@@ -182,8 +182,17 @@ export function classifyRun(input: ClassificationInput): RunClassification {
     };
   }
 
-  // Partial success
+  // Partial success — but if the run recovered and has a real answer artifact, count it complete
   if (codeSuccessCount > 0 && codeFailCount > 0) {
+    const hasAnswerArtifact = artifactCount > 0 && codeSuccessWithOutputCount > 0;
+    if (mode === "task" && hasAnswerArtifact) {
+      return {
+        kind: "task-complete",
+        confidence: 0.7,
+        notes: [`Recovered after ${codeFailCount} failed code execution${codeFailCount === 1 ? "" : "s"}`],
+      };
+    }
+
     return {
       kind: "partial-success",
       confidence: 0.6,

@@ -343,11 +343,22 @@ function tryParseAction(content: string): ProposedAction | undefined {
 
 function extractFirstJsonObject(content: string): string | undefined {
   const start = content.indexOf("{");
-  const end = content.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) {
-    return undefined;
+  if (start === -1) return undefined;
+
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < content.length; i++) {
+    const ch = content[i];
+    if (escape) { escape = false; continue; }
+    if (ch === "\\") { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "{") depth++;
+    if (ch === "}") depth--;
+    if (depth === 0) return content.slice(start, i + 1);
   }
-  return content.slice(start, end + 1);
+  return undefined;
 }
 
 function latestObservation(state: LoopState): TraceEvent | undefined {
