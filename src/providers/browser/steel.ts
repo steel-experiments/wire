@@ -14,7 +14,7 @@ import type { BrowserObserveInput, BrowserProvider } from "../../browser/bridge.
 export interface SteelProviderConfig {
   apiKey: string;
   baseUrl?: string;
-  webSocketFactory?: (url: string, headers?: Record<string, string>) => WebSocketLike;
+  webSocketFactory?: (url: string) => WebSocketLike;
 }
 
 const DEFAULT_BASE_URL = "https://api.steel.dev/v1";
@@ -184,12 +184,12 @@ function extractSteelId(sessionId: SessionId): string {
 export class SteelProvider implements BrowserProvider {
   private readonly apiKey: string;
   private readonly baseUrl: string;
-  private readonly webSocketFactory: (url: string, headers?: Record<string, string>) => WebSocketLike;
+  private readonly webSocketFactory: (url: string) => WebSocketLike;
 
   constructor(config: SteelProviderConfig) {
     this.apiKey = config.apiKey;
     this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
-    this.webSocketFactory = config.webSocketFactory ?? ((url, _headers) => new WebSocket(url) as unknown as WebSocketLike);
+    this.webSocketFactory = config.webSocketFactory ?? ((url) => new WebSocket(url) as unknown as WebSocketLike);
   }
 
   async createSession(input: CreateSessionInput = {}): Promise<BrowserSession> {
@@ -225,12 +225,15 @@ export class SteelProvider implements BrowserProvider {
     );
   }
 
-  private withAuth(session: BrowserSession): { session: BrowserSession; apiKey: string } {
-    return { session, apiKey: this.apiKey };
+  private withAuth(session: BrowserSession): BrowserSession {
+    if (!session.wsUrl) return session;
+    const url = new URL(session.wsUrl);
+    url.searchParams.set("apiKey", this.apiKey);
+    return { ...session, wsUrl: url.toString() };
   }
 
   async observe(input: BrowserObserveInput): Promise<BrowserObservation> {
-    const { session, apiKey } = this.withAuth(await this.getSession(input.sessionId));
+    const session = this.withAuth(await this.getSession(input.sessionId));
 
     return withConnection(this.webSocketFactory, session, async (cdp) => {
       const targets = await listPageTargets(cdp);
@@ -261,11 +264,11 @@ export class SteelProvider implements BrowserProvider {
       }
 
       return observation;
-    }, apiKey);
+    });
   }
 
   async exec(input: BrowserExecRequest): Promise<BrowserExecResult> {
-    const { session, apiKey } = this.withAuth(await this.getSession(input.sessionId));
+    const session = this.withAuth(await this.getSession(input.sessionId));
 
     return withConnection(this.webSocketFactory, session, async (cdp) => {
       const startedAt = Date.now();
@@ -305,14 +308,14 @@ export class SteelProvider implements BrowserProvider {
         result.returnValue = returnValue as NonNullable<BrowserExecResult["returnValue"]>;
       }
       return result;
-    }, apiKey);
+    });
   }
 
   async raw(input: BrowserRawRequest): Promise<unknown> {
-    const { session, apiKey } = this.withAuth(await this.getSession(input.sessionId));
-    return withConnection(this.webSocketFactory, session, async (cdp) => {
-      return cdp.send(input.method, input.params);
-    }, apiKey);
+    const session = this.withAuth(await this.getSession(input.sessionId));
+    return withConnection(this.webSocketFactory, session, async (cdp) =>
+      cdp.send(input.method, input.params),
+    );
   }
 }
 
@@ -436,20 +439,15 @@ class CdpConnection {
 }
 
 async function withConnection<T>(
-  webSocketFactory: (url: string, headers?: Record<string, string>) => WebSocketLike,
+  webSocketFactory: (url: string) => WebSocketLike,
   session: BrowserSession,
   run: (cdp: CdpConnection) => Promise<T>,
-  apiKey?: string,
 ): Promise<T> {
   if (!session.wsUrl) {
     throw new Error("Steel session missing wsUrl");
   }
 
-  const headers: Record<string, string> | undefined = apiKey
-    ? { Authorization: `Bearer ${apiKey}` }
-    : undefined;
-
-  const cdp = new CdpConnection(webSocketFactory(session.wsUrl, headers));
+  const cdp = new CdpConnection(webSocketFactory(session.wsUrl));
   try {
     return await run(cdp);
   } finally {
