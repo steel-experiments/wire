@@ -157,6 +157,16 @@ test("assembleUserPrompt includes loaded skills", () => {
   assert.ok(prompt.includes("Hostname match"));
 });
 
+test("assembleUserPrompt includes execution plan when present", () => {
+  const context = makeContext({
+    plan: "Plan (mode: task):\n  [active] Search pricing page\nStep 1 of 2",
+  });
+  const prompt = assembleUserPrompt(context);
+
+  assert.ok(prompt.includes("Execution plan:"));
+  assert.ok(prompt.includes("Search pricing page"));
+});
+
 test("assembleUserPrompt includes current observation", () => {
   const observations: ObservationSummary[] = [
     { url: "https://dashboard.example.com/invoices", title: "Invoices", forms: 1, buttons: 3, dialogs: 0 },

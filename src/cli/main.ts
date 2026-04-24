@@ -4,7 +4,7 @@ import { loadConfig, resolveLlmConfig } from "./config.js";
 import { formatReview } from "../ui/review.js";
 import { loadRun, listRuns } from "../storage/runs.js";
 import { listArtifacts } from "../storage/artifacts.js";
-import { listTasks } from "../storage/tasks.js";
+import { loadTask, listTasks } from "../storage/tasks.js";
 import { listTraceEvents } from "../storage/events.js";
 import { stableJsonStringify } from "../shared/ids.js";
 import type { TraceEvent } from "../shared/types.js";
@@ -13,7 +13,7 @@ function defaultStorageRoot(): string {
   return process.env["WIRE_ROOT"] ?? ".wire";
 }
 
-function deriveResultFromEvents(events: TraceEvent[]): string | undefined {
+function deriveExtractedResultFromEvents(events: TraceEvent[]): string | undefined {
   const latestAnswerEvent = [...events].reverse().find((event) =>
     event.kind === "code-result" &&
     event.payload.ok === true &&
@@ -37,6 +37,25 @@ function deriveResultFromEvents(events: TraceEvent[]): string | undefined {
     }
   }
 
+  return undefined;
+}
+
+function deriveNoteArtifactResult(events: TraceEvent[]): string | undefined {
+  const latestNoteArtifact = [...events].reverse().find((event) =>
+    event.kind === "artifact" &&
+    event.payload.kind === "note" &&
+    typeof event.payload.content === "string" &&
+    event.payload.content.trim().length > 0
+  );
+
+  if (latestNoteArtifact && typeof latestNoteArtifact.payload.content === "string") {
+    return latestNoteArtifact.payload.content;
+  }
+
+  return undefined;
+}
+
+function deriveFinishSummary(events: TraceEvent[]): string | undefined {
   const latestFinishSummary = [...events].reverse().find((event) =>
     event.kind === "thought-summary" &&
     event.payload.kind === "finish" &&
@@ -226,11 +245,21 @@ async function handleResult(
 
   const runId = args.runId as `run_${string}`;
   const run = await loadRun(root, runId);
+  const task = await loadTask(root, run.taskId);
+  const events = await listTraceEvents(root, runId);
+  const finishSummary = deriveFinishSummary(events);
 
-  const result = run.result ?? deriveResultFromEvents(await listTraceEvents(root, runId));
+  const result = run.result ??
+    deriveExtractedResultFromEvents(events) ??
+    (task.mode === "task"
+      ? (deriveNoteArtifactResult(events) ?? finishSummary)
+      : finishSummary);
 
   if (!result) {
     console.error(`No final result recorded for ${runId}.`);
+    if (task.mode === "task" && finishSummary) {
+      console.error(`Last finish summary: ${finishSummary}`);
+    }
     process.exitCode = 1;
     return;
   }

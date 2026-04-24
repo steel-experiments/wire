@@ -1,10 +1,11 @@
-import type { RunClassification, RunClassificationKind, TraceEvent } from "../shared/types.js";
+import type { RunClassification, RunClassificationKind, TaskMode, TraceEvent } from "../shared/types.js";
 
 // ---------------------------------------------------------------------------
 // Run classification from trace evidence
 // ---------------------------------------------------------------------------
 
 export interface ClassificationInput {
+  mode: TaskMode;
   events: TraceEvent[];
   successCriteria: string[];
   errorCount: number;
@@ -16,6 +17,7 @@ export interface ClassificationInput {
 
 export function classifyRun(input: ClassificationInput): RunClassification {
   const {
+    mode,
     events,
     errorCount,
     authWallHit,
@@ -41,14 +43,6 @@ export function classifyRun(input: ClassificationInput): RunClassification {
     return { kind: "ambiguous", confidence: 0.6, notes: ["Budget exhausted before completion"] };
   }
 
-  // Check for infra errors (network failures)
-  const infraErrors = events.filter(
-    (e) => e.kind === "error" && typeof e.payload.code === "string" && String(e.payload.code).startsWith("E"),
-  );
-  if (infraErrors.length > 0) {
-    return { kind: "infra-error", confidence: 0.8, notes: ["Infrastructure error detected"] };
-  }
-
   // High error count → site or agent error
   if (errorCount > 5) {
     // If there were successful code execs, it's more likely a site issue
@@ -71,9 +65,22 @@ export function classifyRun(input: ClassificationInput): RunClassification {
     (e) => e.kind === "code-result" && e.payload.ok === true,
   ).length;
 
+  const codeSuccessWithOutputCount = events.filter(
+    (e) =>
+      e.kind === "code-result" &&
+      e.payload.ok === true &&
+      (
+        (typeof e.payload.stdout === "string" && e.payload.stdout.trim().length > 0) ||
+        e.payload.returnValue !== undefined
+      ),
+  ).length;
+
   const codeFailCount = events.filter(
     (e) => e.kind === "code-result" && e.payload.ok === false,
   ).length;
+  const infraErrors = events.filter(
+    (e) => e.kind === "error" && typeof e.payload.code === "string" && String(e.payload.code).startsWith("E"),
+  );
 
   // MANIFESTO: "A run is not complete because the agent says so.
   // It is complete when the artifacts prove what happened."
@@ -92,15 +99,31 @@ export function classifyRun(input: ClassificationInput): RunClassification {
       terminalEvent.payload.returnValue !== undefined
     );
 
-  if (codeSuccessCount > 0 && codeFailCount === 0 && errorCount === 0) {
-    if (hasEvidence && (terminalEventIsEvidence || terminalEventHasExtractedAnswer)) {
+  if (codeSuccessCount > 0 && codeFailCount === 0) {
+    const hasAnswerArtifact = artifactCount > 0 || terminalEventHasExtractedAnswer;
+    const taskModeHasCompletionEvidence = mode === "task"
+      ? hasAnswerArtifact && codeSuccessWithOutputCount > 0
+      : hasEvidence && (terminalEventIsEvidence || terminalEventHasExtractedAnswer);
+
+    if (taskModeHasCompletionEvidence) {
+      if (errorCount > 0) {
+        return {
+          kind: "task-complete",
+          confidence: 0.7,
+          notes: [`Recovered after ${errorCount} error${errorCount === 1 ? "" : "s"}`],
+        };
+      }
       return { kind: "task-complete", confidence: 0.85 };
     }
-    // Code ran fine but no artifacts or meaningful observations — weak claim.
+
+    const missingEvidenceNote = mode === "task"
+      ? "Code executed without errors but did not record a final answer or artifact for the objective"
+      : "Code executed without errors but did not end with evidence of the objective";
+
     return {
       kind: "partial-success",
       confidence: 0.6,
-      notes: ["Code executed without errors but did not end with evidence of the objective"],
+      notes: [missingEvidenceNote],
     };
   }
 
@@ -116,6 +139,10 @@ export function classifyRun(input: ClassificationInput): RunClassification {
   // No successes at all
   if (codeSuccessCount === 0 && codeFailCount > 0) {
     return { kind: "site-error", confidence: 0.5, notes: ["All code executions failed"] };
+  }
+
+  if (infraErrors.length > 0) {
+    return { kind: "infra-error", confidence: 0.8, notes: ["Infrastructure error detected"] };
   }
 
   // Default to ambiguous

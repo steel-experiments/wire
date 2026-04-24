@@ -68,7 +68,7 @@ export function matchSkillsByTags(
 /**
  * Sort skills by `updatedAt` descending (newest first). Returns a new array.
  */
-export function sortByRelevance(skills: SkillMetadata[]): SkillMetadata[] {
+export function sortByRelevance<T extends SkillMetadata>(skills: T[]): T[] {
   return [...skills].sort((a, b) => {
     if (a.updatedAt > b.updatedAt) return -1;
     if (a.updatedAt < b.updatedAt) return 1;

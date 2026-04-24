@@ -49,6 +49,14 @@ export type ArtifactKind =
   | "note";
 export type ComparisonDimension = "latency" | "path" | "profile" | "artifacts" | "outcome";
 export type BrowserExecTarget = "active-tab" | "all-tabs" | { tabId: string };
+export type ActionKind =
+  | "observe"
+  | "exec"
+  | "request-approval"
+  | "branch-experiment"
+  | "load-skill"
+  | "propose-skill"
+  | "finish";
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
@@ -162,6 +170,12 @@ export interface SkillMetadata {
 
 export interface SkillFrontmatter extends SkillMetadata {
   title?: string;
+}
+
+export interface LoadedSkill extends SkillMetadata {
+  path: string;
+  body: string;
+  sections: Record<string, string>;
 }
 
 export interface TraceEvent {
@@ -290,7 +304,7 @@ export interface ExperimentBundle {
 }
 
 export interface ProposedAction {
-  kind: string;
+  kind: ActionKind;
   summary: string;
   payload?: JsonObject;
 }

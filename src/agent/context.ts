@@ -13,6 +13,7 @@ export interface SkillSummary {
   id: string;
   scope: string;
   matchReason: string;
+  guidance?: string;
 }
 
 export interface ObservationSummary {
@@ -42,6 +43,7 @@ export interface ContextBundle {
   recentTraces: TraceSummary[];
   policyNotes: string[];
   budget?: BudgetSummary;
+  plan?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -115,10 +117,20 @@ export function assembleSystemPrompt(context: ContextBundle): string {
 export function assembleUserPrompt(context: ContextBundle): string {
   const sections: string[] = [];
 
+  if (context.plan && context.plan.trim().length > 0) {
+    sections.push(`Execution plan:\n${redactSecrets(context.plan)}`);
+  }
+
   // Loaded skills
   if (context.skills.length > 0) {
     const skillLines = context.skills.map(
-      (s) => `- ${s.id} (${s.scope}): ${redactSecrets(s.matchReason)}`,
+      (s) => {
+        const base = `- ${s.id} (${s.scope}): ${redactSecrets(s.matchReason)}`;
+        if (s.guidance && s.guidance.length > 0) {
+          return `${base}\n  Guidance: ${redactSecrets(s.guidance)}`;
+        }
+        return base;
+      },
     );
     sections.push("Loaded skills:\n" + skillLines.join("\n"));
   }

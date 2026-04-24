@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -429,7 +429,7 @@ test("finalizeRun classifies ambiguous run with no events", () => {
   assert.ok(result.run.finishedAt);
 });
 
-test("finalizeRun classifies successful run with code successes and observations", () => {
+test("finalizeRun keeps task-mode observation-only runs as partial-success", () => {
   const task = makeTask();
   const state = createLoopState(task, makeSessionId());
 
@@ -467,10 +467,10 @@ test("finalizeRun classifies successful run with code successes and observations
 
   const result = finalizeRun(state);
 
-  assert.equal(result.run.status, "succeeded");
+  assert.equal(result.run.status, "failed");
   assert.equal(result.run.result, undefined);
-  assert.equal(result.classification.kind, "task-complete");
-  assert.ok(result.outcomeSummary.includes("task-complete"));
+  assert.equal(result.classification.kind, "partial-success");
+  assert.ok(result.outcomeSummary.includes("partial-success"));
 });
 
 test("finalizeRun persists final result from successful code output", () => {
@@ -539,7 +539,7 @@ test("finalizeRun persists final result from successful returnValue", () => {
   assert.equal(result.run.result, '{"answer":"Final answer","price":29}');
 });
 
-test("finalizeRun falls back to finish summary when no extracted payload exists", () => {
+test("finalizeRun does not persist finish summary as task result", () => {
   const task = makeTask();
   const state = createLoopState(task, makeSessionId());
 
@@ -553,7 +553,25 @@ test("finalizeRun falls back to finish summary when no extracted payload exists"
 
   const result = finalizeRun(state);
 
-  assert.equal(result.run.result, "Completed search for San Francisco and New York");
+  assert.equal(result.run.result, undefined);
+  assert.equal(result.run.status, "failed");
+});
+
+test("finalizeRun persists finish summary for investigate mode", () => {
+  const task = makeTask({ mode: "investigate" });
+  const state = createLoopState(task, makeSessionId());
+
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: new Date().toISOString(),
+    kind: "thought-summary",
+    payload: { summary: "The failure reproduces after login", kind: "finish" },
+  });
+
+  const result = finalizeRun(state);
+
+  assert.equal(result.run.result, "The failure reproduces after login");
 });
 
 test("finalizeRun classifies run with mixed results as partial-success", () => {
@@ -699,6 +717,306 @@ test("executeTask proposes domain skill updates from reusable trace evidence", a
   }
 });
 
+test("executeTask loads matched skills into the live agent prompt", async () => {
+  const task = makeTask({ objective: "Inspect example pricing" });
+  const skillDir = await mkdtemp(join(tmpdir(), "wire-agent-skills-"));
+  const sessionId = makeSessionId();
+  let capturedUserPrompt = "";
+  const provider = createMockProvider({
+    async createSession() {
+      return {
+        id: sessionId,
+        provider: "custom",
+        createdAt: new Date().toISOString(),
+        status: "ready",
+      };
+    },
+    async observe(input: BrowserObserveInput): Promise<BrowserObservation> {
+      return {
+        sessionId: input.sessionId,
+        url: "https://example.com/pricing",
+        title: "Pricing",
+        tabs: [
+          { id: "tab-1", title: "Pricing", url: "https://example.com/pricing", active: true },
+        ],
+      };
+    },
+    async stopSession() {},
+  });
+
+  const skillContent = [
+    "---",
+    `id: ${createId("skill")}`,
+    "scope: domain",
+    "hostnamePatterns:",
+    "  - example.com",
+    "tags:",
+    "  - pricing",
+    "updatedAt: 2026-04-24",
+    "source: team",
+    "---",
+    "",
+    "## Facts",
+    "Use /pricing directly when the site supports it.",
+  ].join("\n");
+
+  await writeFile(join(skillDir, "example.md"), skillContent, "utf-8");
+
+  const llmProvider = {
+    async chat(messages: { role: string; content: string }[]) {
+      const userPrompt = messages.find((message) => message.role === "user")?.content ?? "";
+      if (userPrompt.includes("Loaded skills:")) {
+        capturedUserPrompt = userPrompt;
+        return {
+          content: JSON.stringify({ kind: "finish", summary: "Done" }),
+          model: "test-model",
+        };
+      }
+      return {
+        content: "NONE",
+        model: "test-model",
+      };
+    },
+  };
+
+  try {
+    await executeTask(
+      task,
+      { provider, policyEngine: createMockPolicyEngine(), maxSteps: 2, skillDir, llmProvider },
+    );
+    assert.match(capturedUserPrompt, /Loaded skills:/u);
+    assert.match(capturedUserPrompt, /Use \/pricing directly/u);
+  } finally {
+    await rm(skillDir, { recursive: true, force: true });
+  }
+});
+
+test("executeTask persists a task note artifact when finishing without extracted output", async () => {
+  const task = makeTask({ objective: "Search Booking.com" });
+  const sessionId = makeSessionId();
+  let observeCount = 0;
+  const provider = createMockProvider({
+    async createSession() {
+      return {
+        id: sessionId,
+        provider: "custom",
+        createdAt: new Date().toISOString(),
+        status: "ready",
+      };
+    },
+    async observe(input: BrowserObserveInput): Promise<BrowserObservation> {
+      observeCount++;
+      return {
+        sessionId: input.sessionId,
+        url: observeCount === 1
+          ? "https://www.booking.com"
+          : "https://www.booking.com/searchresults.html?ss=New%20York",
+        title: observeCount === 1 ? "Booking.com" : "Search results",
+        tabs: [
+          { id: "tab-1", title: "Booking.com", url: "https://www.booking.com", active: true },
+        ],
+      };
+    },
+    async exec(): Promise<BrowserExecResult> {
+      return {
+        ok: true,
+        durationMs: 10,
+      };
+    },
+    async stopSession() {},
+  });
+
+  const result = await executeTask(
+    task,
+    { provider, policyEngine: createMockPolicyEngine(), maxSteps: 3 },
+    async (state) => {
+      if (state.stepCount === 0) {
+        return {
+          kind: "exec",
+          summary: "Open search results",
+          payload: { code: "window.location.href = 'https://www.booking.com/searchresults.html?ss=New%20York';" },
+        };
+      }
+      return { kind: "finish", summary: "Completed search for New York" };
+    },
+  );
+
+  assert.equal(result.run.status, "failed");
+  assert.equal(result.classification.kind, "partial-success");
+  const noteArtifact = result.events.find((event) =>
+    event.kind === "artifact" &&
+    event.payload.kind === "note" &&
+    typeof event.payload.content === "string"
+  );
+  assert.ok(noteArtifact);
+  assert.match(String(noteArtifact.payload.content ?? ""), /URL: https:\/\/www\.booking\.com/u);
+});
+
+test("executeTask forces a generic extraction pass before finishing task mode", async () => {
+  const task = makeTask({ objective: "Extract booking results" });
+  const sessionId = makeSessionId();
+  let execCount = 0;
+  const provider = createMockProvider({
+    async createSession() {
+      return {
+        id: sessionId,
+        provider: "custom",
+        createdAt: new Date().toISOString(),
+        status: "ready",
+      };
+    },
+    async exec(input: BrowserExecRequest): Promise<BrowserExecResult> {
+      execCount++;
+      if (execCount === 1) {
+        return { ok: true, durationMs: 10 };
+      }
+      assert.match(input.code, /wire:extract-result/u);
+      return {
+        ok: true,
+        durationMs: 10,
+        returnValue: {
+          title: "Booking.com results",
+          cards: [{ title: "Hotel One", prices: ["$199"] }],
+        },
+      };
+    },
+    async stopSession() {},
+  });
+
+  const result = await executeTask(
+    task,
+    { provider, policyEngine: createMockPolicyEngine(), maxSteps: 4 },
+    async (state) => {
+      if (state.stepCount === 0) {
+        return {
+          kind: "exec",
+          summary: "Navigate to results",
+          payload: { code: "window.location.href = 'https://www.booking.com/searchresults.html';" },
+        };
+      }
+      return { kind: "finish", summary: "Done" };
+    },
+  );
+
+  assert.equal(execCount, 2);
+  assert.equal(result.run.status, "succeeded");
+  assert.match(result.run.result ?? "", /"Hotel One"/u);
+  const artifactEvent = result.events.find((event) =>
+    event.kind === "artifact" && event.payload.kind === "json-output"
+  );
+  assert.ok(artifactEvent);
+  assert.match(String(artifactEvent.payload.content ?? ""), /"Hotel One"/u);
+});
+
+test("executeTask retries after a recoverable step error when budget remains", async () => {
+  const task = makeTask({ objective: "Recover from transient browser error" });
+  const sessionId = makeSessionId();
+  let execCount = 0;
+  const provider = createMockProvider({
+    async createSession() {
+      return {
+        id: sessionId,
+        provider: "custom",
+        createdAt: new Date().toISOString(),
+        status: "ready",
+      };
+    },
+    async exec(): Promise<BrowserExecResult> {
+      execCount++;
+      if (execCount === 1) {
+        throw new Error("Target not found: page");
+      }
+      return {
+        ok: true,
+        stdout: "Recovered answer",
+        durationMs: 10,
+      };
+    },
+    async stopSession() {},
+  });
+
+  const result = await executeTask(
+    task,
+    { provider, policyEngine: createMockPolicyEngine(), maxSteps: 3 },
+    async (state) => {
+      const hasRecoveredAnswer = state.events.some((event) =>
+        event.kind === "code-result" && event.payload.stdout === "Recovered answer"
+      );
+      if (hasRecoveredAnswer) {
+        return { kind: "finish", summary: "Recovered answer" };
+      }
+      if (state.stepCount === 0) {
+        return { kind: "exec", summary: "First try", payload: { code: "1" } };
+      }
+      return { kind: "exec", summary: "Retry after error", payload: { code: "2" } };
+    },
+  );
+
+  assert.equal(execCount, 2);
+  assert.equal(result.run.status, "succeeded");
+  assert.equal(result.run.result, "Recovered answer");
+});
+
+test("executeTask persists failure note artifact for task runs that stop on error", async () => {
+  const task = makeTask({ objective: "Search booking.com" });
+  const sessionId = makeSessionId();
+  let observeCount = 0;
+  const provider = createMockProvider({
+    async createSession() {
+      return {
+        id: sessionId,
+        provider: "custom",
+        createdAt: new Date().toISOString(),
+        status: "ready",
+      };
+    },
+    async observe(input: BrowserObserveInput): Promise<BrowserObservation> {
+      observeCount++;
+      return {
+        sessionId: input.sessionId,
+        url: observeCount === 1 ? "about:blank" : "https://www.booking.com/searchresults.html?ss=San+Francisco",
+        title: observeCount === 1 ? "about:blank" : "Booking.com search results",
+        tabs: [
+          {
+            id: "tab-1",
+            title: "Booking.com",
+            url: "https://www.booking.com/searchresults.html?ss=San+Francisco",
+            active: true,
+          },
+        ],
+      };
+    },
+    async exec(): Promise<BrowserExecResult> {
+      return {
+        ok: true,
+        durationMs: 10,
+      };
+    },
+    async stopSession() {},
+  });
+
+  const result = await executeTask(
+    task,
+    { provider, policyEngine: createMockPolicyEngine(), maxSteps: 2 },
+    async (state) => {
+      if (state.stepCount === 0) {
+        return { kind: "observe", summary: "Check booking results" };
+      }
+      throw new Error("Target not found: page");
+    },
+  );
+
+  assert.equal(result.run.status, "failed");
+  assert.match(result.run.result ?? "", /Run stopped with error: Target not found: page/u);
+  const noteArtifact = result.events.find((event) =>
+    event.kind === "artifact" &&
+    event.payload.kind === "note" &&
+    typeof event.payload.content === "string"
+  );
+  assert.ok(noteArtifact);
+  assert.match(String(noteArtifact.payload.content ?? ""), /Reached Booking\.com search results/u);
+});
+
 // ---------------------------------------------------------------------------
 // classifyRun — detailed tests (T013)
 // ---------------------------------------------------------------------------
@@ -729,6 +1047,7 @@ test("classifyRun returns task-complete for all-successful code execs with obser
   ];
 
   const result = classifyRun({
+    mode: "investigate",
     events,
     successCriteria: ["Task completed"],
     errorCount: 0,
@@ -760,6 +1079,7 @@ test("classifyRun does not return task-complete when the latest evidence is miss
   ];
 
   const result = classifyRun({
+    mode: "task",
     events,
     successCriteria: ["Pricing captured"],
     errorCount: 0,
@@ -769,7 +1089,7 @@ test("classifyRun does not return task-complete when the latest evidence is miss
   });
 
   assert.equal(result.kind, "partial-success");
-  assert.match(result.notes?.[0] ?? "", /did not end with evidence/i);
+  assert.match(result.notes?.[0] ?? "", /did not record a final answer or artifact/i);
 });
 
 test("classifyRun returns task-complete when the final exec extracts an answer", () => {
@@ -798,6 +1118,7 @@ test("classifyRun returns task-complete when the final exec extracts an answer",
   ];
 
   const result = classifyRun({
+    mode: "task",
     events,
     successCriteria: ["Pricing captured"],
     errorCount: 0,
@@ -821,6 +1142,7 @@ test("classifyRun returns partial-success for code success with no evidence", ()
   ];
 
   const result = classifyRun({
+    mode: "task",
     events,
     successCriteria: ["Task completed"],
     errorCount: 0,
@@ -830,11 +1152,12 @@ test("classifyRun returns partial-success for code success with no evidence", ()
   });
 
   assert.equal(result.kind, "partial-success");
-  assert.ok(result.notes?.some((n) => /did not end with evidence/i.test(n)));
+  assert.ok(result.notes?.some((n) => /did not record a final answer or artifact/i.test(n)));
 });
 
 test("classifyRun returns ambiguous when awaiting approval", () => {
   const result = classifyRun({
+    mode: "task",
     events: [],
     successCriteria: [],
     errorCount: 0,
@@ -867,6 +1190,7 @@ test("classifyRun returns partial-success for mixed results", () => {
   ];
 
   const result = classifyRun({
+    mode: "task",
     events,
     successCriteria: [],
     errorCount: 0,
@@ -882,6 +1206,7 @@ test("classifyRun returns partial-success for mixed results", () => {
 
 test("classifyRun returns blocked-auth when auth wall hit", () => {
   const result = classifyRun({
+    mode: "task",
     events: [],
     successCriteria: [],
     errorCount: 0,
@@ -896,6 +1221,7 @@ test("classifyRun returns blocked-auth when auth wall hit", () => {
 
 test("classifyRun returns agent-error when policy denied", () => {
   const result = classifyRun({
+    mode: "task",
     events: [],
     successCriteria: [],
     errorCount: 0,
@@ -909,6 +1235,7 @@ test("classifyRun returns agent-error when policy denied", () => {
 
 test("classifyRun returns ambiguous when budget exhausted", () => {
   const result = classifyRun({
+    mode: "task",
     events: [],
     successCriteria: [],
     errorCount: 0,
@@ -932,6 +1259,7 @@ test("classifyRun returns infra-error for network failures", () => {
   ];
 
   const result = classifyRun({
+    mode: "task",
     events,
     successCriteria: [],
     errorCount: 1,
@@ -955,6 +1283,7 @@ test("classifyRun returns site-error for all-failed code execs", () => {
   ];
 
   const result = classifyRun({
+    mode: "task",
     events,
     successCriteria: [],
     errorCount: 0,
@@ -968,6 +1297,7 @@ test("classifyRun returns site-error for all-failed code execs", () => {
 
 test("classifyRun returns ambiguous for empty events", () => {
   const result = classifyRun({
+    mode: "task",
     events: [],
     successCriteria: [],
     errorCount: 0,
@@ -982,6 +1312,7 @@ test("classifyRun returns ambiguous for empty events", () => {
 
 test("classifyRun returns agent-error for high error count", () => {
   const result = classifyRun({
+    mode: "task",
     events: [],
     successCriteria: [],
     errorCount: 10,

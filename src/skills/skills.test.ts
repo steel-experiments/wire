@@ -9,7 +9,7 @@ import { test, afterEach } from "node:test";
 import { createId } from "../shared/ids.js";
 import type { SkillFrontmatter, SkillMetadata } from "../shared/types.js";
 
-import { loadSkillsFromDir, findMatchingSkills } from "./loader.js";
+import { loadSkillDocsFromDir, loadSkillsFromDir, findMatchingSkills } from "./loader.js";
 import { matchSkillsByHostname, matchSkillsByTags, sortByRelevance } from "./matcher.js";
 import { extractSections, parseSkillFile } from "./parser.js";
 
@@ -442,6 +442,20 @@ test("loadSkillsFromDir drops title from SkillMetadata", async () => {
   assert.equal(skills[0]!.id, "skill_titled");
   // title should not appear on SkillMetadata
   assert.equal("title" in skills[0]!, false);
+});
+
+test("loadSkillDocsFromDir returns parsed body and sections", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  await mkdir(dir, { recursive: true });
+
+  await writeFile(join(dir, "stripe.md"), STRIPE_SKILL_MD, "utf-8");
+
+  const skills = await loadSkillDocsFromDir(dir);
+  assert.equal(skills.length, 1);
+  assert.equal(skills[0]!.id, "skill_stripe-dashboard");
+  assert.ok(skills[0]!.body.includes("## Durable facts"));
+  assert.ok(typeof skills[0]!.sections["Durable facts"] === "string");
 });
 
 // ---------------------------------------------------------------------------

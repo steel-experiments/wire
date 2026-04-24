@@ -1,4 +1,5 @@
 import type {
+  LoadedSkill,
   ActionId,
   ApprovalRequest,
   JsonObject,
@@ -7,6 +8,7 @@ import type {
   RunId,
   SessionId,
   Task,
+  TaskMode,
   TraceEvent,
 } from "../shared/types.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
@@ -30,6 +32,7 @@ export interface LoopState {
   task: Task;
   run: Run;
   sessionId: SessionId;
+  loadedSkills: LoadedSkill[];
   events: TraceEvent[];
   stepCount: number;
   startedAt: string;
@@ -82,6 +85,7 @@ export function createLoopState(task: Task, sessionId: SessionId): LoopState {
     task,
     run,
     sessionId,
+    loadedSkills: [],
     events: [],
     stepCount: 0,
     startedAt: nowIsoUtc(),
@@ -296,6 +300,34 @@ export async function executeStep(
           kind: "code-result",
           payload: resultPayload,
         });
+
+        // Auto-observe after navigation: when exec code navigates the page
+        // (location.href/assign/replace), the code-result has no output and
+        // the agent needs an observation of the new page before its next turn.
+        const isNavigation = isNavigationCode(code);
+        const producedOutput = result.ok && (
+          (typeof result.stdout === "string" && result.stdout.length > 0) ||
+          result.returnValue !== undefined
+        );
+        if (isNavigation && !producedOutput) {
+          const observation = await observeBrowser({ provider, sessionId: state.sessionId });
+          const obsPayload: JsonObject = {
+            url: observation.url,
+            title: observation.title,
+          };
+          if (observation.targetId) obsPayload.targetId = observation.targetId;
+          if (observation.tabs.length > 0) obsPayload.tabs = observation.tabs;
+          if (observation.focusedElement) obsPayload.focusedElement = observation.focusedElement as unknown as JsonObject;
+          if (observation.pageSummary) obsPayload.pageSummary = observation.pageSummary as unknown as JsonObject;
+          state.events.push({
+            id: createId("event"),
+            runId: state.run.id,
+            ts: nowIsoUtc(),
+            kind: "observation",
+            payload: obsPayload,
+          });
+          authWallHit = detectAuthWall(observation).detected;
+        }
       }
       break;
     }
@@ -322,6 +354,21 @@ export async function executeStep(
 }
 
 // ---------------------------------------------------------------------------
+// Detect navigation code patterns
+// ---------------------------------------------------------------------------
+
+const NAVIGATION_PATTERNS = [
+  /\bwindow\s*\.\s*location\s*[\[.]/u,
+  /\blocation\s*\.\s*(href|assign|replace|reload)\b/u,
+  /\blocation\s*=/u,
+  /\bdocument\s*\.\s*location\s*[\[.]/u,
+];
+
+function isNavigationCode(code: string): boolean {
+  return NAVIGATION_PATTERNS.some((p) => p.test(code));
+}
+
+// ---------------------------------------------------------------------------
 // Finalize a run
 // ---------------------------------------------------------------------------
 
@@ -335,7 +382,7 @@ export interface FinalizeOptions {
   pendingAction?: ProposedAction;
 }
 
-function deriveRunResult(events: TraceEvent[]): string | undefined {
+function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | undefined {
   const latestAnswerEvent = [...events].reverse().find((event) =>
     event.kind === "code-result" &&
     event.payload.ok === true &&
@@ -359,6 +406,21 @@ function deriveRunResult(events: TraceEvent[]): string | undefined {
     }
   }
 
+  if (mode === "task") {
+    const latestNoteArtifact = [...events].reverse().find((event) =>
+      event.kind === "artifact" &&
+      event.payload.kind === "note" &&
+      typeof event.payload.content === "string" &&
+      event.payload.content.trim().length > 0
+    );
+
+    if (latestNoteArtifact && typeof latestNoteArtifact.payload.content === "string") {
+      return latestNoteArtifact.payload.content;
+    }
+
+    return undefined;
+  }
+
   const latestFinishSummary = [...events].reverse().find((event) =>
     event.kind === "thought-summary" &&
     event.payload.kind === "finish" &&
@@ -377,6 +439,7 @@ export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): Lo
   const errorCount = state.events.filter((e) => e.kind === "error").length;
 
   const classification = classifyRun({
+    mode: state.task.mode,
     events: state.events,
     successCriteria: state.task.successCriteria,
     errorCount,
@@ -398,7 +461,7 @@ export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): Lo
   const finishedRun: Run = {
     ...state.run,
     status,
-    result: deriveRunResult(state.events),
+    result: deriveRunResult(state.events, state.task.mode),
     classification,
     outcomeSummary,
   };

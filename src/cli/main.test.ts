@@ -13,6 +13,7 @@ import { main } from "./main.js";
 test("main list prints stored tasks and runs", async () => {
   const root = await mkdtemp(join(tmpdir(), "wire-cli-"));
   const previousRoot = process.env.WIRE_ROOT;
+  const previousExitCode = process.exitCode;
   process.env.WIRE_ROOT = root;
 
   const task = {
@@ -47,6 +48,7 @@ test("main list prints stored tasks and runs", async () => {
     await main(["node", "wire", "list"]);
   } finally {
     console.log = originalLog;
+    process.exitCode = previousExitCode;
     if (previousRoot === undefined) {
       delete process.env.WIRE_ROOT;
     } else {
@@ -61,6 +63,7 @@ test("main list prints stored tasks and runs", async () => {
 test("main result prints recorded run result", async () => {
   const root = await mkdtemp(join(tmpdir(), "wire-cli-"));
   const previousRoot = process.env.WIRE_ROOT;
+  const previousExitCode = process.exitCode;
   process.env.WIRE_ROOT = root;
 
   const run = {
@@ -81,10 +84,20 @@ test("main result prints recorded run result", async () => {
   };
 
   try {
+    await saveTask(root, {
+      id: run.taskId,
+      title: "Pricing task",
+      mode: "task",
+      objective: "Find pricing",
+      constraints: [],
+      successCriteria: ["Extract pricing"],
+      createdAt: nowIsoUtc(),
+    });
     await saveRun(root, run);
     await main(["node", "wire", "result", "--run-id", run.id]);
   } finally {
     console.log = originalLog;
+    process.exitCode = previousExitCode;
     if (previousRoot === undefined) {
       delete process.env.WIRE_ROOT;
     } else {
@@ -98,6 +111,7 @@ test("main result prints recorded run result", async () => {
 test("main result falls back to legacy trace events when run.result is missing", async () => {
   const root = await mkdtemp(join(tmpdir(), "wire-cli-"));
   const previousRoot = process.env.WIRE_ROOT;
+  const previousExitCode = process.exitCode;
   process.env.WIRE_ROOT = root;
 
   const run = {
@@ -117,6 +131,15 @@ test("main result falls back to legacy trace events when run.result is missing",
   };
 
   try {
+    await saveTask(root, {
+      id: run.taskId,
+      title: "Legacy task",
+      mode: "task",
+      objective: "Find pricing",
+      constraints: [],
+      successCriteria: ["Extract pricing"],
+      createdAt: nowIsoUtc(),
+    });
     await saveRun(root, run);
     await saveTraceEvent(root, {
       id: createId("event"),
@@ -128,6 +151,7 @@ test("main result falls back to legacy trace events when run.result is missing",
     await main(["node", "wire", "result", "--run-id", run.id]);
   } finally {
     console.log = originalLog;
+    process.exitCode = previousExitCode;
     if (previousRoot === undefined) {
       delete process.env.WIRE_ROOT;
     } else {
@@ -138,9 +162,71 @@ test("main result falls back to legacy trace events when run.result is missing",
   assert.deepEqual(lines, ["Recovered legacy result"]);
 });
 
-test("main result falls back to legacy finish summary when no extracted payload exists", async () => {
+test("main result falls back to finish summary when task output is missing", async () => {
   const root = await mkdtemp(join(tmpdir(), "wire-cli-"));
   const previousRoot = process.env.WIRE_ROOT;
+  const previousExitCode = process.exitCode;
+  process.env.WIRE_ROOT = root;
+
+  const run = {
+    id: createId("run"),
+    taskId: createId("task"),
+    status: "succeeded" as const,
+    startedAt: nowIsoUtc(),
+    finishedAt: nowIsoUtc(),
+    outcomeSummary: "ok",
+    classification: { kind: "task-complete" as const, confidence: 1 },
+  };
+
+  const lines: string[] = [];
+  const errors: string[] = [];
+  const originalLog = console.log;
+  const originalError = console.error;
+  console.log = (value?: unknown) => {
+    lines.push(String(value ?? ""));
+  };
+  console.error = (value?: unknown) => {
+    errors.push(String(value ?? ""));
+  };
+
+  try {
+    await saveTask(root, {
+      id: run.taskId,
+      title: "Search task",
+      mode: "task",
+      objective: "Search Booking.com",
+      constraints: [],
+      successCriteria: ["Extract hotel options"],
+      createdAt: nowIsoUtc(),
+    });
+    await saveRun(root, run);
+    await saveTraceEvent(root, {
+      id: createId("event"),
+      runId: run.id,
+      ts: nowIsoUtc(),
+      kind: "thought-summary",
+      payload: { summary: "Completed search for San Francisco and New York", kind: "finish" },
+    });
+    await main(["node", "wire", "result", "--run-id", run.id]);
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+    process.exitCode = previousExitCode;
+    if (previousRoot === undefined) {
+      delete process.env.WIRE_ROOT;
+    } else {
+      process.env.WIRE_ROOT = previousRoot;
+    }
+  }
+
+  assert.deepEqual(lines, ["Completed search for San Francisco and New York"]);
+  assert.deepEqual(errors, []);
+});
+
+test("main result falls back to persisted note artifacts for task runs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wire-cli-"));
+  const previousRoot = process.env.WIRE_ROOT;
+  const previousExitCode = process.exitCode;
   process.env.WIRE_ROOT = root;
 
   const run = {
@@ -160,17 +246,32 @@ test("main result falls back to legacy finish summary when no extracted payload 
   };
 
   try {
+    await saveTask(root, {
+      id: run.taskId,
+      title: "Search task",
+      mode: "task",
+      objective: "Search Booking.com",
+      constraints: [],
+      successCriteria: ["Complete search"],
+      createdAt: nowIsoUtc(),
+    });
     await saveRun(root, run);
     await saveTraceEvent(root, {
       id: createId("event"),
       runId: run.id,
       ts: nowIsoUtc(),
-      kind: "thought-summary",
-      payload: { summary: "Completed search for San Francisco and New York", kind: "finish" },
+      kind: "artifact",
+      payload: {
+        artifactId: createId("artifact"),
+        kind: "note",
+        path: "artifacts/example.txt",
+        content: "Completed search for San Francisco May 15-17 and New York May 20-22",
+      },
     });
     await main(["node", "wire", "result", "--run-id", run.id]);
   } finally {
     console.log = originalLog;
+    process.exitCode = previousExitCode;
     if (previousRoot === undefined) {
       delete process.env.WIRE_ROOT;
     } else {
@@ -178,5 +279,5 @@ test("main result falls back to legacy finish summary when no extracted payload 
     }
   }
 
-  assert.deepEqual(lines, ["Completed search for San Francisco and New York"]);
+  assert.deepEqual(lines, ["Completed search for San Francisco May 15-17 and New York May 20-22"]);
 });

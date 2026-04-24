@@ -414,7 +414,7 @@ export interface Run {
   parentRunId?: string;
   branchLabel?: string;
   hypothesisId?: string;
-  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'aborted';
+  status: 'queued' | 'running' | 'awaiting-approval' | 'succeeded' | 'failed' | 'aborted';
   startedAt?: string;
   finishedAt?: string;
   outcomeSummary?: string;
@@ -1370,5 +1370,4 @@ This spec is informed by:
 - Browser Harness’s emphasis on code-as-interface, raw escape hatches, and durable site knowledge.
 - Remote cloud browser infrastructure patterns such as persistent sessions, profiles, replay, and managed browser lifecycle.
 - The view that AI research and agentic work increasingly become about **experiment throughput**, with the human supervising which questions are worth spending real-world budget on.
-
 

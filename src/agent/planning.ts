@@ -47,6 +47,23 @@ export function advanceStep(plan: TaskPlan): TaskPlan {
   };
 }
 
+export function advancePlanBy(plan: TaskPlan, steps: number): TaskPlan {
+  if (!Number.isFinite(steps) || steps <= 0) {
+    return plan;
+  }
+
+  const maxIndex = Math.max(0, plan.steps.length - 1);
+  const nextIndex = Math.min(maxIndex, plan.currentStepIndex + Math.floor(steps));
+  if (nextIndex === plan.currentStepIndex) {
+    return plan;
+  }
+
+  return {
+    ...plan,
+    currentStepIndex: nextIndex,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // isPlanComplete — check if all steps have been completed
 // ---------------------------------------------------------------------------
