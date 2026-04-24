@@ -12,6 +12,7 @@ import type { SkillFrontmatter, SkillMetadata } from "../shared/types.js";
 import { loadSkillDocsFromDir, loadSkillsFromDir, findMatchingSkills } from "./loader.js";
 import { matchSkillsByHostname, matchSkillsByTags, sortByRelevance } from "./matcher.js";
 import { extractSections, parseSkillFile } from "./parser.js";
+import { promoteSkill, generateSkillProposal, type PromotionCandidate } from "./promote.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -539,4 +540,101 @@ test("findMatchingSkills with wildcard hostname", async () => {
   const matched = await findMatchingSkills(dir, "api.github.com");
   assert.equal(matched.length, 1);
   assert.equal(matched[0]!.id, "skill_gh-prs");
+});
+
+// ---------------------------------------------------------------------------
+// promote.ts — skill dedup
+// ---------------------------------------------------------------------------
+
+function makeCandidate(overrides: Partial<PromotionCandidate> = {}): PromotionCandidate {
+  return {
+    skillId: createId("skill"),
+    hostname: "example.com",
+    facts: ["Page has a heading"],
+    selectors: ["h1"],
+    routes: ["/"],
+    waits: [],
+    traps: [],
+    confidence: 0.7,
+    sourceRunId: createId("run"),
+    ...overrides,
+  };
+}
+
+test("promoteSkill writes a new skill file", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  const candidate = makeCandidate();
+
+  const path = await promoteSkill(candidate, dir);
+
+  assert.ok(typeof path === "string");
+  assert.ok(path.includes("example_com"));
+  assert.ok(path.endsWith(".md"));
+});
+
+test("promoteSkill skips when existing skill has equal or higher confidence", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+
+  // Write a skill with confidence 0.8
+  const first = makeCandidate({ confidence: 0.8 });
+  await promoteSkill(first, dir);
+
+  // Try to write a skill with lower confidence for the same hostname
+  const second = makeCandidate({ confidence: 0.6 });
+  const path = await promoteSkill(second, dir);
+
+  assert.equal(path, undefined);
+
+  // Verify only one skill file exists
+  const skills = await loadSkillsFromDir(dir);
+  assert.equal(skills.length, 1);
+});
+
+test("promoteSkill replaces existing skill when new one has higher confidence", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+
+  // Write a skill with confidence 0.5
+  const first = makeCandidate({ confidence: 0.5 });
+  await promoteSkill(first, dir);
+
+  // Write a better skill with confidence 0.9
+  const second = makeCandidate({ confidence: 0.9 });
+  const path = await promoteSkill(second, dir);
+
+  assert.ok(typeof path === "string");
+
+  // Should still be exactly one skill file (old replaced)
+  const skills = await loadSkillsFromDir(dir);
+  assert.equal(skills.length, 1);
+});
+
+test("promoteSkill writes when no existing skill for hostname", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+
+  // Write a skill for stripe.com
+  const stripe = makeCandidate({ hostname: "dashboard.stripe.com", confidence: 0.9 });
+  await promoteSkill(stripe, dir);
+
+  // Write a different skill for example.com
+  const example = makeCandidate({ hostname: "example.com", confidence: 0.5 });
+  const path = await promoteSkill(example, dir);
+
+  assert.ok(typeof path === "string");
+  const skills = await loadSkillsFromDir(dir);
+  assert.equal(skills.length, 2);
+});
+
+test("promoteSkill rejects skill containing secrets", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+
+  const candidate = makeCandidate({ facts: ["password=secret123"] });
+  await assert.rejects(
+    () => promoteSkill(candidate, dir),
+    /secret patterns detected/u,
+  );
 });

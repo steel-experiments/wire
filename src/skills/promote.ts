@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { readdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { createId, nowIsoUtc } from "../shared/ids.js";
@@ -235,7 +235,7 @@ export function generateSkillProposal(candidate: PromotionCandidate): string {
   lines.push(`tags:`);
   lines.push(`  - auto-promoted`);
   lines.push(`  - ${candidate.hostname}`);
-  lines.push(`updatedAt: ${nowIsoUtc()}`);
+  lines.push(`updatedAt: ${nowIsoUtc().slice(0, 10)}`);
   if (candidate.hostname) {
     lines.push(`hostnamePatterns:`);
     lines.push(`  - "${candidate.hostname}"`);
@@ -300,17 +300,40 @@ export function generateSkillProposal(candidate: PromotionCandidate): string {
 }
 
 /**
+ * Scan the skill directory for existing files matching the same hostname
+ * prefix. Returns paths of files for the same hostname.
+ */
+async function findExistingSkillsForHostname(
+  skillDir: string,
+  hostname: string,
+): Promise<string[]> {
+  const prefix = hostname.replace(/\./gu, "_");
+  try {
+    const entries = await readdir(skillDir);
+    return entries
+      .filter((name) => name.endsWith(".md") && name.startsWith(prefix))
+      .map((name) => join(skillDir, name));
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Write a promoted skill file to the given skill directory.
  *
  * Before writing, the proposal content is scanned for secrets. If any are
  * found the write is aborted and an error is thrown.
  *
- * Returns the absolute path of the written file.
+ * If an existing skill for the same hostname already exists and has equal or
+ * higher confidence, the new skill is skipped. If the new skill has higher
+ * confidence, the old file is replaced.
+ *
+ * Returns the absolute path of the written file, or undefined if skipped.
  */
 export async function promoteSkill(
   candidate: PromotionCandidate,
   skillDir: string,
-): Promise<string> {
+): Promise<string | undefined> {
   const content = generateSkillProposal(candidate);
 
   if (containsSecrets(content)) {
@@ -319,12 +342,50 @@ export async function promoteSkill(
     );
   }
 
-  const fileName = `${candidate.hostname.replace(/\./gu, "_")}-${candidate.skillId.slice(0, 16)}.md`;
-  const filePath = join(skillDir, fileName);
-
   const { ensureDir } = await import("../storage/atomic.js");
   await ensureDir(skillDir);
+
+  // Dedup: check for existing skills with the same hostname
+  const existing = await findExistingSkillsForHostname(skillDir, candidate.hostname);
+  if (existing.length > 0) {
+    // Extract confidence from the first matching file's frontmatter
+    const existingConfidence = await readSkillConfidence(existing[0]!);
+    if (existingConfidence !== undefined && existingConfidence >= candidate.confidence) {
+      return undefined; // skip — existing skill is at least as good
+    }
+    // New skill is better — remove the old one(s)
+    for (const path of existing) {
+      try { await unlink(path); } catch { /* best effort */ }
+    }
+  }
+
+  const fileName = `${candidate.hostname.replace(/\./gu, "_")}-${candidate.skillId.slice(0, 16)}.md`;
+  const filePath = join(skillDir, fileName);
   await writeFile(filePath, content, "utf-8");
 
   return filePath;
+}
+
+/**
+ * Read the confidence value from a skill file's frontmatter.
+ * Returns undefined if the file can't be parsed or has no confidence.
+ */
+async function readSkillConfidence(filePath: string): Promise<number | undefined> {
+  try {
+    const raw = await import("node:fs/promises").then((fs) => fs.readFile(filePath, "utf-8"));
+    const match = raw.match(/^---\n([\s\S]*?)\n---/u);
+    if (!match) return undefined;
+    const frontmatter = match[1]!;
+    const confMatch = frontmatter.match(/confidence:\s*([\d.]+)/u);
+    if (confMatch) {
+      return parseFloat(confMatch[1]!);
+    }
+    // Auto-promoted skills store confidence in the body, not frontmatter.
+    // Check for "confidence X" in the content after frontmatter.
+    const body = raw.slice(raw.indexOf("---", 3) + 3);
+    const bodyMatch = body.match(/confidence\s+(\d+\.?\d*)/iu);
+    return bodyMatch ? parseFloat(bodyMatch[1]!) : undefined;
+  } catch {
+    return undefined;
+  }
 }

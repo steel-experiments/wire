@@ -1,4 +1,4 @@
-import type { ExperimentBundle, Run, RunClassification, RunId, Task } from "../shared/types.js";
+import type { ComparisonDimension, ExperimentBundle, Run, RunClassification, RunId, Task } from "../shared/types.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
 import { saveTask, loadTask } from "../storage/tasks.js";
 import { saveExperimentBundle, saveHypothesis, saveRun } from "../storage/runs.js";
@@ -149,7 +149,7 @@ export function createExperimentBundleFromRuns(
       id: createId("comparison"),
       lhsRunId: runs[i - 1]!.id,
       rhsRunId: runs[i]!.id,
-      dimensions: ["latency", "path", "artifacts", "outcome"] as const,
+      dimensions: ["latency", "path", "artifacts", "outcome"] as ComparisonDimension[],
     });
   }
 

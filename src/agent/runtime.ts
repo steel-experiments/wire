@@ -392,7 +392,13 @@ async function appendSkillProposalEvents(
 
   if (skillDir) {
     try {
-      payload.path = await promoteSkill(candidate, skillDir);
+      const written = await promoteSkill(candidate, skillDir);
+      if (written) {
+        payload.path = written;
+      } else {
+        payload.skipped = true;
+        payload.skipReason = "Existing skill with equal or higher confidence";
+      }
     } catch (err) {
       payload.writeError = err instanceof Error ? err.message : String(err);
     }

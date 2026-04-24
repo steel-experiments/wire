@@ -63,7 +63,6 @@ test("createExperimentBundleFromRuns creates comparisons and summary", () => {
     {
       id: createId("run"),
       taskId,
-      parentRunId: undefined,
       branchLabel: "alternative-approach",
       status: "failed" as const,
       startedAt: nowIsoUtc(),

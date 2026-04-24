@@ -11,10 +11,10 @@ import type { SkillMetadata } from "../shared/types.js";
  *
  * Skills without `hostnamePatterns` are never returned.
  */
-export function matchSkillsByHostname(
-  skills: SkillMetadata[],
+export function matchSkillsByHostname<T extends SkillMetadata>(
+  skills: T[],
   hostname: string,
-): SkillMetadata[] {
+): T[] {
   const lower = hostname.toLowerCase();
 
   return skills.filter((skill) => {
@@ -48,10 +48,10 @@ function hostnameMatches(pattern: string, hostname: string): boolean {
  * Return skills that have at least one tag in common with the requested tags.
  * Comparison is case-sensitive.
  */
-export function matchSkillsByTags(
-  skills: SkillMetadata[],
+export function matchSkillsByTags<T extends SkillMetadata>(
+  skills: T[],
   tags: string[],
-): SkillMetadata[] {
+): T[] {
   if (tags.length === 0) return [];
 
   const tagSet = new Set(tags);
