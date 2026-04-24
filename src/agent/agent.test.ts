@@ -468,8 +468,92 @@ test("finalizeRun classifies successful run with code successes and observations
   const result = finalizeRun(state);
 
   assert.equal(result.run.status, "succeeded");
+  assert.equal(result.run.result, undefined);
   assert.equal(result.classification.kind, "task-complete");
   assert.ok(result.outcomeSummary.includes("task-complete"));
+});
+
+test("finalizeRun persists final result from successful code output", () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+
+  state.events.push(
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "observation",
+      payload: { url: "https://example.com", title: "Example" },
+    },
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "observation",
+      payload: { url: "https://example.com/result", title: "Result" },
+    },
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, durationMs: 10, stdout: "Final answer" },
+    },
+  );
+
+  const result = finalizeRun(state);
+
+  assert.equal(result.run.result, "Final answer");
+});
+
+test("finalizeRun persists final result from successful returnValue", () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+
+  state.events.push(
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "observation",
+      payload: { url: "https://example.com", title: "Example" },
+    },
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "observation",
+      payload: { url: "https://example.com/result", title: "Result" },
+    },
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, durationMs: 10, returnValue: { answer: "Final answer", price: 29 } },
+    },
+  );
+
+  const result = finalizeRun(state);
+
+  assert.equal(result.run.result, '{"answer":"Final answer","price":29}');
+});
+
+test("finalizeRun falls back to finish summary when no extracted payload exists", () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: new Date().toISOString(),
+    kind: "thought-summary",
+    payload: { summary: "Completed search for San Francisco and New York", kind: "finish" },
+  });
+
+  const result = finalizeRun(state);
+
+  assert.equal(result.run.result, "Completed search for San Francisco and New York");
 });
 
 test("finalizeRun classifies run with mixed results as partial-success", () => {
@@ -563,10 +647,31 @@ test("executeTask proposes domain skill updates from reusable trace evidence", a
   });
   const policy = createMockPolicyEngine();
 
+  const mockLlmProvider = {
+    async chat(messages: { content: string }[]) {
+      const userMsg = messages.find((m) => m.content.includes("[observation]"));
+      if (userMsg) {
+        return {
+          content: JSON.stringify({
+            hostname: "example.com",
+            facts: ["Pricing page at /pricing"],
+            selectors: [],
+            routes: ["/pricing"],
+            waits: [],
+            traps: [],
+            confidence: 0.8,
+          }),
+          model: "test-model",
+        };
+      }
+      return { content: "NONE", model: "test-model" };
+    },
+  };
+
   try {
     const result = await executeTask(
       task,
-      { provider, policyEngine: policy, maxSteps: 3, skillDir },
+      { provider, policyEngine: policy, maxSteps: 3, skillDir, llmProvider: mockLlmProvider },
       async (state) => {
         if (state.stepCount === 0) {
           return {

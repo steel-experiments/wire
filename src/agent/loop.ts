@@ -15,6 +15,7 @@ import type { BrowserProvider } from "../browser/bridge.js";
 import type { PolicyEngine } from "../policy/engine.js";
 import type { PolicyAction } from "../policy/rules.js";
 import { createApprovalRequest } from "../policy/approvals.js";
+import { stableJsonStringify } from "../shared/ids.js";
 
 import { observeBrowser } from "../browser/observe.js";
 import { execCode } from "../browser/exec.js";
@@ -285,6 +286,9 @@ export async function executeStep(
         if (result.stderr) {
           resultPayload.stderr = result.stderr;
         }
+        if (result.returnValue !== undefined) {
+          resultPayload.returnValue = result.returnValue;
+        }
         state.events.push({
           id: createId("event"),
           runId: state.run.id,
@@ -331,6 +335,44 @@ export interface FinalizeOptions {
   pendingAction?: ProposedAction;
 }
 
+function deriveRunResult(events: TraceEvent[]): string | undefined {
+  const latestAnswerEvent = [...events].reverse().find((event) =>
+    event.kind === "code-result" &&
+    event.payload.ok === true &&
+    (
+      typeof event.payload.stdout === "string" ||
+      event.payload.returnValue !== undefined
+    )
+  );
+
+  if (latestAnswerEvent) {
+    const stdout = latestAnswerEvent.payload.stdout;
+    if (typeof stdout === "string" && stdout.trim().length > 0) {
+      return stdout;
+    }
+
+    const returnValue = latestAnswerEvent.payload.returnValue;
+    if (returnValue !== undefined) {
+      return typeof returnValue === "string"
+        ? returnValue
+        : stableJsonStringify(returnValue);
+    }
+  }
+
+  const latestFinishSummary = [...events].reverse().find((event) =>
+    event.kind === "thought-summary" &&
+    event.payload.kind === "finish" &&
+    typeof event.payload.summary === "string" &&
+    event.payload.summary.trim().length > 0
+  );
+
+  if (latestFinishSummary && typeof latestFinishSummary.payload.summary === "string") {
+    return latestFinishSummary.payload.summary;
+  }
+
+  return undefined;
+}
+
 export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): LoopResult {
   const errorCount = state.events.filter((e) => e.kind === "error").length;
 
@@ -356,6 +398,7 @@ export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): Lo
   const finishedRun: Run = {
     ...state.run,
     status,
+    result: deriveRunResult(state.events),
     classification,
     outcomeSummary,
   };

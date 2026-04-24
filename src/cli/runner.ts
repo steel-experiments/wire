@@ -21,11 +21,13 @@ import type { LLMProvider } from "../providers/llm/openai.js";
 import { createOpenAIProvider } from "../providers/llm/openai.js";
 import { createAnthropicProvider } from "../providers/llm/anthropic.js";
 import { executeTask, resumeTask, type RuntimeConfig } from "../agent/runtime.js";
+import type { LlmProvider } from "./config.js";
 
 export interface RunOptions {
   objective: string;
   mode?: "task" | "investigate" | "experiment";
   profileId?: string;
+  provider?: LlmProvider;
   model?: string;
   maxSteps?: number;
   skillDir?: string;
@@ -35,12 +37,61 @@ function defaultStorageRoot(): string {
   return process.env["WIRE_ROOT"] ?? ".wire";
 }
 
-function createLlmProvider(model?: string): LLMProvider | undefined {
-  if (process.env.OPENAI_API_KEY) {
+function inferProviderFromModel(model?: string): LlmProvider | undefined {
+  if (!model) {
+    return undefined;
+  }
+
+  if (/^(gpt-|o[1-9]|o\d|chatgpt-)/u.test(model)) {
+    return "openai";
+  }
+
+  if (/^claude-/u.test(model)) {
+    return "anthropic";
+  }
+
+  return undefined;
+}
+
+export function resolveProviderSelection(provider?: LlmProvider, model?: string): LlmProvider | undefined {
+  const inferred = inferProviderFromModel(model);
+  if (provider && inferred && provider !== inferred) {
+    throw new Error(`Model "${model}" does not match provider "${provider}".`);
+  }
+
+  if (provider) {
+    return provider;
+  }
+
+  if (inferred) {
+    return inferred;
+  }
+
+  const hasOpenAi = Boolean(process.env.OPENAI_API_KEY);
+  const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY);
+
+  if (hasOpenAi && !hasAnthropic) {
+    return "openai";
+  }
+
+  if (hasAnthropic && !hasOpenAi) {
+    return "anthropic";
+  }
+
+  if (hasOpenAi && hasAnthropic) {
+    throw new Error("Multiple LLM providers are configured. Set `llm.provider`, `WIRE_PROVIDER`, or `--provider`.");
+  }
+
+  return undefined;
+}
+
+function createLlmProvider(provider?: LlmProvider, model?: string): LLMProvider | undefined {
+  const selectedProvider = resolveProviderSelection(provider, model);
+  if (selectedProvider === "openai") {
     return createOpenAIProvider(model ? { model } : undefined);
   }
 
-  if (process.env.ANTHROPIC_API_KEY) {
+  if (selectedProvider === "anthropic") {
     return createAnthropicProvider(model ? { model } : undefined);
   }
 
@@ -48,7 +99,7 @@ function createLlmProvider(model?: string): LLMProvider | undefined {
 }
 
 function createRuntimeConfig(
-  options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "model">,
+  options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "provider" | "model">,
 ): RuntimeConfig {
   const config: RuntimeConfig = {
     provider: createSteelProvider(),
@@ -59,7 +110,7 @@ function createRuntimeConfig(
     },
   };
 
-  const llmProvider = createLlmProvider(options.model);
+  const llmProvider = createLlmProvider(options.provider, options.model);
   if (llmProvider) {
     config.llmProvider = llmProvider;
   }
@@ -130,6 +181,9 @@ export async function runTask(options: RunOptions): Promise<void> {
   console.log(
     `Classification: ${result.run.classification?.kind ?? "unknown"} (${(((result.run.classification?.confidence) ?? 0) * 100).toFixed(0)}%)`,
   );
+  if (result.run.result) {
+    console.log(`Result:       ${result.run.result}`);
+  }
   if (result.run.outcomeSummary) {
     console.log(`Summary:      ${result.run.outcomeSummary}`);
   }
@@ -166,5 +220,8 @@ export async function approveRun(runId: RunId): Promise<void> {
   console.log(`Run resumed:  ${runId}`);
   console.log(`Task:         ${task.title}`);
   console.log(`Status:       ${resumed.run.status}`);
+  if (resumed.run.result) {
+    console.log(`Result:       ${resumed.run.result}`);
+  }
   console.log(`Summary:      ${resumed.run.outcomeSummary ?? ""}`);
 }

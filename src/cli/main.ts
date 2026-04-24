@@ -1,14 +1,54 @@
 import { parseArgs, formatHelp } from "./args.js";
 import { approveRun, runTask } from "./runner.js";
-import { loadConfig, resolveModel } from "./config.js";
+import { loadConfig, resolveLlmConfig } from "./config.js";
 import { formatReview } from "../ui/review.js";
 import { loadRun, listRuns } from "../storage/runs.js";
 import { listArtifacts } from "../storage/artifacts.js";
 import { listTasks } from "../storage/tasks.js";
 import { listTraceEvents } from "../storage/events.js";
+import { stableJsonStringify } from "../shared/ids.js";
+import type { TraceEvent } from "../shared/types.js";
 
 function defaultStorageRoot(): string {
   return process.env["WIRE_ROOT"] ?? ".wire";
+}
+
+function deriveResultFromEvents(events: TraceEvent[]): string | undefined {
+  const latestAnswerEvent = [...events].reverse().find((event) =>
+    event.kind === "code-result" &&
+    event.payload.ok === true &&
+    (
+      typeof event.payload.stdout === "string" ||
+      event.payload.returnValue !== undefined
+    )
+  );
+
+  if (latestAnswerEvent) {
+    const stdout = latestAnswerEvent.payload.stdout;
+    if (typeof stdout === "string" && stdout.trim().length > 0) {
+      return stdout;
+    }
+
+    const returnValue = latestAnswerEvent.payload.returnValue;
+    if (returnValue !== undefined) {
+      return typeof returnValue === "string"
+        ? returnValue
+        : stableJsonStringify(returnValue);
+    }
+  }
+
+  const latestFinishSummary = [...events].reverse().find((event) =>
+    event.kind === "thought-summary" &&
+    event.payload.kind === "finish" &&
+    typeof event.payload.summary === "string" &&
+    event.payload.summary.trim().length > 0
+  );
+
+  if (latestFinishSummary && typeof latestFinishSummary.payload.summary === "string") {
+    return latestFinishSummary.payload.summary;
+  }
+
+  return undefined;
 }
 
 export async function main(argv: string[]): Promise<void> {
@@ -28,6 +68,10 @@ export async function main(argv: string[]): Promise<void> {
       await handleReview(args);
       break;
     }
+    case "result": {
+      await handleResult(args);
+      break;
+    }
     case "list": {
       await handleList(args);
       break;
@@ -45,7 +89,7 @@ export async function main(argv: string[]): Promise<void> {
 }
 
 async function handleRun(
-  args: { objective?: string; taskFile?: string; mode?: "task" | "investigate" | "experiment"; profileId?: string; model?: string; maxSteps?: number; skillDir?: string },
+  args: { objective?: string; taskFile?: string; mode?: "task" | "investigate" | "experiment"; profileId?: string; provider?: "openai" | "anthropic"; model?: string; maxSteps?: number; skillDir?: string },
 ): Promise<void> {
   if (!args.objective && !args.taskFile) {
     console.error("Error: --objective or --task-file is required for 'run'.");
@@ -71,12 +115,21 @@ async function handleRun(
   }
 
   const config = await loadConfig();
-  const model = resolveModel(args.model, process.env.WIRE_MODEL, config.model);
+  const llm = resolveLlmConfig(
+    args.provider,
+    args.model,
+    process.env.WIRE_PROVIDER === "openai" || process.env.WIRE_PROVIDER === "anthropic"
+      ? process.env.WIRE_PROVIDER
+      : undefined,
+    process.env.WIRE_MODEL,
+    config,
+  );
 
-  const opts: { objective: string; mode?: "task" | "investigate" | "experiment"; profileId?: string; model?: string; maxSteps?: number; skillDir?: string } = { objective };
+  const opts: { objective: string; mode?: "task" | "investigate" | "experiment"; profileId?: string; provider?: "openai" | "anthropic"; model?: string; maxSteps?: number; skillDir?: string } = { objective };
   if (args.mode) opts.mode = args.mode;
   if (args.profileId) opts.profileId = args.profileId;
-  if (model) opts.model = model;
+  if (llm.provider) opts.provider = llm.provider;
+  if (llm.model) opts.model = llm.model;
   if (args.maxSteps) opts.maxSteps = args.maxSteps;
   if (args.skillDir) opts.skillDir = args.skillDir;
 
@@ -158,6 +211,31 @@ async function handleList(
       console.log(`  ${run.id}  [${run.status}]${cls}  task: ${run.taskId}`);
     }
   }
+}
+
+async function handleResult(
+  args: { runId?: string },
+): Promise<void> {
+  const root = defaultStorageRoot();
+
+  if (!args.runId) {
+    console.error("Error: --run-id is required for 'result'.");
+    process.exitCode = 1;
+    return;
+  }
+
+  const runId = args.runId as `run_${string}`;
+  const run = await loadRun(root, runId);
+
+  const result = run.result ?? deriveResultFromEvents(await listTraceEvents(root, runId));
+
+  if (!result) {
+    console.error(`No final result recorded for ${runId}.`);
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log(result);
 }
 
 async function handleApprove(

@@ -29,7 +29,7 @@ import { assembleSystemPrompt, assembleUserPrompt, type ContextBundle } from "./
 import { createPlan, planToContext, advanceStep, isPlanComplete, type TaskPlan } from "./planning.js";
 import { observeBrowser } from "../browser/observe.js";
 import { detectAuthWall } from "../profiles/auth.js";
-import { detectPromotionCandidates, generateSkillProposal, promoteSkill } from "../skills/promote.js";
+import { llmProposeSkill, generateSkillProposal, promoteSkill } from "../skills/promote.js";
 
 // ---------------------------------------------------------------------------
 // RuntimeConfig — what the runtime needs to run
@@ -221,39 +221,45 @@ function extractFirstJsonObject(content: string): string | undefined {
   return content.slice(start, end + 1);
 }
 
-async function appendSkillProposalEvents(state: LoopState, skillDir?: string): Promise<void> {
+async function appendSkillProposalEvents(
+  state: LoopState,
+  skillDir?: string,
+  llmProvider?: LLMProvider,
+): Promise<void> {
+  if (!llmProvider) return;
+
   const alreadyProposed = state.events.some((event) => event.kind === "skill-proposal");
   if (alreadyProposed) {
     return;
   }
 
-  const candidates = detectPromotionCandidates(state.events, state.run.id);
-  for (const candidate of candidates) {
-    const payload: JsonObject = {
-      skillId: candidate.skillId,
-      scope: "domain",
-      hostname: candidate.hostname,
-      confidence: candidate.confidence,
-      rationale: `Reusable browser knowledge detected for ${candidate.hostname}`,
-      proposal: generateSkillProposal(candidate),
-    };
+  const candidate = await llmProposeSkill(state.events, state.run.id, llmProvider);
+  if (!candidate) return;
 
-    if (skillDir) {
-      try {
-        payload.path = await promoteSkill(candidate, skillDir);
-      } catch (err) {
-        payload.writeError = err instanceof Error ? err.message : String(err);
-      }
+  const payload: JsonObject = {
+    skillId: candidate.skillId,
+    scope: "domain",
+    hostname: candidate.hostname,
+    confidence: candidate.confidence,
+    rationale: `Reusable browser knowledge detected for ${candidate.hostname}`,
+    proposal: generateSkillProposal(candidate),
+  };
+
+  if (skillDir) {
+    try {
+      payload.path = await promoteSkill(candidate, skillDir);
+    } catch (err) {
+      payload.writeError = err instanceof Error ? err.message : String(err);
     }
-
-    state.events.push({
-      id: createId("event"),
-      runId: state.run.id,
-      ts: nowIsoUtc(),
-      kind: "skill-proposal",
-      payload,
-    });
   }
+
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: nowIsoUtc(),
+    kind: "skill-proposal",
+    payload,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -469,7 +475,7 @@ async function executeWithState(
     return finalizeRun(state, approvalOptions);
   }
 
-  await appendSkillProposalEvents(state, config.skillDir);
+  await appendSkillProposalEvents(state, config.skillDir, config.llmProvider);
 
   return finalizeRun(state, finalizeOptions);
 }

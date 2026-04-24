@@ -137,6 +137,7 @@ export interface Run {
   status: RunStatus;
   startedAt?: string;
   finishedAt?: string;
+  result?: string;
   outcomeSummary?: string;
   classification?: RunClassification;
 }

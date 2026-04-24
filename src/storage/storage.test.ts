@@ -324,6 +324,16 @@ test("saveRun updates status and classification", async () => {
   assert.equal(loaded.classification?.confidence, 0.95);
 });
 
+test("saveRun preserves final result text", async () => {
+  testRoot = makeRoot();
+  const run = makeRun({ result: "Extracted answer" });
+
+  await saveRun(testRoot, run);
+  const loaded = await loadRun(testRoot, run.id);
+
+  assert.equal(loaded.result, "Extracted answer");
+});
+
 test("loadRun throws NotFoundError for missing run", async () => {
   testRoot = makeRoot();
 

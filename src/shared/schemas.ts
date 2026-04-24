@@ -157,6 +157,7 @@ export const runSchema = z
     status: runStatusSchema,
     startedAt: isoUtcTimestampSchema.optional(),
     finishedAt: isoUtcTimestampSchema.optional(),
+    result: z.string().min(1).optional(),
     outcomeSummary: z.string().min(1).optional(),
     classification: runClassificationSchema.optional(),
   })

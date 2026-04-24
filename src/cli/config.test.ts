@@ -1,36 +1,64 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { resolveModel, loadConfig } from "./config.js";
+import { resolveLlmConfig, loadConfig } from "./config.js";
 import { writeFile, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 // ---------------------------------------------------------------------------
-// resolveModel — precedence tests
+// resolveLlmConfig — precedence tests
 // ---------------------------------------------------------------------------
 
-test("resolveModel returns CLI flag when all sources provided", () => {
-  assert.equal(resolveModel("cli-model", "env-model", "config-model"), "cli-model");
+test("resolveLlmConfig returns CLI values when all sources provided", () => {
+  const config = resolveLlmConfig(
+    "anthropic",
+    "cli-model",
+    "openai",
+    "env-model",
+    { llm: { provider: "openai", model: "config-model" } },
+  );
+  assert.equal(config.provider, "anthropic");
+  assert.equal(config.model, "cli-model");
 });
 
-test("resolveModel returns env var when no CLI flag", () => {
-  assert.equal(resolveModel(undefined, "env-model", "config-model"), "env-model");
+test("resolveLlmConfig returns env values when no CLI values", () => {
+  const config = resolveLlmConfig(
+    undefined,
+    undefined,
+    "anthropic",
+    "env-model",
+    { llm: { provider: "openai", model: "config-model" } },
+  );
+  assert.equal(config.provider, "anthropic");
+  assert.equal(config.model, "env-model");
 });
 
-test("resolveModel returns config value when no CLI or env", () => {
-  assert.equal(resolveModel(undefined, undefined, "config-model"), "config-model");
+test("resolveLlmConfig returns config llm values when no CLI or env", () => {
+  const config = resolveLlmConfig(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { llm: { provider: "anthropic", model: "config-model" } },
+  );
+  assert.equal(config.provider, "anthropic");
+  assert.equal(config.model, "config-model");
 });
 
-test("resolveModel returns undefined when nothing provided", () => {
-  assert.equal(resolveModel(undefined, undefined, undefined), undefined);
+test("resolveLlmConfig falls back to legacy root fields", () => {
+  const config = resolveLlmConfig(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { provider: "openai", model: "legacy-model" },
+  );
+  assert.equal(config.provider, "openai");
+  assert.equal(config.model, "legacy-model");
 });
 
-test("resolveModel returns CLI flag even when env and config are set", () => {
-  assert.equal(resolveModel("gpt-5.4-mini", "claude-sonnet-4-6", "other"), "gpt-5.4-mini");
-});
-
-test("resolveModel returns env var when only env is set", () => {
-  assert.equal(resolveModel(undefined, "claude-sonnet-4-6", undefined), "claude-sonnet-4-6");
+test("resolveLlmConfig returns empty config when nothing provided", () => {
+  assert.deepEqual(resolveLlmConfig(undefined, undefined, undefined, undefined, undefined), {});
 });
 
 // ---------------------------------------------------------------------------
@@ -60,9 +88,10 @@ test("loadConfig returns {} when both files are missing", async () => {
 test("loadConfig reads project wire.json", async () => {
   const dir = await makeIsolatedDir();
   try {
-    await writeFile(join(dir, "wire.json"), JSON.stringify({ model: "gpt-5.4-mini" }));
+    await writeFile(join(dir, "wire.json"), JSON.stringify({ llm: { provider: "openai", model: "gpt-5.4-mini" } }));
     const config = await loadConfig(dir, dir);
-    assert.equal(config.model, "gpt-5.4-mini");
+    assert.equal(config.llm?.provider, "openai");
+    assert.equal(config.llm?.model, "gpt-5.4-mini");
   } finally {
     await rm(dir, { recursive: true });
   }
@@ -101,10 +130,11 @@ test("loadConfig reads user-level ~/.wire/config.json", async () => {
     await mkdir(join(userDir, ".wire"), { recursive: true });
     await writeFile(
       join(userDir, ".wire", "config.json"),
-      JSON.stringify({ model: "claude-sonnet-4-6" }),
+      JSON.stringify({ llm: { provider: "anthropic", model: "claude-sonnet-4-6" } }),
     );
     const config = await loadConfig(projectDir, userDir);
-    assert.equal(config.model, "claude-sonnet-4-6");
+    assert.equal(config.llm?.provider, "anthropic");
+    assert.equal(config.llm?.model, "claude-sonnet-4-6");
   } finally {
     await rm(userDir, { recursive: true });
     await rm(projectDir, { recursive: true });
@@ -118,14 +148,15 @@ test("loadConfig merges user defaults with project overrides", async () => {
     await mkdir(join(userDir, ".wire"), { recursive: true });
     await writeFile(
       join(userDir, ".wire", "config.json"),
-      JSON.stringify({ model: "user-default" }),
+      JSON.stringify({ llm: { provider: "openai", model: "user-default" } }),
     );
     await writeFile(
       join(projectDir, "wire.json"),
-      JSON.stringify({ model: "project-override" }),
+      JSON.stringify({ llm: { model: "project-override" } }),
     );
     const config = await loadConfig(projectDir, userDir);
-    assert.equal(config.model, "project-override");
+    assert.equal(config.llm?.provider, "openai");
+    assert.equal(config.llm?.model, "project-override");
   } finally {
     await rm(userDir, { recursive: true });
     await rm(projectDir, { recursive: true });
@@ -139,13 +170,26 @@ test("loadConfig uses user config when project has no model", async () => {
     await mkdir(join(userDir, ".wire"), { recursive: true });
     await writeFile(
       join(userDir, ".wire", "config.json"),
-      JSON.stringify({ model: "user-default" }),
+      JSON.stringify({ llm: { provider: "anthropic", model: "user-default" } }),
     );
     await writeFile(join(projectDir, "wire.json"), "{}");
     const config = await loadConfig(projectDir, userDir);
-    assert.equal(config.model, "user-default");
+    assert.equal(config.llm?.provider, "anthropic");
+    assert.equal(config.llm?.model, "user-default");
   } finally {
     await rm(userDir, { recursive: true });
     await rm(projectDir, { recursive: true });
+  }
+});
+
+test("loadConfig preserves legacy root model fields", async () => {
+  const dir = await makeIsolatedDir();
+  try {
+    await writeFile(join(dir, "wire.json"), JSON.stringify({ model: "gpt-5.4-mini", provider: "openai" }));
+    const config = await loadConfig(dir, dir);
+    assert.equal(config.provider, "openai");
+    assert.equal(config.model, "gpt-5.4-mini");
+  } finally {
+    await rm(dir, { recursive: true });
   }
 });

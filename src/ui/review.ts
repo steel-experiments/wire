@@ -52,6 +52,12 @@ export function formatReview(data: ReviewData): string {
     lines.push("");
   }
 
+  if (run.result) {
+    lines.push("--- Result ---");
+    lines.push(run.result);
+    lines.push("");
+  }
+
   if (events.length > 0) {
     lines.push(formatTimeline(events));
     lines.push("");

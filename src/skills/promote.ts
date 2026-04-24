@@ -7,6 +7,7 @@ import type {
   SkillId,
   TraceEvent,
 } from "../shared/types.js";
+import type { LLMProvider, ChatMessage } from "../providers/llm/openai.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -59,187 +60,113 @@ function extractHostname(url: string): string | null {
   }
 }
 
-interface FactEntry {
-  hostname: string;
-  count: number;
-}
+// ---------------------------------------------------------------------------
+// Trace serialization for LLM
+// ---------------------------------------------------------------------------
+
+const SKIP_KINDS = new Set(["skill-load", "policy-check", "skill-proposal", "approval-request"]);
 
 /**
- * Scan observation events for repeated successful observations of the same
- * hostname. A hostname observed 2+ times becomes a "fact".
+ * Serialize trace events into a compact one-line-per-event format suitable
+ * for an LLM prompt.
  */
-function extractFacts(events: TraceEvent[]): Map<string, FactEntry> {
-  const hostCounts = new Map<string, FactEntry>();
+export function serializeTraceForLLM(events: TraceEvent[]): string {
+  const lines: string[] = [];
 
   for (const event of events) {
-    if (event.kind !== "observation") continue;
+    if (SKIP_KINDS.has(event.kind)) continue;
 
-    const url = event.payload["url"];
-    if (typeof url !== "string") continue;
-
-    const hostname = extractHostname(url);
-    if (hostname === null) continue;
-
-    const existing = hostCounts.get(hostname);
-    if (existing) {
-      existing.count += 1;
-    } else {
-      hostCounts.set(hostname, { hostname, count: 1 });
+    switch (event.kind) {
+      case "observation": {
+        const url = String(event.payload["url"] ?? "");
+        const title = String(event.payload["title"] ?? "");
+        lines.push(`[observation] url=${url} title=${title}`);
+        break;
+      }
+      case "code-exec": {
+        const code = String(event.payload["code"] ?? "").slice(0, 500);
+        lines.push(`[code-exec] ${code}`);
+        break;
+      }
+      case "code-result": {
+        const ok = event.payload["ok"];
+        if (ok) {
+          const stdout = String(event.payload["stdout"] ?? "").slice(0, 200);
+          lines.push(`[code-result] ok=true stdout=${stdout}`);
+        } else {
+          const error = String(event.payload["stderr"] ?? event.payload["error"] ?? "").slice(0, 200);
+          lines.push(`[code-result] ok=false error=${error}`);
+        }
+        break;
+      }
+      case "thought-summary": {
+        const text = String(event.payload["summary"] ?? event.payload["reason"] ?? "");
+        lines.push(`[thought-summary] ${text}`);
+        break;
+      }
+      case "error": {
+        const message = String(event.payload["message"] ?? "");
+        lines.push(`[error] ${message.slice(0, 200)}`);
+        break;
+      }
+      default: {
+        const summary = String(event.payload["summary"] ?? event.kind);
+        lines.push(`[${event.kind}] ${summary.slice(0, 200)}`);
+      }
     }
   }
 
-  return hostCounts;
+  return lines.join("\n");
 }
 
-/**
- * Extract repeated CSS selectors from code-exec payloads.
- * Selectors used 2+ times across different events are considered reusable.
- */
-function extractSelectors(events: TraceEvent[]): string[] {
-  const selectorCounts = new Map<string, number>();
-
-  for (const event of events) {
-    if (event.kind !== "code-exec") continue;
-
-    const code = event.payload["code"];
-    if (typeof code !== "string") continue;
-
-    // Naive extraction: look for querySelector / $ calls with string literals.
-    const selectorRegex = /(?:querySelector|querySelectorAll|\$\$?)\(\s*['"]([^'"]+)['"]\s*\)/gu;
-    let match: RegExpExecArray | null;
-    while ((match = selectorRegex.exec(code)) !== null) {
-      const sel = match[1]!;
-      const current = selectorCounts.get(sel) ?? 0;
-      selectorCounts.set(sel, current + 1);
-    }
-  }
-
-  // Keep selectors used 2+ times
-  const results: string[] = [];
-  for (const [selector, count] of selectorCounts) {
-    if (count >= 2) {
-      results.push(selector);
-    }
-  }
-
-  return results;
-}
+// ---------------------------------------------------------------------------
+// LLM response parsing
+// ---------------------------------------------------------------------------
 
 /**
- * Extract successful navigation routes from observation events.
- * Each unique URL path on the same hostname forms a "route".
+ * Parse the LLM response content into a `PromotionCandidate`, or `null` if
+ * the LLM indicated no proposal or the output is unparseable.
  */
-function extractRoutes(
-  events: TraceEvent[],
-  hostname: string,
-): string[] {
-  const routes = new Set<string>();
+export function parseSkillProposalResponse(
+  content: string,
+  runId: RunId,
+): PromotionCandidate | null {
+  const trimmed = content.trim();
 
-  for (const event of events) {
-    if (event.kind !== "observation") continue;
+  if (trimmed === "NONE") return null;
 
-    const url = event.payload["url"];
-    if (typeof url !== "string") continue;
-
-    const parsed = extractHostname(url);
-    if (parsed !== hostname) continue;
-
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    // Fall back to extracting the first {…} block
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) return null;
     try {
-      const path = new URL(url).pathname;
-      if (path.length > 1) {
-        routes.add(path);
-      }
+      parsed = JSON.parse(trimmed.slice(start, end + 1));
     } catch {
-      // Skip malformed URLs
+      return null;
     }
   }
 
-  return [...routes];
-}
+  if (typeof parsed.hostname !== "string" || !parsed.hostname) return null;
 
-/**
- * Extract common wait patterns from code-exec events.
- * Looks for waitFor, waitForSelector, waitForNavigation patterns.
- */
-function extractWaits(events: TraceEvent[]): string[] {
-  const waitCounts = new Map<string, number>();
+  const confidence = typeof parsed.confidence === "number"
+    ? Math.max(0, Math.min(1, Math.round(parsed.confidence * 100) / 100))
+    : 0.5;
 
-  for (const event of events) {
-    if (event.kind !== "code-exec") continue;
-
-    const code = event.payload["code"];
-    if (typeof code !== "string") continue;
-
-    const waitRegex =
-      /waitFor(?:Selector|Navigation|Timeout)?\(\s*['"]([^'"]+)['"]\s*/gu;
-    let match: RegExpExecArray | null;
-    while ((match = waitRegex.exec(code)) !== null) {
-      const pattern = match[1]!;
-      const current = waitCounts.get(pattern) ?? 0;
-      waitCounts.set(pattern, current + 1);
-    }
-  }
-
-  const results: string[] = [];
-  for (const [pattern, count] of waitCounts) {
-    if (count >= 2) {
-      results.push(pattern);
-    }
-  }
-
-  return results;
-}
-
-/**
- * Extract common failure/trap patterns from error and code-result events.
- */
-function extractTraps(events: TraceEvent[]): string[] {
-  const traps = new Set<string>();
-
-  for (const event of events) {
-    if (event.kind === "error") {
-      const message = event.payload["message"];
-      if (typeof message === "string" && message.length > 0) {
-        // Normalise to a short representative snippet
-        const snippet = message.split("\n")[0]!.slice(0, 120);
-        traps.add(snippet);
-      }
-    }
-
-    if (event.kind === "code-result") {
-      const ok = event.payload["ok"];
-      const stderr = event.payload["stderr"];
-      if (ok === false && typeof stderr === "string" && stderr.length > 0) {
-        const snippet = stderr.split("\n")[0]!.slice(0, 120);
-        traps.add(snippet);
-      }
-    }
-  }
-
-  return [...traps];
-}
-
-/**
- * Compute a rough confidence score for a candidate based on the density of
- * patterns found relative to total events.
- */
-function computeConfidence(
-  factsCount: number,
-  selectorsCount: number,
-  routesCount: number,
-  waitsCount: number,
-  trapsCount: number,
-  totalEvents: number,
-): number {
-  if (totalEvents === 0) return 0;
-
-  const signalCount =
-    factsCount + selectorsCount + routesCount + waitsCount + trapsCount;
-
-  // Each signal contributes; cap at 1.0
-  const raw = Math.min(signalCount / Math.max(totalEvents * 0.3, 1), 1);
-  // Round to two decimal places
-  return Math.round(raw * 100) / 100;
+  return {
+    skillId: createId("skill"),
+    hostname: parsed.hostname,
+    facts: Array.isArray(parsed.facts) ? parsed.facts.filter((f: unknown) => typeof f === "string") : [],
+    selectors: Array.isArray(parsed.selectors) ? parsed.selectors.filter((s: unknown) => typeof s === "string") : [],
+    routes: Array.isArray(parsed.routes) ? parsed.routes.filter((r: unknown) => typeof r === "string") : [],
+    waits: Array.isArray(parsed.waits) ? parsed.waits.filter((w: unknown) => typeof w === "string") : [],
+    traps: Array.isArray(parsed.traps) ? parsed.traps.filter((t: unknown) => typeof t === "string") : [],
+    confidence,
+    sourceRunId: runId,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -247,63 +174,46 @@ function computeConfidence(
 // ---------------------------------------------------------------------------
 
 /**
- * Scan a run's trace events for repeated patterns that could be promoted to a
- * reusable skill. Returns one `PromotionCandidate` per hostname that yielded
- * actionable patterns, or an empty array if nothing is worth promoting.
+ * Ask the LLM to propose a reusable skill from a completed run's trace.
+ * Returns a `PromotionCandidate` if the LLM identifies reusable knowledge,
+ * or `null` otherwise. Never throws — errors are caught and return `null`.
  */
-export function detectPromotionCandidates(
+export async function llmProposeSkill(
   events: TraceEvent[],
   runId: RunId,
-): PromotionCandidate[] {
-  if (events.length === 0) return [];
+  llmProvider: LLMProvider,
+): Promise<PromotionCandidate | null> {
+  try {
+    const trace = serializeTraceForLLM(events);
 
-  const factsMap = extractFacts(events);
-  const selectors = extractSelectors(events);
-  const waits = extractWaits(events);
-  const traps = extractTraps(events);
+    // Extract the task objective from thought-summary or the task itself
+    const objective = events
+      .filter((e) => e.kind === "thought-summary" && e.payload["kind"] === "finish")
+      .map((e) => String(e.payload["summary"] ?? ""))
+      .join("; ") || "browser automation task";
 
-  const candidates: PromotionCandidate[] = [];
+    const systemPrompt = [
+      "You are a skill-distillation agent for a browser automation framework called Wire.",
+      "Given a trace of events from a completed run, decide whether there is reusable browser knowledge worth saving as a skill file.",
+      "If the trace contains useful domain knowledge (routes, selectors, wait patterns, common pitfalls), return a JSON object with this shape:",
+      '{"hostname":"example.com","facts":["..."],"selectors":["..."],"routes":["..."],"waits":["..."],"traps":["..."],"confidence":0.8}',
+      "If nothing is worth saving, respond with exactly: NONE",
+      "Do not wrap the JSON in prose or code fences.",
+    ].join("\n");
 
-  for (const entry of factsMap.values()) {
-    if (entry.count < 2) continue;
+    const userPrompt = `Trace from a successful run (objective: ${objective}):\n\n${trace}`;
 
-    const hostname = entry.hostname;
-    const routes = extractRoutes(events, hostname);
+    const messages: ChatMessage[] = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ];
 
-    const confidence = computeConfidence(
-      1, // this hostname is a fact
-      selectors.length,
-      routes.length,
-      waits.length,
-      traps.length,
-      events.length,
-    );
+    const response = await llmProvider.chat(messages, { maxTokens: 500 });
 
-    // Only promote if there is at least some signal beyond just visiting a page
-    const hasSignal =
-      selectors.length > 0 ||
-      routes.length > 0 ||
-      waits.length > 0 ||
-      traps.length > 0;
-
-    if (!hasSignal && confidence < 0.3) continue;
-
-    const skillId = createId("skill");
-
-    candidates.push({
-      skillId,
-      hostname,
-      facts: [`Observed ${entry.count} successful interactions on ${hostname}`],
-      selectors,
-      routes,
-      waits,
-      traps,
-      confidence,
-      sourceRunId: runId,
-    });
+    return parseSkillProposalResponse(response.content, runId);
+  } catch {
+    return null;
   }
-
-  return candidates;
 }
 
 /**

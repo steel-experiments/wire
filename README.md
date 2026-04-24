@@ -106,28 +106,30 @@ Every run is classified into one of:
 
 ## Configuration
 
-### Model Selection
+### LLM Selection
 
-Wire resolves the LLM model from multiple sources, in priority order:
+Wire resolves LLM settings from multiple sources, in priority order:
 
-1. `--model <model-id>` CLI flag
-2. `WIRE_MODEL` environment variable
-3. `model` field in project `wire.json`
-4. `model` field in `~/.wire/config.json` (user-level default)
-5. Provider default (`gpt-5.4-mini` for OpenAI, `claude-sonnet-4-6` for Anthropic)
+1. `--provider <provider>` and `--model <model-id>` CLI flags
+2. `WIRE_PROVIDER` and `WIRE_MODEL` environment variables
+3. `llm.provider` and `llm.model` in project `wire.json`
+4. `llm.provider` and `llm.model` in `~/.wire/config.json`
+5. Provider default model (`gpt-5.4-mini` for OpenAI, `claude-sonnet-4-6` for Anthropic)
+
+If both OpenAI and Anthropic keys are configured, Wire requires an explicit provider or a model that clearly implies one. It will reject mismatched pairs such as `provider=anthropic` with `model=gpt-5.4-mini`.
 
 ```bash
-# CLI flag (highest priority)
-wire run --objective "Open example.com" --model gpt-5.4-mini
+# CLI flags (highest priority)
+wire run --objective "Open example.com" --provider openai --model gpt-5.4-mini
 
 # Environment variable
-WIRE_MODEL=claude-sonnet-4-6 wire run --objective "Open example.com"
+WIRE_PROVIDER=anthropic WIRE_MODEL=claude-sonnet-4-6 wire run --objective "Open example.com"
 
 # Project-level config: wire.json in project root
-echo '{"model": "gpt-5.4-mini"}' > wire.json
+echo '{"llm":{"provider":"openai","model":"gpt-5.4-mini"}}' > wire.json
 
 # User-level default: ~/.wire/config.json
-mkdir -p ~/.wire && echo '{"model": "claude-sonnet-4-6"}' > ~/.wire/config.json
+mkdir -p ~/.wire && echo '{"llm":{"provider":"anthropic","model":"claude-sonnet-4-6"}}' > ~/.wire/config.json
 ```
 
 ### Environment Variables
@@ -135,5 +137,6 @@ mkdir -p ~/.wire && echo '{"model": "claude-sonnet-4-6"}' > ~/.wire/config.json
 - `STEEL_API_KEY` — Steel browser API key (required for Steel provider)
 - `OPENAI_API_KEY` — OpenAI API key (for LLM-powered agent turns)
 - `ANTHROPIC_API_KEY` — Anthropic API key (alternative LLM provider)
+- `WIRE_PROVIDER` — Override the LLM provider (`openai` or `anthropic`)
 - `WIRE_MODEL` — Override the LLM model
 - `WIRE_ROOT` — Storage root directory (default: `.wire`)

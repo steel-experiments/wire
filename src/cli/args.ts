@@ -1,20 +1,22 @@
 import type { TaskMode } from "../shared/types.js";
+import type { LlmProvider } from "./config.js";
 
 export interface CliArgs {
-  command: "run" | "review" | "list" | "approve";
+  command: "run" | "review" | "result" | "list" | "approve";
   taskFile?: string;
   objective?: string;
   mode?: TaskMode;
   runId?: string;
   taskId?: string;
   profileId?: string;
+  provider?: LlmProvider;
   model?: string;
   maxSteps?: number;
   skillDir?: string;
   help?: boolean;
 }
 
-const VALID_COMMANDS = new Set(["run", "review", "list", "approve"]);
+const VALID_COMMANDS = new Set(["run", "review", "result", "list", "approve"]);
 
 export function parseArgs(argv: string[]): CliArgs {
   const args = argv.slice(2); // drop node and script path
@@ -90,6 +92,16 @@ export function parseArgs(argv: string[]): CliArgs {
       continue;
     }
 
+    if (arg === "--provider") {
+      i++;
+      const val = args[i];
+      if (val === "openai" || val === "anthropic") {
+        result.provider = val;
+      }
+      i++;
+      continue;
+    }
+
     if (arg === "--model") {
       i++;
       const val = args[i];
@@ -147,6 +159,7 @@ export function formatHelp(): string {
     "Commands:",
     "  run       Execute a task (default)",
     "  review    Review a completed run",
+    "  result    Print the final result for a run",
     "  list      List tasks or runs",
     "  approve   Approve pending actions",
     "",
@@ -155,6 +168,7 @@ export function formatHelp(): string {
     "  --task-file <path>       Load task from a JSON file",
     "  --mode <mode>            Task mode: task | investigate | experiment",
     "  --profile <profile-id>   Browser profile to use",
+    "  --provider <provider>    LLM provider: openai | anthropic",
     "  --model <model-id>       LLM model to use (e.g. gpt-5.4-mini, claude-sonnet-4-6)",
     "  --max-steps <n>          Maximum agent steps",
     "  --skill-dir <path>       Directory of skill definitions",
@@ -162,6 +176,9 @@ export function formatHelp(): string {
     "Review options:",
     "  --run-id <id>            Run to review",
     "  --task-id <id>           Review all runs for a task",
+    "",
+    "Result options:",
+    "  --run-id <id>            Run whose final result should be printed",
     "",
     "List options:",
     "  --mode <mode>            Filter by task mode",
