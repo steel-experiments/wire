@@ -23,6 +23,7 @@ function makeInput(overrides: Partial<ClassificationInput> = {}): Classification
     mode: "task" as TaskMode,
     events: [],
     successCriteria: [],
+    objective: "get the answer",
     errorCount: 0,
     authWallHit: false,
     policyDenied: false,
@@ -181,13 +182,45 @@ describe("classifyRun", () => {
 
   it("classifies recovered to task-complete with answer artifact in task mode", () => {
     const events = [
-      makeEvent("code-result", { ok: true, stdout: "result" }),
+      makeEvent("code-result", { ok: true, stdout: "the answer" }),
       makeEvent("code-result", { ok: false, stderr: "error" }),
       makeEvent("artifact", { kind: "answer", content: "final answer" }),
     ];
     const result = classifyRun(makeInput({ mode: "task", events, errorCount: 0 }));
     assert.equal(result.kind, "task-complete");
     assert.equal(result.confidence, 0.7);
+  });
+
+  it("downgrades task-complete to partial-success when output does not address objective", () => {
+    const events = [
+      makeEvent("code-result", { ok: true, stdout: '{"title":"Booking.com","url":"https://www.booking.com/"}' }),
+      makeEvent("artifact", { kind: "json-output", content: '{"title":"Booking.com"}' }),
+    ];
+    const result = classifyRun(makeInput({
+      mode: "task",
+      events,
+      errorCount: 0,
+      objective: "search for hotels in San Francisco and extract names and prices",
+    }));
+    assert.equal(result.kind, "partial-success");
+    assert.ok(result.confidence < 0.6);
+    assert.ok(result.notes?.some((n) => /does not.*address/i.test(n)));
+  });
+
+  it("downgrades recovered task-complete when output does not address objective", () => {
+    const events = [
+      makeEvent("code-result", { ok: true, stdout: "some unrelated data" }),
+      makeEvent("code-result", { ok: false, stderr: "error" }),
+      makeEvent("artifact", { kind: "answer", content: "unrelated data" }),
+    ];
+    const result = classifyRun(makeInput({
+      mode: "task",
+      events,
+      errorCount: 0,
+      objective: "search for hotels in San Francisco and extract names and prices",
+    }));
+    assert.equal(result.kind, "partial-success");
+    assert.ok(result.notes?.some((n) => /does not.*address/i.test(n)));
   });
 
   it("classifies site-error when all code execs failed", () => {

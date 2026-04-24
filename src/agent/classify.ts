@@ -1,6 +1,79 @@
 import type { RunClassification, RunClassificationKind, TaskMode, TraceEvent } from "../shared/types.js";
 
 // ---------------------------------------------------------------------------
+// Objective relevance check
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract keywords from a string: lowercase alphanumeric tokens of 3+ chars.
+ */
+function objectiveKeywords(text: string): Set<string> {
+  const matches = text.match(/[a-z0-9]{3,}/giu) ?? [];
+  const STOP = new Set(["the", "and", "for", "with", "from", "this", "that", "then", "than", "are", "was", "has", "have", "been", "will", "would", "could", "should", "into", "about", "after", "their", "them", "they", "when", "what", "which", "extract", "return", "using", "page"]);
+  return new Set(matches.map((m) => m.toLowerCase()).filter((w) => !STOP.has(w)));
+}
+
+/**
+ * Extract the last meaningful result text from the trace.
+ */
+function extractFinalResultText(events: TraceEvent[]): string | undefined {
+  // Check the last code-result with output
+  const lastResult = [...events].reverse().find((e) =>
+    e.kind === "code-result" &&
+    e.payload.ok === true &&
+    (
+      (typeof e.payload.stdout === "string" && e.payload.stdout.trim().length > 0) ||
+      e.payload.returnValue !== undefined
+    ),
+  );
+
+  if (lastResult) {
+    const stdout = lastResult.payload.stdout;
+    if (typeof stdout === "string" && stdout.trim().length > 0) {
+      return stdout;
+    }
+    const rv = lastResult.payload.returnValue;
+    if (rv !== undefined) {
+      return typeof rv === "string" ? rv : JSON.stringify(rv);
+    }
+  }
+
+  // Check the last note artifact
+  const lastNote = [...events].reverse().find((e) =>
+    e.kind === "artifact" &&
+    e.payload.kind === "note" &&
+    typeof e.payload.content === "string" &&
+    (e.payload.content as string).trim().length > 0,
+  );
+
+  if (lastNote && typeof lastNote.payload.content === "string") {
+    return lastNote.payload.content;
+  }
+
+  return undefined;
+}
+
+/**
+ * Check whether the extracted result plausibly addresses the objective.
+ * Returns true if at least one objective keyword appears in the result text.
+ */
+function resultAddressesObjective(resultText: string | undefined, objective: string): boolean {
+  if (!resultText || !objective) return true; // no objective = no gate
+
+  const objWords = objectiveKeywords(objective);
+  if (objWords.size === 0) return true;
+
+  const resultLower = resultText.toLowerCase();
+  for (const word of objWords) {
+    if (resultLower.includes(word)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Run classification from trace evidence
 // ---------------------------------------------------------------------------
 
@@ -8,6 +81,7 @@ export interface ClassificationInput {
   mode: TaskMode;
   events: TraceEvent[];
   successCriteria: string[];
+  objective?: string;
   errorCount: number;
   authWallHit: boolean;
   policyDenied: boolean;
@@ -19,6 +93,7 @@ export function classifyRun(input: ClassificationInput): RunClassification {
   const {
     mode,
     events,
+    objective,
     errorCount,
     authWallHit,
     policyDenied,
@@ -154,6 +229,14 @@ export function classifyRun(input: ClassificationInput): RunClassification {
       terminalEvent.payload.returnValue !== undefined
     );
 
+  // In task mode, check whether the extracted result addresses the objective.
+  // This prevents classifying runs as "task-complete" when the agent extracted
+  // unrelated content (e.g. homepage text instead of search results).
+  // In investigate/experiment mode, skip this check — the objective is exploratory.
+  const objectiveRelevant = mode === "task" && objective;
+  const finalResultText = extractFinalResultText(events);
+  const addressesObjective = !objectiveRelevant || resultAddressesObjective(finalResultText, objective!);
+
   if (codeSuccessCount > 0 && codeFailCount === 0) {
     const hasAnswerArtifact = artifactCount > 0 || terminalEventHasExtractedAnswer;
     const taskModeHasCompletionEvidence = mode === "task"
@@ -161,14 +244,22 @@ export function classifyRun(input: ClassificationInput): RunClassification {
       : hasEvidence && (terminalEventIsEvidence || terminalEventHasExtractedAnswer);
 
     if (taskModeHasCompletionEvidence) {
-      if (errorCount > 0) {
-        return {
-          kind: "task-complete",
-          confidence: 0.7,
-          notes: [`Recovered after ${errorCount} error${errorCount === 1 ? "" : "s"}`],
-        };
+      if (addressesObjective) {
+        if (errorCount > 0) {
+          return {
+            kind: "task-complete",
+            confidence: 0.7,
+            notes: [`Recovered after ${errorCount} error${errorCount === 1 ? "" : "s"}`],
+          };
+        }
+        return { kind: "task-complete", confidence: 0.85 };
       }
-      return { kind: "task-complete", confidence: 0.85 };
+      // Has output but it doesn't address the objective
+      return {
+        kind: "partial-success",
+        confidence: 0.55,
+        notes: ["Extracted output does not appear to address the task objective"],
+      };
     }
 
     const missingEvidenceNote = mode === "task"
@@ -185,11 +276,21 @@ export function classifyRun(input: ClassificationInput): RunClassification {
   // Partial success — but if the run recovered and has a real answer artifact, count it complete
   if (codeSuccessCount > 0 && codeFailCount > 0) {
     const hasAnswerArtifact = artifactCount > 0 && codeSuccessWithOutputCount > 0;
-    if (mode === "task" && hasAnswerArtifact) {
+    if (mode === "task" && hasAnswerArtifact && addressesObjective) {
       return {
         kind: "task-complete",
         confidence: 0.7,
         notes: [`Recovered after ${codeFailCount} failed code execution${codeFailCount === 1 ? "" : "s"}`],
+      };
+    }
+    if (mode === "task" && hasAnswerArtifact && !addressesObjective) {
+      return {
+        kind: "partial-success",
+        confidence: 0.55,
+        notes: [
+          `Recovered after ${codeFailCount} failed code execution${codeFailCount === 1 ? "" : "s"}`,
+          "Extracted output does not appear to address the task objective",
+        ],
       };
     }
 

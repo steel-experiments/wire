@@ -495,6 +495,7 @@ export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): Lo
     mode: state.task.mode,
     events: state.events,
     successCriteria: state.task.successCriteria,
+    objective: state.task.objective,
     errorCount,
     authWallHit: options.authWallHit ?? false,
     policyDenied: options.policyDenied ?? false,

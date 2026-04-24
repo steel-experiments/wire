@@ -194,14 +194,33 @@ export class SteelProvider implements BrowserProvider {
 
   async createSession(input: CreateSessionInput = {}): Promise<BrowserSession> {
     const body = buildCreateSessionBody(input);
-    const steel = await steelFetch<SteelSessionResponse>(
-      this.baseUrl,
-      this.apiKey,
-      "/sessions",
-      { method: "POST", body: JSON.stringify(body) },
-    );
+    const maxRetries = 3;
+    let lastError: unknown;
 
-    return toBrowserSession(steel, input.region);
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const steel = await steelFetch<SteelSessionResponse>(
+          this.baseUrl,
+          this.apiKey,
+          "/sessions",
+          { method: "POST", body: JSON.stringify(body) },
+        );
+        return toBrowserSession(steel, input.region);
+      } catch (err) {
+        lastError = err;
+        const status = err instanceof SteelApiError ? err.status : 0;
+        // Only retry on transient errors: 500+ or network failures (status 0)
+        if (status !== 0 && status < 500) {
+          throw err;
+        }
+        if (attempt < maxRetries) {
+          const delay = 500 * Math.pow(2, attempt);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    throw lastError;
   }
 
   async getSession(sessionId: SessionId): Promise<BrowserSession> {
