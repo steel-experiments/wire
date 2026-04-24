@@ -10,6 +10,7 @@ export const SECRET_PATTERNS = [
   /token[_-]?[a-zA-Z0-9]{16,}/giu,
   /password\s*[:=]\s*\S+/giu,
   /bearer\s+[a-zA-Z0-9._-]+/giu,
+  /apiKey=[^&\s]+/giu,
 ];
 
 // ---------------------------------------------------------------------------

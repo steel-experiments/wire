@@ -27,13 +27,25 @@ import {
   type LoopResult,
   type AgentTurnFn,
 } from "./loop.js";
-import { safeParseBoundary, proposedActionSchema } from "../shared/schemas.js";
 import { assembleSystemPrompt, assembleUserPrompt, type ContextBundle } from "./context.js";
 import { createPlan, planToContext, advancePlanBy, type TaskPlan } from "./planning.js";
 import { observeBrowser } from "../browser/observe.js";
 import { detectAuthWall } from "../profiles/auth.js";
 import { llmProposeSkill, generateSkillProposal, promoteSkill } from "../skills/promote.js";
 import { findMatchingSkillDocs } from "../skills/loader.js";
+import { parseActionFromLlm } from "./llm-parse.js";
+import {
+  latestObservation,
+  latestError,
+  latestCodeResult,
+  hasRecordedTaskArtifact,
+  hasExtractedTaskResult,
+  hasAttemptedExtraction,
+  hasMeaningfulProgress,
+  buildFailureSummary,
+  isRecoverableStepError,
+  buildGenericExtractionAction,
+} from "./state-helpers.js";
 
 // ---------------------------------------------------------------------------
 // RuntimeConfig — what the runtime needs to run
@@ -48,17 +60,6 @@ export interface RuntimeConfig {
   sessionInput?: CreateSessionInput;
   onSessionCreated?: (session: BrowserSession) => Promise<void> | void;
 }
-
-const ACTION_KINDS = new Set<ProposedAction["kind"]>([
-  "observe",
-  "exec",
-  "raw",
-  "request-approval",
-  "branch-experiment",
-  "load-skill",
-  "propose-skill",
-  "finish",
-]);
 
 function hostnameFromState(state: LoopState): string | undefined {
   const observation = latestObservation(state);
@@ -274,144 +275,6 @@ export function defaultAgentTurn(llmProvider?: LLMProvider): AgentTurnFn {
   };
 }
 
-// ---------------------------------------------------------------------------
-// parseActionFromLlm — extract a ProposedAction from LLM text output
-// ---------------------------------------------------------------------------
-
-function parseActionFromLlm(content: string, state: LoopState): ProposedAction {
-  // Try to find a JSON action block in the response
-  const jsonMatch = content.match(/```json\s*([\s\S]*?)```/u);
-  const candidates = [
-    jsonMatch?.[1],
-    content.trim(),
-    extractFirstJsonObject(content),
-  ];
-
-  for (const candidate of candidates) {
-    if (!candidate) {
-      continue;
-    }
-
-    const parsed = tryParseAction(candidate);
-    if (parsed) {
-      return parsed;
-    }
-  }
-
-  const hasObservation = state.events.some((event) => event.kind === "observation");
-
-  // Bias toward gathering evidence instead of silently finishing on malformed output.
-  if (!hasObservation) {
-    return {
-      kind: "observe",
-      summary: "Observe current browser state",
-    };
-  }
-
-  return {
-    kind: "finish",
-    summary: `Model returned an invalid action payload: ${content.slice(0, 400)}`,
-  };
-}
-
-function tryParseAction(content: string): ProposedAction | undefined {
-  try {
-    const parsed = JSON.parse(content);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      return undefined;
-    }
-
-    // Validate kind is a known action kind
-    if (typeof parsed.kind !== "string" || !ACTION_KINDS.has(parsed.kind as ProposedAction["kind"])) {
-      return undefined;
-    }
-    if (typeof parsed.summary !== "string") {
-      return undefined;
-    }
-
-    // Use schema validation for the full action shape
-    const result = safeParseBoundary(proposedActionSchema, parsed, "llm-action");
-    if (!result.success) {
-      return undefined;
-    }
-
-    return result.data as ProposedAction;
-  } catch {
-    return undefined;
-  }
-}
-
-function extractFirstJsonObject(content: string): string | undefined {
-  const start = content.indexOf("{");
-  if (start === -1) return undefined;
-
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  for (let i = start; i < content.length; i++) {
-    const ch = content[i];
-    if (escape) { escape = false; continue; }
-    if (ch === "\\") { escape = true; continue; }
-    if (ch === '"') { inString = !inString; continue; }
-    if (inString) continue;
-    if (ch === "{") depth++;
-    if (ch === "}") depth--;
-    if (depth === 0) return content.slice(start, i + 1);
-  }
-  return undefined;
-}
-
-function latestObservation(state: LoopState): TraceEvent | undefined {
-  return [...state.events].reverse().find((event) => event.kind === "observation");
-}
-
-function latestError(state: LoopState): TraceEvent | undefined {
-  return [...state.events].reverse().find((event) => event.kind === "error");
-}
-
-function hasRecordedTaskArtifact(state: LoopState): boolean {
-  return state.events.some((event) =>
-    event.kind === "artifact" &&
-    typeof event.payload.kind === "string" &&
-    typeof event.payload.content === "string" &&
-    event.payload.content.trim().length > 0
-  );
-}
-
-function latestCodeResult(state: LoopState): TraceEvent | undefined {
-  return [...state.events].reverse().find((event) => event.kind === "code-result");
-}
-
-function hasExtractedTaskResult(state: LoopState): boolean {
-  const result = latestCodeResult(state);
-  if (!result || result.payload.ok !== true) {
-    return false;
-  }
-
-  return (
-    (typeof result.payload.stdout === "string" && result.payload.stdout.trim().length > 0) ||
-    result.payload.returnValue !== undefined
-  );
-}
-
-function hasAttemptedExtraction(state: LoopState): boolean {
-  return state.events.some((event) =>
-    event.kind === "code-exec" &&
-    typeof event.payload.code === "string" &&
-    event.payload.code.includes("wire:extract")
-  );
-}
-
-function buildGenericExtractionAction(): ProposedAction {
-  return {
-    kind: "exec",
-    summary: "Extract current page content",
-    payload: {
-      code: "/* wire:extract */ return { title: document.title, url: location.href, text: document.body?.innerText?.slice(0, 5000) ?? '' }",
-    },
-  };
-}
-
 function appendExtractedResultArtifact(state: LoopState): void {
   const result = latestCodeResult(state);
   if (!result || result.payload.ok !== true) {
@@ -494,43 +357,6 @@ function appendTaskNoteArtifact(state: LoopState, summary: string): void {
       content: lines.join("\n"),
     },
   });
-}
-
-function hasMeaningfulProgress(state: LoopState): boolean {
-  const observations = state.events.filter((event) => event.kind === "observation");
-  const codeExecs = state.events.filter((event) => event.kind === "code-exec");
-  return observations.length > 1 || codeExecs.length > 0;
-}
-
-function buildFailureSummary(state: LoopState): string | undefined {
-  if (!hasMeaningfulProgress(state)) {
-    return undefined;
-  }
-
-  const observation = latestObservation(state);
-  const error = latestError(state);
-  const parts: string[] = [];
-
-  if (observation) {
-    const title = typeof observation.payload.title === "string" ? observation.payload.title : undefined;
-    const url = typeof observation.payload.url === "string" ? observation.payload.url : undefined;
-    if (title && url) {
-      parts.push(`Reached ${title} at ${url}`);
-    } else if (url) {
-      parts.push(`Reached ${url}`);
-    }
-  }
-
-  if (error && typeof error.payload.message === "string") {
-    parts.push(`Run stopped with error: ${error.payload.message}`);
-  }
-
-  return parts.length > 0 ? parts.join("\n") : undefined;
-}
-
-function isRecoverableStepError(message: string): boolean {
-  return /Target not found|timeout|network|ECONN|ETIMEDOUT|ENOTFOUND|fetch|Execution context was destroyed|Cannot find context/i
-    .test(message);
 }
 
 async function appendSkillProposalEvents(

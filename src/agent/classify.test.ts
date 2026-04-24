@@ -1,0 +1,239 @@
+import { describe, it } from "node:test";
+import * as assert from "node:assert/strict";
+import { createId } from "../shared/ids.js";
+import type { TraceEvent, TaskMode, JsonObject } from "../shared/types.js";
+import { classifyRun, generateOutcomeSummary, type ClassificationInput } from "./classify.js";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeEvent(kind: TraceEvent["kind"], payload: JsonObject): TraceEvent {
+  return {
+    id: createId("event"),
+    runId: createId("run"),
+    ts: new Date().toISOString(),
+    kind,
+    payload,
+  };
+}
+
+function makeInput(overrides: Partial<ClassificationInput> = {}): ClassificationInput {
+  return {
+    mode: "task" as TaskMode,
+    events: [],
+    successCriteria: [],
+    errorCount: 0,
+    authWallHit: false,
+    policyDenied: false,
+    budgetExhausted: false,
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// classifyRun
+// ---------------------------------------------------------------------------
+
+describe("classifyRun", () => {
+  it("classifies awaitingApproval as ambiguous", () => {
+    const result = classifyRun(makeInput({ awaitingApproval: true }));
+    assert.equal(result.kind, "ambiguous");
+    assert.equal(result.confidence, 0.85);
+  });
+
+  it("classifies browser-crash when session error with no recovery", () => {
+    const events = [
+      makeEvent("error", { message: "Session crashed unexpectedly" }),
+    ];
+    const result = classifyRun(makeInput({ events }));
+    assert.equal(result.kind, "browser-crash");
+    assert.equal(result.confidence, 0.85);
+  });
+
+  it("does not classify browser-crash when recovered with observation", () => {
+    const events = [
+      makeEvent("error", { message: "Session crashed unexpectedly" }),
+      makeEvent("observation", { url: "https://example.com", title: "Example" }),
+    ];
+    const result = classifyRun(makeInput({ events }));
+    assert.notEqual(result.kind, "browser-crash");
+  });
+
+  it("classifies captcha when captcha in URL", () => {
+    const events = [
+      makeEvent("observation", { url: "https://example.com/captcha", title: "Verify" }),
+    ];
+    const result = classifyRun(makeInput({ events }));
+    assert.equal(result.kind, "captcha");
+    assert.equal(result.confidence, 0.8);
+  });
+
+  it("classifies rate-limited on 429 error", () => {
+    const events = [
+      makeEvent("error", { message: "429 Too Many Requests", code: "429" }),
+    ];
+    const result = classifyRun(makeInput({ events }));
+    assert.equal(result.kind, "rate-limited");
+    assert.equal(result.confidence, 0.85);
+  });
+
+  it("classifies network-timeout on ETIMEDOUT", () => {
+    const events = [
+      makeEvent("error", { message: "ETIMEDOUT connection timed out", code: "ETIMEDOUT" }),
+    ];
+    const result = classifyRun(makeInput({ events }));
+    assert.equal(result.kind, "network-timeout");
+    assert.equal(result.confidence, 0.85);
+  });
+
+  it("classifies policyDenied as agent-error", () => {
+    const result = classifyRun(makeInput({ policyDenied: true }));
+    assert.equal(result.kind, "agent-error");
+    assert.equal(result.confidence, 0.95);
+  });
+
+  it("classifies authWallHit as blocked-auth", () => {
+    const result = classifyRun(makeInput({ authWallHit: true }));
+    assert.equal(result.kind, "blocked-auth");
+    assert.equal(result.confidence, 0.9);
+  });
+
+  it("classifies budgetExhausted as ambiguous", () => {
+    const result = classifyRun(makeInput({ budgetExhausted: true }));
+    assert.equal(result.kind, "ambiguous");
+    assert.equal(result.confidence, 0.6);
+  });
+
+  it("classifies high errors with code success as site-error", () => {
+    const events = [
+      makeEvent("code-exec", { code: "return 1" }),
+      makeEvent("code-result", { ok: true, stdout: "1" }),
+      makeEvent("code-exec", { code: "return 2" }),
+      makeEvent("code-result", { ok: true, stdout: "2" }),
+    ];
+    const result = classifyRun(makeInput({ events, errorCount: 6 }));
+    assert.equal(result.kind, "site-error");
+    assert.equal(result.confidence, 0.7);
+  });
+
+  it("classifies high errors without code success as agent-error", () => {
+    const events = [
+      makeEvent("code-exec", { code: "return 1" }),
+      makeEvent("code-result", { ok: false, stderr: "fail" }),
+      makeEvent("code-exec", { code: "return 2" }),
+      makeEvent("code-result", { ok: false, stderr: "fail" }),
+    ];
+    const result = classifyRun(makeInput({ events, errorCount: 6 }));
+    assert.equal(result.kind, "agent-error");
+    assert.equal(result.confidence, 0.7);
+  });
+
+  it("classifies task-complete in task mode with artifact and output", () => {
+    const events = [
+      makeEvent("code-result", { ok: true, stdout: "the answer" }),
+      makeEvent("artifact", { kind: "answer", content: "the answer" }),
+    ];
+    const result = classifyRun(makeInput({ mode: "task", events, errorCount: 0 }));
+    assert.equal(result.kind, "task-complete");
+    assert.equal(result.confidence, 0.85);
+  });
+
+  it("classifies task-complete with errors at lower confidence", () => {
+    const events = [
+      makeEvent("code-result", { ok: true, stdout: "the answer" }),
+      makeEvent("artifact", { kind: "answer", content: "the answer" }),
+    ];
+    const result = classifyRun(makeInput({ mode: "task", events, errorCount: 2 }));
+    assert.equal(result.kind, "task-complete");
+    assert.equal(result.confidence, 0.7);
+  });
+
+  it("classifies task-complete in investigate mode with evidence", () => {
+    const events = [
+      makeEvent("observation", { url: "https://example.com", title: "Example" }),
+      makeEvent("observation", { url: "https://example.com/page", title: "Page" }),
+      makeEvent("code-result", { ok: true, stdout: "data" }),
+      makeEvent("artifact", { kind: "note", content: "findings" }),
+    ];
+    const result = classifyRun(makeInput({ mode: "investigate", events, errorCount: 0 }));
+    assert.equal(result.kind, "task-complete");
+  });
+
+  it("classifies partial-success when code succeeds without output or artifact", () => {
+    const events = [
+      makeEvent("code-result", { ok: true }),
+    ];
+    const result = classifyRun(makeInput({ mode: "task", events, errorCount: 0 }));
+    assert.equal(result.kind, "partial-success");
+    assert.equal(result.confidence, 0.6);
+  });
+
+  it("classifies partial-success with mixed successes and failures", () => {
+    const events = [
+      makeEvent("code-result", { ok: true, stdout: "result" }),
+      makeEvent("code-result", { ok: false, stderr: "error" }),
+    ];
+    const result = classifyRun(makeInput({ mode: "task", events, errorCount: 0 }));
+    assert.equal(result.kind, "partial-success");
+    assert.equal(result.confidence, 0.6);
+  });
+
+  it("classifies recovered to task-complete with answer artifact in task mode", () => {
+    const events = [
+      makeEvent("code-result", { ok: true, stdout: "result" }),
+      makeEvent("code-result", { ok: false, stderr: "error" }),
+      makeEvent("artifact", { kind: "answer", content: "final answer" }),
+    ];
+    const result = classifyRun(makeInput({ mode: "task", events, errorCount: 0 }));
+    assert.equal(result.kind, "task-complete");
+    assert.equal(result.confidence, 0.7);
+  });
+
+  it("classifies site-error when all code execs failed", () => {
+    const events = [
+      makeEvent("code-result", { ok: false, stderr: "error" }),
+      makeEvent("code-result", { ok: false, stderr: "error" }),
+    ];
+    const result = classifyRun(makeInput({ events, errorCount: 0 }));
+    assert.equal(result.kind, "site-error");
+    assert.equal(result.confidence, 0.5);
+  });
+
+  it("classifies infra-error on E-prefix error codes", () => {
+    const events = [
+      makeEvent("error", { message: "Connection refused", code: "ECONNREFUSED" }),
+    ];
+    const result = classifyRun(makeInput({ events, errorCount: 0 }));
+    assert.equal(result.kind, "infra-error");
+    assert.equal(result.confidence, 0.8);
+  });
+
+  it("defaults to ambiguous with low confidence", () => {
+    const result = classifyRun(makeInput());
+    assert.equal(result.kind, "ambiguous");
+    assert.equal(result.confidence, 0.3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateOutcomeSummary
+// ---------------------------------------------------------------------------
+
+describe("generateOutcomeSummary", () => {
+  it("formats classification and event stats", () => {
+    const classification = { kind: "task-complete" as const, confidence: 0.85 };
+    const events = [
+      makeEvent("code-exec", { code: "x" }),
+      makeEvent("code-result", { ok: true, stdout: "x" }),
+      makeEvent("observation", { url: "https://example.com", title: "Example" }),
+      makeEvent("error", { message: "oops" }),
+    ];
+    const summary = generateOutcomeSummary(classification, events);
+    assert.ok(summary.includes("task-complete"));
+    assert.ok(summary.includes("0.85"));
+    assert.ok(summary.includes("1 code executions"));
+    assert.ok(summary.includes("1 observations"));
+    assert.ok(summary.includes("Errors: 1"));
+  });
+});
