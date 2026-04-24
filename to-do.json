@@ -45,7 +45,7 @@
       "id": "T002",
       "title": "Define shared core types, schemas, IDs, and boundary validators",
       "priority": 1,
-      "status": "todo",
+      "status": "done",
       "details": "Implement the shared contracts for Task, Run, Session, Profile, Skill, Artifact, Hypothesis, approvals, and policy decisions with runtime validation only at system boundaries.",
       "steps": [
         "Author TypeScript interfaces in shared types modules.",
@@ -58,15 +58,17 @@
         "schemas"
       ],
       "files": [
+        "src/index.ts",
         "src/shared/types.ts",
         "src/shared/schemas.ts",
-        "src/shared/ids.ts"
+        "src/shared/ids.ts",
+        "src/shared/shared.test.ts"
       ],
       "depends_on": [
         "T001"
       ],
       "created_at": "2026-04-24T09:04:46Z",
-      "updated_at": "2026-04-24T09:04:46Z"
+      "updated_at": "2026-04-24T09:15:59Z"
     },
     {
       "id": "T003",
