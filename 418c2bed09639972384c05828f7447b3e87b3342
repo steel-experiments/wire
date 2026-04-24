@@ -1,0 +1,10 @@
+# Context
+
+## Background
+Repository setup requested for publishing Wire under steel-experiments as a private GitHub repository.
+
+## Why This Way
+Added Apache-2.0 licensing, repository hygiene files, environment example, and a CLAUDE.md symlink to AGENTS.md so coding agents share the same project instructions. The backlog was already rewritten to require MANIFESTO.md and SPECS.md review before task work.
+
+## Gotchas
+CLAUDE.md is a symlink, not a duplicate file. Generated runtime evidence should stay out of source control via .gitignore unless intentionally promoted as fixtures or docs.
