@@ -1,8 +1,16 @@
 node_modules/
 dist/
+coverage/
+
 .env
 .env.*
 !.env.example
-coverage/
+
+.wire/
+artifacts/
+runs/
+tmp/
+
 .DS_Store
 pnpm-debug.log*
+*.log
