@@ -13,6 +13,7 @@ export interface CliArgs {
   model?: string;
   maxSteps?: number;
   skillDir?: string;
+  json?: boolean;
   help?: boolean;
 }
 
@@ -135,6 +136,12 @@ export function parseArgs(argv: string[]): CliArgs {
       continue;
     }
 
+    if (arg === "--json") {
+      result.json = true;
+      i++;
+      continue;
+    }
+
     // Positional: the command
     if (arg !== undefined && VALID_COMMANDS.has(arg)) {
       result.command = arg as CliArgs["command"];
@@ -187,6 +194,7 @@ export function formatHelp(): string {
     "  --run-id <id>            Run with pending approvals (required)",
     "",
     "General:",
+    "  --json                   Output machine-readable JSON",
     "  --help, -h               Show this help message",
   ].join("\n");
 }

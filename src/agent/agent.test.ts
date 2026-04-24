@@ -357,7 +357,7 @@ test("executeStep handles finish action without events", async () => {
 // executeStep — thought/default action
 // ---------------------------------------------------------------------------
 
-test("executeStep handles unknown action kind as thought-summary", async () => {
+test("executeStep handles unknown action kind as thought-summary after policy check", async () => {
   const task = makeTask();
   const state = createLoopState(task, makeSessionId());
   const provider = createMockProvider();
@@ -365,14 +365,16 @@ test("executeStep handles unknown action kind as thought-summary", async () => {
 
   const result = await executeStep(
     state,
-    { kind: "plan", summary: "Thinking about next step" },
+    { kind: "plan" as "observe", summary: "Thinking about next step" },
     provider,
     policy,
   );
 
   assert.equal(result.state.stepCount, 1);
-  assert.equal(result.state.events.length, 1);
-  assert.equal(result.state.events[0]!.kind, "thought-summary");
+  // Non-trivial actions now get a policy-check + the default thought-summary
+  assert.equal(result.state.events.length, 2);
+  assert.equal(result.state.events[0]!.kind, "policy-check");
+  assert.equal(result.state.events[1]!.kind, "thought-summary");
 });
 
 test("defaultAgentTurn falls back to observe when LLM returns prose", async () => {
@@ -870,7 +872,7 @@ test("executeTask forces a generic extraction pass before finishing task mode", 
       if (execCount === 1) {
         return { ok: true, durationMs: 10 };
       }
-      assert.match(input.code, /wire:extract-result/u);
+      assert.match(input.code, /wire:extract/u);
       return {
         ok: true,
         durationMs: 10,
@@ -1381,4 +1383,251 @@ test("generateOutcomeSummary includes error count", () => {
   const summary = generateOutcomeSummary({ kind: "agent-error", confidence: 0.7 }, events);
 
   assert.ok(summary.includes("Errors: 1"));
+});
+
+// ---------------------------------------------------------------------------
+// executeStep — raw CDP action policy gate
+// ---------------------------------------------------------------------------
+
+test("executeStep handles raw CDP action and triggers policy check", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  const provider = createMockProvider({
+    async raw() {
+      return { result: { value: 2 } };
+    },
+  });
+  const policy = createMockPolicyEngine();
+
+  const result = await executeStep(
+    state,
+    {
+      kind: "raw",
+      summary: "Send CDP command",
+      payload: { method: "Runtime.evaluate", params: { expression: "1+1" } },
+    },
+    provider,
+    policy,
+  );
+
+  assert.equal(result.policyDenied, false);
+  assert.equal(result.state.stepCount, 1);
+  // policy-check + code-exec + code-result = 3 events
+  assert.equal(result.state.events.length, 3);
+  assert.equal(result.state.events[0]!.kind, "policy-check");
+  assert.equal(result.state.events[1]!.kind, "code-exec");
+  assert.equal(result.state.events[2]!.kind, "code-result");
+});
+
+test("executeStep denies raw CDP action when policy denies it", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  const provider = createMockProvider();
+  const policy = createMockPolicyEngine({
+    check(actionId) {
+      return {
+        id: createId("policy"),
+        actionId,
+        result: "deny",
+        reason: "Raw CDP access not allowed",
+      };
+    },
+  });
+
+  const result = await executeStep(
+    state,
+    {
+      kind: "raw",
+      summary: "Send dangerous CDP command",
+      payload: { method: "Browser.close" },
+    },
+    provider,
+    policy,
+  );
+
+  assert.equal(result.policyDenied, true);
+  assert.equal(result.state.events.length, 1);
+  assert.equal(result.state.events[0]!.kind, "policy-check");
+  assert.equal(result.state.stepCount, 0);
+});
+
+// ---------------------------------------------------------------------------
+// classifyRun — new failure classification kinds
+// ---------------------------------------------------------------------------
+
+test("classifyRun returns browser-crash when session error detected", () => {
+  const events: TraceEvent[] = [
+    {
+      id: createId("event"),
+      runId: createId("run"),
+      ts: new Date().toISOString(),
+      kind: "error",
+      payload: { message: "Session crashed unexpectedly", code: "session_crash" },
+    },
+  ];
+
+  const result = classifyRun({
+    mode: "task",
+    events,
+    successCriteria: [],
+    errorCount: 1,
+    authWallHit: false,
+    policyDenied: false,
+    budgetExhausted: false,
+  });
+
+  assert.equal(result.kind, "browser-crash");
+  assert.ok(result.confidence >= 0.8);
+});
+
+test("classifyRun returns captcha when captcha indicators in observation", () => {
+  const events: TraceEvent[] = [
+    {
+      id: createId("event"),
+      runId: createId("run"),
+      ts: new Date().toISOString(),
+      kind: "observation",
+      payload: { url: "https://example.com/recaptcha", title: "Recaptcha Challenge" },
+    },
+  ];
+
+  const result = classifyRun({
+    mode: "task",
+    events,
+    successCriteria: [],
+    errorCount: 0,
+    authWallHit: false,
+    policyDenied: false,
+    budgetExhausted: false,
+  });
+
+  assert.equal(result.kind, "captcha");
+  assert.ok(result.confidence >= 0.7);
+});
+
+test("classifyRun returns rate-limited when 429 error detected", () => {
+  const events: TraceEvent[] = [
+    {
+      id: createId("event"),
+      runId: createId("run"),
+      ts: new Date().toISOString(),
+      kind: "error",
+      payload: { message: "429 Too Many Requests", code: "HTTP429" },
+    },
+  ];
+
+  const result = classifyRun({
+    mode: "task",
+    events,
+    successCriteria: [],
+    errorCount: 1,
+    authWallHit: false,
+    policyDenied: false,
+    budgetExhausted: false,
+  });
+
+  assert.equal(result.kind, "rate-limited");
+  assert.ok(result.confidence >= 0.8);
+});
+
+test("classifyRun returns network-timeout when ETIMEDOUT detected", () => {
+  const events: TraceEvent[] = [
+    {
+      id: createId("event"),
+      runId: createId("run"),
+      ts: new Date().toISOString(),
+      kind: "error",
+      payload: { message: "connection timed out", code: "ETIMEDOUT" },
+    },
+  ];
+
+  const result = classifyRun({
+    mode: "task",
+    events,
+    successCriteria: [],
+    errorCount: 1,
+    authWallHit: false,
+    policyDenied: false,
+    budgetExhausted: false,
+  });
+
+  assert.equal(result.kind, "network-timeout");
+  assert.ok(result.confidence >= 0.8);
+});
+
+// ---------------------------------------------------------------------------
+// tryParseAction — malformed LLM payload rejection
+// ---------------------------------------------------------------------------
+
+test("defaultAgentTurn rejects LLM payload with missing kind", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  const provider = createMockProvider();
+  const turn = defaultAgentTurn({
+    async chat() {
+      return {
+        content: '{"summary":"Do something","payload":{}}',
+        model: "test-model",
+      };
+    },
+  });
+
+  const action = await turn(state, provider);
+
+  // Missing kind should fall back to observe (no prior observation) or finish
+  assert.ok(action.kind === "observe" || action.kind === "finish");
+});
+
+test("defaultAgentTurn rejects LLM payload with unknown kind", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  const provider = createMockProvider();
+  const turn = defaultAgentTurn({
+    async chat() {
+      return {
+        content: '{"kind":"unknown-action","summary":"Do something"}',
+        model: "test-model",
+      };
+    },
+  });
+
+  const action = await turn(state, provider);
+
+  assert.ok(action.kind === "observe" || action.kind === "finish");
+});
+
+test("defaultAgentTurn rejects non-object LLM payload (bare function string)", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  const provider = createMockProvider();
+  const turn = defaultAgentTurn({
+    async chat() {
+      return {
+        content: 'function() { return "malicious"; }',
+        model: "test-model",
+      };
+    },
+  });
+
+  const action = await turn(state, provider);
+
+  assert.ok(action.kind === "observe" || action.kind === "finish");
+});
+
+test("defaultAgentTurn rejects array LLM payload", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  const provider = createMockProvider();
+  const turn = defaultAgentTurn({
+    async chat() {
+      return {
+        content: '[{"kind":"observe","summary":"Array payload"}]',
+        model: "test-model",
+      };
+    },
+  });
+
+  const action = await turn(state, provider);
+
+  assert.ok(action.kind === "observe" || action.kind === "finish");
 });

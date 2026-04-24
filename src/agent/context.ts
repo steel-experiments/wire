@@ -50,20 +50,32 @@ export interface ContextBundle {
 // Prompt assembly
 // ---------------------------------------------------------------------------
 
-const SECRET_PATTERNS = [
-  /sk-[a-zA-Z0-9]{20,}/gu,
-  /key[_-]?[a-zA-Z0-9]{16,}/giu,
-  /token[_-]?[a-zA-Z0-9]{16,}/giu,
-  /password\s*[:=]\s*\S+/giu,
-  /bearer\s+[a-zA-Z0-9._-]+/giu,
-];
+import { redactSecrets } from "../shared/redact.js";
 
-function redactSecrets(text: string): string {
-  let result = text;
-  for (const pattern of SECRET_PATTERNS) {
-    result = result.replace(pattern, "[REDACTED]");
-  }
-  return result;
+// ---------------------------------------------------------------------------
+// Context assembly types
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Skill content sanitization — strip injection patterns before LLM injection
+// ---------------------------------------------------------------------------
+
+const INJECTION_LINE_PATTERN = /^(system|ignore previous|disregard|forget)\b/iu;
+const SYSTEM_TAG_PATTERN = /<system>[\s\S]*?<\/system>/giu;
+const SKILL_GUIDANCE_CHAR_LIMIT = 300;
+
+export function sanitizeSkillContent(text: string): string {
+  // Strip <system>...</system> blocks
+  let result = text.replace(SYSTEM_TAG_PATTERN, "");
+
+  // Strip injection-attempt lines
+  result = result
+    .split("\n")
+    .filter((line) => !INJECTION_LINE_PATTERN.test(line))
+    .join("\n");
+
+  // Cap at char limit
+  return result.slice(0, SKILL_GUIDANCE_CHAR_LIMIT);
 }
 
 /**
@@ -127,7 +139,7 @@ export function assembleUserPrompt(context: ContextBundle): string {
       (s) => {
         const base = `- ${s.id} (${s.scope}): ${redactSecrets(s.matchReason)}`;
         if (s.guidance && s.guidance.length > 0) {
-          return `${base}\n  Guidance: ${redactSecrets(s.guidance)}`;
+          return `${base}\n  Guidance: ${redactSecrets(sanitizeSkillContent(s.guidance))}`;
         }
         return base;
       },

@@ -30,6 +30,61 @@ export function classifyRun(input: ClassificationInput): RunClassification {
     return { kind: "ambiguous", confidence: 0.85, notes: ["Awaiting human approval"] };
   }
 
+  // Check for specific failure patterns in error events
+  const errorEvents = events.filter((e) => e.kind === "error");
+
+  // Browser crash: session errors with crash/disconnect indicators, no subsequent observations
+  const hasBrowserCrash = errorEvents.some((e) => {
+    const msg = String(e.payload.message ?? "").toLowerCase();
+    const code = String(e.payload.code ?? "").toLowerCase();
+    return (
+      (msg.includes("session") && (msg.includes("crashed") || msg.includes("disconnected") || msg.includes("target closed"))) ||
+      code.includes("session") && code.includes("crash")
+    );
+  });
+  if (hasBrowserCrash) {
+    const hasSubsequentObservation = events.some((e, i) => {
+      const crashIdx = errorEvents.findIndex((crash) => events.indexOf(crash) < i);
+      return e.kind === "observation" && crashIdx !== -1;
+    });
+    if (!hasSubsequentObservation) {
+      return { kind: "browser-crash", confidence: 0.85, notes: ["Browser session crashed or disconnected"] };
+    }
+  }
+
+  // Captcha: observation content containing captcha indicators
+  const captchaObservation = events.find((e) => {
+    if (e.kind !== "observation") return false;
+    const text = [
+      String(e.payload.url ?? ""),
+      String(e.payload.title ?? ""),
+    ].join(" ").toLowerCase();
+    return text.includes("captcha") || text.includes("recaptcha") || text.includes("cloudflare");
+  });
+  if (captchaObservation) {
+    return { kind: "captcha", confidence: 0.8, notes: ["Captcha or anti-bot challenge detected"] };
+  }
+
+  // Rate-limited: error events with 429/rate limit indicators
+  const rateLimitedError = errorEvents.find((e) => {
+    const msg = String(e.payload.message ?? "").toLowerCase();
+    const code = String(e.payload.code ?? "");
+    return msg.includes("429") || msg.includes("rate limit") || msg.includes("too many requests") || code === "429";
+  });
+  if (rateLimitedError) {
+    return { kind: "rate-limited", confidence: 0.85, notes: ["Rate limit or 429 response detected"] };
+  }
+
+  // Network timeout: error events with ETIMEDOUT/network timeout
+  const networkTimeoutError = errorEvents.find((e) => {
+    const msg = String(e.payload.message ?? "").toLowerCase();
+    const code = String(e.payload.code ?? "");
+    return msg.includes("etimedout") || msg.includes("network timeout") || code === "ETIMEDOUT";
+  });
+  if (networkTimeoutError) {
+    return { kind: "network-timeout", confidence: 0.85, notes: ["Network timeout detected"] };
+  }
+
   // Policy denial or auth wall → specific classifications
   if (policyDenied) {
     return { kind: "agent-error", confidence: 0.95, notes: ["Policy denied further progress"] };

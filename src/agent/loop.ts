@@ -3,6 +3,7 @@ import type {
   ActionId,
   ApprovalRequest,
   JsonObject,
+  JsonValue,
   ProposedAction,
   Run,
   RunId,
@@ -21,22 +22,36 @@ import { stableJsonStringify } from "../shared/ids.js";
 
 import { observeBrowser } from "../browser/observe.js";
 import { execCode } from "../browser/exec.js";
+import { execRaw } from "../browser/raw.js";
 import { classifyRun, generateOutcomeSummary } from "./classify.js";
 import { detectAuthWall } from "../profiles/auth.js";
+import { redactJsonObject } from "../shared/redact.js";
 
 // ---------------------------------------------------------------------------
-// Loop state
+// Loop state — decomposed by time scale
 // ---------------------------------------------------------------------------
 
-export interface LoopState {
+/** Static input: task identity and browser session. */
+interface TaskContext {
   task: Task;
-  run: Run;
   sessionId: SessionId;
   loadedSkills: LoadedSkill[];
+}
+
+/** Accumulating trace: run metadata, events, timing. */
+interface RunTrace {
+  run: Run;
   events: TraceEvent[];
-  stepCount: number;
   startedAt: string;
 }
+
+/** Step counter: volatile budget tracking. */
+interface StepCounter {
+  stepCount: number;
+}
+
+/** Full loop state — composed from sub-interfaces. */
+export interface LoopState extends TaskContext, RunTrace, StepCounter {}
 
 // ---------------------------------------------------------------------------
 // Loop result
@@ -153,8 +168,8 @@ export async function executeStep(
 
   const actionId = createId("action");
 
-  // Policy check for exec actions
-  if (action.kind === "exec" && !options.skipPolicyCheck) {
+  // Policy check for non-trivial actions (everything except observe/finish)
+  if (action.kind !== "observe" && action.kind !== "finish" && !options.skipPolicyCheck) {
     const policyKind = typeof action.payload?.policyKind === "string"
       ? action.payload.policyKind
       : action.kind;
@@ -168,7 +183,7 @@ export async function executeStep(
     const decision = policyEngine.check(actionId, policyAction);
 
     // Record policy check event
-    const policyPayload: JsonObject = { actionKind: "exec", result: decision.result };
+    const policyPayload: JsonObject = { actionKind: action.kind, result: decision.result };
     if (decision.reason) {
       policyPayload.reason = decision.reason;
     }
@@ -239,7 +254,7 @@ export async function executeStep(
         obsPayload.targetId = observation.targetId;
       }
       if (observation.tabs.length > 0) {
-        obsPayload.tabs = observation.tabs;
+        obsPayload.tabs = observation.tabs as unknown as JsonValue;
       }
       if (observation.focusedElement) {
         obsPayload.focusedElement = observation.focusedElement as unknown as JsonObject;
@@ -256,7 +271,7 @@ export async function executeStep(
         runId: state.run.id,
         ts: nowIsoUtc(),
         kind: "observation",
-        payload: obsPayload,
+        payload: redactJsonObject(obsPayload),
       });
 
       authWallHit = detectAuthWall(observation).detected;
@@ -271,7 +286,7 @@ export async function executeStep(
           runId: state.run.id,
           ts: nowIsoUtc(),
           kind: "code-exec",
-          payload: { code },
+          payload: redactJsonObject({ code }),
         });
 
         const result = await execCode({
@@ -298,7 +313,7 @@ export async function executeStep(
           runId: state.run.id,
           ts: nowIsoUtc(),
           kind: "code-result",
-          payload: resultPayload,
+          payload: redactJsonObject(resultPayload),
         });
 
         // Auto-observe after navigation: when exec code navigates the page
@@ -316,7 +331,7 @@ export async function executeStep(
             title: observation.title,
           };
           if (observation.targetId) obsPayload.targetId = observation.targetId;
-          if (observation.tabs.length > 0) obsPayload.tabs = observation.tabs;
+          if (observation.tabs.length > 0) obsPayload.tabs = observation.tabs as unknown as JsonValue;
           if (observation.focusedElement) obsPayload.focusedElement = observation.focusedElement as unknown as JsonObject;
           if (observation.pageSummary) obsPayload.pageSummary = observation.pageSummary as unknown as JsonObject;
           state.events.push({
@@ -328,6 +343,44 @@ export async function executeStep(
           });
           authWallHit = detectAuthWall(observation).detected;
         }
+      }
+      break;
+    }
+
+    case "raw": {
+      const method = action.payload?.method as string;
+      if (method) {
+        state.events.push({
+          id: createId("event"),
+          runId: state.run.id,
+          ts: nowIsoUtc(),
+          kind: "code-exec",
+          payload: redactJsonObject({ rawMethod: method }),
+        });
+
+        const rawOptions: { provider: BrowserProvider; sessionId: SessionId; method: string; params?: JsonObject } = {
+          provider,
+          sessionId: state.sessionId,
+          method,
+        };
+        const params = action.payload?.params as JsonObject | undefined;
+        if (params) {
+          rawOptions.params = params;
+        }
+
+        const rawResult = await execRaw(rawOptions);
+
+        state.events.push({
+          id: createId("event"),
+          runId: state.run.id,
+          ts: nowIsoUtc(),
+          kind: "code-result",
+          payload: {
+            ok: true,
+            durationMs: 0,
+            returnValue: rawResult as unknown as import("../shared/types.js").JsonValue,
+          },
+        });
       }
       break;
     }
@@ -461,10 +514,14 @@ export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): Lo
   const finishedRun: Run = {
     ...state.run,
     status,
-    result: deriveRunResult(state.events, state.task.mode),
     classification,
     outcomeSummary,
   };
+
+  const derivedResult = deriveRunResult(state.events, state.task.mode);
+  if (derivedResult !== undefined) {
+    finishedRun.result = derivedResult;
+  }
 
   if (!options.awaitingApproval) {
     finishedRun.finishedAt = nowIsoUtc();

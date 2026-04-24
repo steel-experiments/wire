@@ -1,5 +1,5 @@
-import { parseArgs, formatHelp } from "./args.js";
-import { approveRun, runTask } from "./runner.js";
+import { parseArgs, formatHelp, type CliArgs } from "./args.js";
+import { approveRun, runTask, type RunOptions } from "./runner.js";
 import { loadConfig, resolveLlmConfig } from "./config.js";
 import { formatReview } from "../ui/review.js";
 import { loadRun, listRuns } from "../storage/runs.js";
@@ -108,7 +108,7 @@ export async function main(argv: string[]): Promise<void> {
 }
 
 async function handleRun(
-  args: { objective?: string; taskFile?: string; mode?: "task" | "investigate" | "experiment"; profileId?: string; provider?: "openai" | "anthropic"; model?: string; maxSteps?: number; skillDir?: string },
+  args: CliArgs,
 ): Promise<void> {
   if (!args.objective && !args.taskFile) {
     console.error("Error: --objective or --task-file is required for 'run'.");
@@ -144,19 +144,20 @@ async function handleRun(
     config,
   );
 
-  const opts: { objective: string; mode?: "task" | "investigate" | "experiment"; profileId?: string; provider?: "openai" | "anthropic"; model?: string; maxSteps?: number; skillDir?: string } = { objective };
+  const opts: RunOptions = { objective };
   if (args.mode) opts.mode = args.mode;
   if (args.profileId) opts.profileId = args.profileId;
   if (llm.provider) opts.provider = llm.provider;
   if (llm.model) opts.model = llm.model;
   if (args.maxSteps) opts.maxSteps = args.maxSteps;
   if (args.skillDir) opts.skillDir = args.skillDir;
+  if (args.json) opts.json = args.json;
 
   await runTask(opts);
 }
 
 async function handleReview(
-  args: { runId?: string; taskId?: string },
+  args: CliArgs,
 ): Promise<void> {
   const root = defaultStorageRoot();
 
@@ -196,30 +197,37 @@ async function handleReview(
   const artifacts = await listArtifacts(root, runId);
   const events = await listTraceEvents(root, runId);
 
-  console.log(formatReview({ run, events, artifacts }));
+  if (args.json) {
+    console.log(JSON.stringify({ run, events, artifacts }));
+  } else {
+    console.log(formatReview({ run, events, artifacts }));
+  }
 }
 
 async function handleList(
-  args: { mode?: "task" | "investigate" | "experiment" },
+  args: CliArgs,
 ): Promise<void> {
   const root = defaultStorageRoot();
+  const tasks = await listTasks(root);
+  const filteredTasks = args.mode ? tasks.filter((t) => t.mode === args.mode) : tasks;
+  const runs = await listRuns(root);
+
+  if (args.json) {
+    console.log(JSON.stringify({ tasks: filteredTasks, runs }));
+    return;
+  }
 
   console.log("=== Tasks ===");
-  const tasks = await listTasks(root);
-
-  if (tasks.length === 0) {
+  if (filteredTasks.length === 0) {
     console.log("  (no tasks)");
   } else {
-    for (const task of tasks) {
-      if (args.mode && task.mode !== args.mode) continue;
+    for (const task of filteredTasks) {
       console.log(`  ${task.id}  [${task.mode}]  ${task.title}`);
     }
   }
 
   console.log("");
   console.log("=== Runs ===");
-  const runs = await listRuns(root);
-
   if (runs.length === 0) {
     console.log("  (no runs)");
   } else {
@@ -233,7 +241,7 @@ async function handleList(
 }
 
 async function handleResult(
-  args: { runId?: string },
+  args: CliArgs,
 ): Promise<void> {
   const root = defaultStorageRoot();
 
@@ -264,11 +272,20 @@ async function handleResult(
     return;
   }
 
-  console.log(result);
+  if (args.json) {
+    console.log(JSON.stringify({
+      runId,
+      result,
+      classification: run.classification?.kind ?? "unknown",
+      status: run.status,
+    }));
+  } else {
+    console.log(result);
+  }
 }
 
 async function handleApprove(
-  args: { runId?: string },
+  args: CliArgs,
 ): Promise<void> {
   if (!args.runId) {
     console.error("Error: --run-id is required for 'approve'.");
@@ -276,5 +293,5 @@ async function handleApprove(
     return;
   }
 
-  await approveRun(args.runId as `run_${string}`);
+  await approveRun(args.runId as `run_${string}`, args.json);
 }

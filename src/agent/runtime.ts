@@ -27,6 +27,7 @@ import {
   type LoopResult,
   type AgentTurnFn,
 } from "./loop.js";
+import { safeParseBoundary, proposedActionSchema } from "../shared/schemas.js";
 import { assembleSystemPrompt, assembleUserPrompt, type ContextBundle } from "./context.js";
 import { createPlan, planToContext, advancePlanBy, type TaskPlan } from "./planning.js";
 import { observeBrowser } from "../browser/observe.js";
@@ -51,6 +52,7 @@ export interface RuntimeConfig {
 const ACTION_KINDS = new Set<ProposedAction["kind"]>([
   "observe",
   "exec",
+  "raw",
   "request-approval",
   "branch-experiment",
   "load-skill",
@@ -166,14 +168,17 @@ export function defaultAgentTurn(llmProvider?: LLMProvider): AgentTurnFn {
       .map((e) => {
         const ps = e.payload.pageSummary as Record<string, unknown> | undefined;
         const texts = Array.isArray(ps?.visibleTexts) ? ps!.visibleTexts as string[] : undefined;
-        return {
+        const obs: { url: string; title: string; forms: number; buttons: number; dialogs: number; visibleTexts?: string[] } = {
           url: String(e.payload.url ?? ""),
           title: String(e.payload.title ?? ""),
           forms: typeof ps?.forms === "number" ? ps.forms : 0,
           buttons: typeof ps?.buttons === "number" ? ps.buttons : 0,
           dialogs: typeof ps?.dialogs === "number" ? ps.dialogs : 0,
-          visibleTexts: texts,
         };
+        if (texts) {
+          obs.visibleTexts = texts;
+        }
+        return obs;
       });
 
     const recentTraces = state.events.slice(-5).map((e) => {
@@ -311,26 +316,29 @@ function parseActionFromLlm(content: string, state: LoopState): ProposedAction {
 
 function tryParseAction(content: string): ProposedAction | undefined {
   try {
-    const parsed = JSON.parse(content) as Record<string, unknown>;
-    if (
-      typeof parsed.kind === "string" &&
-      ACTION_KINDS.has(parsed.kind as ProposedAction["kind"]) &&
-      typeof parsed.summary === "string"
-    ) {
-      const action: ProposedAction = {
-        kind: parsed.kind as ProposedAction["kind"],
-        summary: parsed.summary,
-      };
-      if (parsed.payload && typeof parsed.payload === "object" && parsed.payload !== null) {
-        action.payload = parsed.payload as JsonObject;
-      }
-      return action;
+    const parsed = JSON.parse(content);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return undefined;
     }
+
+    // Validate kind is a known action kind
+    if (typeof parsed.kind !== "string" || !ACTION_KINDS.has(parsed.kind as ProposedAction["kind"])) {
+      return undefined;
+    }
+    if (typeof parsed.summary !== "string") {
+      return undefined;
+    }
+
+    // Use schema validation for the full action shape
+    const result = safeParseBoundary(proposedActionSchema, parsed, "llm-action");
+    if (!result.success) {
+      return undefined;
+    }
+
+    return result.data as ProposedAction;
   } catch {
     return undefined;
   }
-
-  return undefined;
 }
 
 function extractFirstJsonObject(content: string): string | undefined {
@@ -375,78 +383,21 @@ function hasExtractedTaskResult(state: LoopState): boolean {
   );
 }
 
-function hasAttemptedSyntheticExtraction(state: LoopState): boolean {
+function hasAttemptedExtraction(state: LoopState): boolean {
   return state.events.some((event) =>
     event.kind === "code-exec" &&
     typeof event.payload.code === "string" &&
-    event.payload.code.includes("wire:extract-result")
+    event.payload.code.includes("wire:extract")
   );
 }
 
-function buildSyntheticExtractionAction(): ProposedAction {
-  const code = `(() => {
-  /* wire:extract-result */
-  const clean = (value) => value.replace(/\\s+/g, " ").trim();
-  const visibleText = (value) => {
-    if (!value) return "";
-    return clean(value);
-  };
-  const priceRegex = /(?:US\\$|\\$|EUR\\s?|GBP\\s?|CAD\\s?)\\s?\\d[\\d,]*(?:\\.\\d{2})?/g;
-  const cardSelectors = [
-    '[data-testid*="property-card"]',
-    '[data-testid*="search-result"]',
-    '[data-testid*="card"]',
-    'article',
-    'li',
-    'div'
-  ];
-  const cards = [];
-  const seen = new Set();
-  for (const selector of cardSelectors) {
-    for (const node of Array.from(document.querySelectorAll(selector))) {
-      if (!(node instanceof HTMLElement)) continue;
-      const text = visibleText(node.innerText || node.textContent || "");
-      if (text.length < 40) continue;
-      const link = node.querySelector('a[href]');
-      const titleNode = node.querySelector('h1, h2, h3, [data-testid*="title"], strong, b') || link;
-      const title = visibleText(titleNode?.textContent || "");
-      if (!title) continue;
-      const href = link instanceof HTMLAnchorElement ? link.href : undefined;
-      const prices = Array.from(new Set(text.match(priceRegex) || [])).slice(0, 3);
-      const key = [title, href || "", prices.join("|")].join("::");
-      if (seen.has(key)) continue;
-      seen.add(key);
-      cards.push({
-        title,
-        href,
-        prices,
-        snippet: text.slice(0, 280),
-      });
-      if (cards.length >= 10) break;
-    }
-    if (cards.length >= 10) break;
-  }
-  const tables = Array.from(document.querySelectorAll('table')).slice(0, 3).map((table) => {
-    const rows = Array.from(table.querySelectorAll('tr')).slice(0, 8).map((row) =>
-      Array.from(row.querySelectorAll('th,td')).map((cell) => visibleText(cell.textContent || "")).filter(Boolean)
-    ).filter((row) => row.length > 0);
-    return rows;
-  }).filter((rows) => rows.length > 0);
-  const headings = Array.from(document.querySelectorAll('h1,h2,h3')).map((el) => visibleText(el.textContent || "")).filter(Boolean).slice(0, 10);
-  return {
-    objective: "Extract final task result from the current page",
-    title: document.title,
-    url: location.href,
-    headings,
-    cards,
-    tables,
-  };
-})()`;
-
+function buildGenericExtractionAction(): ProposedAction {
   return {
     kind: "exec",
-    summary: "Extract final task result from the current page",
-    payload: { code },
+    summary: "Extract current page content",
+    payload: {
+      code: "/* wire:extract */ return { title: document.title, url: location.href, text: document.body?.innerText?.slice(0, 5000) ?? '' }",
+    },
   };
 }
 
@@ -649,225 +600,262 @@ export async function resumeTask(
   return executeWithState(checkpoint.task, config, turn, undefined, state, checkpoint.pendingAction);
 }
 
-async function executeWithState(
-  task: Task,
+// ---------------------------------------------------------------------------
+// initializeState — setup, initial observation, skill sync, approval resume
+// ---------------------------------------------------------------------------
+
+interface LoopSignals {
+  policyDenied: boolean;
+  authWallHit: boolean;
+  awaitingApproval: boolean;
+  pendingApproval: LoopResult["pendingApproval"];
+  pendingAction: LoopResult["pendingAction"];
+}
+
+async function initializeState(
+  state: LoopState,
   config: RuntimeConfig,
-  turn: AgentTurnFn,
-  session?: BrowserSession,
-  initialState?: LoopState,
-  approvedPendingAction?: ProposedAction,
-): Promise<LoopResult> {
-  let state = initialState ?? createLoopState(task, session!.id);
-  let consecutiveRecoverableErrors = 0;
+  initialState: LoopState | undefined,
+  approvedPendingAction: ProposedAction | undefined,
+): Promise<LoopSignals> {
+  const signals: LoopSignals = {
+    policyDenied: false,
+    authWallHit: false,
+    awaitingApproval: false,
+    pendingApproval: undefined,
+    pendingAction: undefined,
+  };
 
-  // Track stop signal sources across steps
-  let policyDenied = false;
-  let authWallHit = false;
-  let awaitingApproval = false;
-  let pendingApproval: LoopResult["pendingApproval"];
-  let pendingAction: LoopResult["pendingAction"];
+  if (approvedPendingAction) {
+    const resumedStep = await executeStep(
+      state,
+      approvedPendingAction,
+      config.provider,
+      config.policyEngine,
+      { skipPolicyCheck: false },
+    );
+    Object.assign(state, resumedStep.state);
+    signals.policyDenied = resumedStep.policyDenied;
+    signals.authWallHit = resumedStep.authWallHit;
 
-  try {
-    if (approvedPendingAction) {
-      const resumedStep = await executeStep(
-        state,
-        approvedPendingAction,
-        config.provider,
-        config.policyEngine,
-        { skipPolicyCheck: true },
-      );
-      state = resumedStep.state;
-      authWallHit = resumedStep.authWallHit;
-      await syncMatchedSkills(state, config.skillDir);
-    } else if (!initialState) {
-      // Fresh start: observe the current browser state before the first agent turn.
-      // SPECS §19.1 step 5, §28 — "observation before first action".
-      // This is setup, not an agent step — do not count against the step budget.
-      const observation = await observeBrowser({
-        provider: config.provider,
-        sessionId: state.sessionId,
-      });
-      const obsPayload: JsonObject = {
-        url: observation.url,
-        title: observation.title,
-      };
-      if (observation.targetId) obsPayload.targetId = observation.targetId;
-      if (observation.tabs.length > 0) obsPayload.tabs = observation.tabs;
-      if (observation.focusedElement) obsPayload.focusedElement = observation.focusedElement as unknown as JsonObject;
-      if (observation.pageSummary) obsPayload.pageSummary = observation.pageSummary as unknown as JsonObject;
-
+    if (signals.policyDenied) {
       state.events.push({
         id: createId("event"),
         runId: state.run.id,
         ts: nowIsoUtc(),
-        kind: "observation",
-        payload: obsPayload,
-      } as TraceEvent);
-      authWallHit = detectAuthWall(observation).detected;
-      await syncMatchedSkills(state, config.skillDir);
-    } else {
-      await syncMatchedSkills(state, config.skillDir);
+        kind: "error",
+        payload: {
+          message: "Previously approved action is now denied by current policy",
+          code: "EPOLICYCHANGED",
+        },
+      });
     }
 
-    while (true) {
-      // Check stopping conditions
-      const stopResult = shouldStop(state, {
-        maxSteps: config.maxSteps,
-        budgetExhausted: false,
-        policyDenied,
-        authWallHit,
-        userCancelled: false,
-      });
+    await syncMatchedSkills(state, config.skillDir);
+  } else if (!initialState) {
+    // Fresh start: observe the current browser state before the first agent turn.
+    // SPECS §19.1 step 5, §28 — "observation before first action".
+    // This is setup, not an agent step — do not count against the step budget.
+    const observation = await observeBrowser({
+      provider: config.provider,
+      sessionId: state.sessionId,
+    });
+    const obsPayload: JsonObject = {
+      url: observation.url,
+      title: observation.title,
+    };
+    if (observation.targetId) obsPayload.targetId = observation.targetId;
+    if (observation.tabs.length > 0) obsPayload.tabs = observation.tabs as unknown as import("../shared/types.js").JsonValue;
+    if (observation.focusedElement) obsPayload.focusedElement = observation.focusedElement as unknown as JsonObject;
+    if (observation.pageSummary) obsPayload.pageSummary = observation.pageSummary as unknown as JsonObject;
 
-      if (stopResult.stop) {
-        // Record the stop reason as a trace event
+    state.events.push({
+      id: createId("event"),
+      runId: state.run.id,
+      ts: nowIsoUtc(),
+      kind: "observation",
+      payload: obsPayload,
+    } as TraceEvent);
+    signals.authWallHit = detectAuthWall(observation).detected;
+    await syncMatchedSkills(state, config.skillDir);
+  } else {
+    await syncMatchedSkills(state, config.skillDir);
+  }
+
+  return signals;
+}
+
+// ---------------------------------------------------------------------------
+// runMainLoop — the while(true) agent loop
+// ---------------------------------------------------------------------------
+
+async function runMainLoop(
+  state: LoopState,
+  config: RuntimeConfig,
+  turn: AgentTurnFn,
+  signals: LoopSignals,
+): Promise<void> {
+  let consecutiveRecoverableErrors = 0;
+
+  while (true) {
+    // Check stopping conditions
+    const stopResult = shouldStop(state, {
+      maxSteps: config.maxSteps,
+      budgetExhausted: false,
+      policyDenied: signals.policyDenied,
+      authWallHit: signals.authWallHit,
+      userCancelled: false,
+    });
+
+    if (stopResult.stop) {
+      // Record the stop reason as a trace event
+      state.events.push({
+        id: createId("event"),
+        runId: state.run.id,
+        ts: new Date().toISOString(),
+        kind: "thought-summary",
+        payload: { reason: stopResult.reason ?? "Unknown stop condition" },
+      });
+      break;
+    }
+
+    let action: ProposedAction;
+    try {
+      action = await turn(state, config.provider);
+    } catch (err) {
+      state.events.push({
+        id: createId("event"),
+        runId: state.run.id,
+        ts: new Date().toISOString(),
+        kind: "error",
+        payload: { message: (err as Error).message, code: "EAGENT" },
+      });
+      break;
+    }
+
+    // If the agent wants to finish, record and break
+    if (action.kind === "finish") {
+      if (
+        state.task.mode === "task" &&
+        !hasExtractedTaskResult(state) &&
+        !hasRecordedTaskArtifact(state) &&
+        !hasAttemptedExtraction(state) &&
+        state.stepCount < config.maxSteps
+      ) {
+        action = buildGenericExtractionAction();
+      } else if (state.task.mode === "task") {
+        if (hasExtractedTaskResult(state) && !hasRecordedTaskArtifact(state)) {
+          appendExtractedResultArtifact(state);
+        } else if (!hasRecordedTaskArtifact(state)) {
+          appendTaskNoteArtifact(state, action.summary);
+        }
         state.events.push({
           id: createId("event"),
           runId: state.run.id,
           ts: new Date().toISOString(),
           kind: "thought-summary",
-          payload: { reason: stopResult.reason ?? "Unknown stop condition" },
+          payload: { summary: action.summary, kind: "finish" },
         });
         break;
-      }
-
-      let action: ProposedAction;
-      try {
-        action = await turn(state, config.provider);
-      } catch (err) {
+      } else {
         state.events.push({
           id: createId("event"),
           runId: state.run.id,
           ts: new Date().toISOString(),
-          kind: "error",
-          payload: { message: (err as Error).message, code: "EAGENT" },
+          kind: "thought-summary",
+          payload: { summary: action.summary, kind: "finish" },
         });
-        break;
-      }
-
-      // If the agent wants to finish, record and break
-      if (action.kind === "finish") {
-        if (
-          task.mode === "task" &&
-          !hasExtractedTaskResult(state) &&
-          !hasRecordedTaskArtifact(state) &&
-          !hasAttemptedSyntheticExtraction(state) &&
-          state.stepCount < config.maxSteps
-        ) {
-          action = buildSyntheticExtractionAction();
-        } else if (task.mode === "task") {
-          if (hasExtractedTaskResult(state) && !hasRecordedTaskArtifact(state)) {
-            appendExtractedResultArtifact(state);
-          } else if (!hasRecordedTaskArtifact(state)) {
-            appendTaskNoteArtifact(state, action.summary);
-          }
-          state.events.push({
-            id: createId("event"),
-            runId: state.run.id,
-            ts: new Date().toISOString(),
-            kind: "thought-summary",
-            payload: { summary: action.summary, kind: "finish" },
-          });
-          break;
-        } else {
-          state.events.push({
-            id: createId("event"),
-            runId: state.run.id,
-            ts: new Date().toISOString(),
-            kind: "thought-summary",
-            payload: { summary: action.summary, kind: "finish" },
-          });
-          break;
-        }
-      }
-
-      // Execute the step
-      try {
-        const stepResult = await executeStep(state, action, config.provider, config.policyEngine);
-        state = stepResult.state;
-        policyDenied = stepResult.policyDenied;
-        authWallHit = stepResult.authWallHit;
-        consecutiveRecoverableErrors = 0;
-        await syncMatchedSkills(state, config.skillDir);
-
-        if (
-          task.mode === "task" &&
-          action.kind === "exec" &&
-          typeof action.payload?.code === "string" &&
-          action.payload.code.includes("wire:extract-result")
-        ) {
-          appendExtractedResultArtifact(state);
-        }
-
-        if (stepResult.pendingApproval) {
-          awaitingApproval = true;
-          pendingApproval = stepResult.pendingApproval;
-          pendingAction = stepResult.pendingAction;
-          break;
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        const code = /network|timeout|ECONN|ETIMEDOUT|ENOTFOUND|fetch/iu.test(message)
-          ? "ENETWORK"
-          : "EEXEC";
-        state.events.push({
-          id: createId("event"),
-          runId: state.run.id,
-          ts: new Date().toISOString(),
-          kind: "error",
-          payload: { message, code },
-        });
-        state.stepCount++;
-
-        if (isRecoverableStepError(message)) {
-          consecutiveRecoverableErrors++;
-          const budgetRemaining = state.stepCount < config.maxSteps;
-          if (budgetRemaining && consecutiveRecoverableErrors < 3) {
-            continue;
-          }
-        }
-
         break;
       }
     }
-  } finally {
-    // Always clean up the browser session
-    if (!awaitingApproval) {
-      try {
-        await stopBrowserSession(config.provider, state.sessionId);
-      } catch {
-        // Best-effort cleanup — don't mask the real result
+
+    // Execute the step
+    try {
+      const stepResult = await executeStep(state, action, config.provider, config.policyEngine);
+      Object.assign(state, stepResult.state);
+      signals.policyDenied = stepResult.policyDenied;
+      signals.authWallHit = stepResult.authWallHit;
+      consecutiveRecoverableErrors = 0;
+      await syncMatchedSkills(state, config.skillDir);
+
+      if (
+        state.task.mode === "task" &&
+        action.kind === "exec" &&
+        typeof action.payload?.code === "string" &&
+        action.payload.code.includes("wire:extract")
+      ) {
+        appendExtractedResultArtifact(state);
       }
+
+      if (stepResult.pendingApproval) {
+        signals.awaitingApproval = true;
+        signals.pendingApproval = stepResult.pendingApproval;
+        signals.pendingAction = stepResult.pendingAction;
+        break;
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const code = /network|timeout|ECONN|ETIMEDOUT|ENOTFOUND|fetch/iu.test(message)
+        ? "ENETWORK"
+        : "EEXEC";
+      state.events.push({
+        id: createId("event"),
+        runId: state.run.id,
+        ts: new Date().toISOString(),
+        kind: "error",
+        payload: { message, code },
+      });
+      state.stepCount++;
+
+      if (isRecoverableStepError(message)) {
+        consecutiveRecoverableErrors++;
+        const budgetRemaining = state.stepCount < config.maxSteps;
+        if (budgetRemaining && consecutiveRecoverableErrors < 3) {
+          continue;
+        }
+      }
+
+      break;
     }
   }
+}
 
+// ---------------------------------------------------------------------------
+// finalizeExecution — artifact persistence, skill proposals, finalization
+// ---------------------------------------------------------------------------
+
+async function finalizeExecution(
+  state: LoopState,
+  config: RuntimeConfig,
+  signals: LoopSignals,
+): Promise<LoopResult> {
   const finalizeOptions = {
-    authWallHit,
-    policyDenied,
+    authWallHit: signals.authWallHit,
+    policyDenied: signals.policyDenied,
     budgetExhausted: false,
-    awaitingApproval,
+    awaitingApproval: signals.awaitingApproval,
   } as const;
 
-  if (pendingApproval) {
+  if (signals.pendingApproval) {
     const approvalOptions: {
       authWallHit: boolean;
       policyDenied: boolean;
       budgetExhausted: false;
       awaitingApproval: boolean;
-      pendingApproval: NonNullable<typeof pendingApproval>;
+      pendingApproval: NonNullable<typeof signals.pendingApproval>;
       pendingAction?: ProposedAction;
     } = {
       ...finalizeOptions,
-      pendingApproval,
+      pendingApproval: signals.pendingApproval,
     };
-    if (pendingAction) {
-      approvalOptions.pendingAction = pendingAction;
+    if (signals.pendingAction) {
+      approvalOptions.pendingAction = signals.pendingAction;
     }
     return finalizeRun(state, approvalOptions);
   }
 
   if (
-    task.mode === "task" &&
+    state.task.mode === "task" &&
     !hasRecordedTaskArtifact(state)
   ) {
     const failureSummary = buildFailureSummary(state);
@@ -879,6 +867,38 @@ async function executeWithState(
   await appendSkillProposalEvents(state, config.skillDir, config.llmProvider);
 
   return finalizeRun(state, finalizeOptions);
+}
+
+// ---------------------------------------------------------------------------
+// executeWithState — orchestrator
+// ---------------------------------------------------------------------------
+
+async function executeWithState(
+  task: Task,
+  config: RuntimeConfig,
+  turn: AgentTurnFn,
+  session?: BrowserSession,
+  initialState?: LoopState,
+  approvedPendingAction?: ProposedAction,
+): Promise<LoopResult> {
+  const state = initialState ?? createLoopState(task, session!.id);
+
+  const signals = await initializeState(state, config, initialState, approvedPendingAction);
+
+  try {
+    await runMainLoop(state, config, turn, signals);
+  } finally {
+    // Always clean up the browser session
+    if (!signals.awaitingApproval) {
+      try {
+        await stopBrowserSession(config.provider, state.sessionId);
+      } catch {
+        // Best-effort cleanup — don't mask the real result
+      }
+    }
+  }
+
+  return finalizeExecution(state, config, signals);
 }
 
 // Re-export planning types for convenience

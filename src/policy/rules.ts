@@ -133,6 +133,12 @@ export const BASELINE_RULES: PolicyRule[] = [
     "require-approval",
     (a) => PRIVILEGED_KINDS.has(a.kind),
   ),
+  makeRule(
+    "baseline-raw-cdp",
+    "Raw CDP access requires approval.",
+    "require-approval",
+    (a) => a.kind === "raw",
+  ),
 ];
 
 // ---------------------------------------------------------------------------

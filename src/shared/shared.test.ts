@@ -9,11 +9,16 @@ import {
   nowIsoUtc,
   stableJsonStringify,
 } from "./ids.js";
+import {
+  redactJsonObject,
+  redactSecrets,
+} from "./redact.js";
 import type {
   BrowserExecRequest,
   BrowserExecResult,
   BrowserObservation,
   CreateSessionInput,
+  JsonObject,
   SkillFrontmatter,
   Task,
 } from "./types.js";
@@ -184,4 +189,86 @@ test("safeParseBoundary reports invalid payloads without throwing", () => {
   assert.equal(result.success, false);
   assert.match(result.error.message, /browser-exec-request/u);
   assert.match(result.issues[0]?.message ?? "", /session/u);
+});
+
+// ---------------------------------------------------------------------------
+// redactSecrets
+// ---------------------------------------------------------------------------
+
+test("redactSecrets replaces API key patterns with [REDACTED]", () => {
+  const result = redactSecrets("Use key sk-1234567890abcdef1234567890 to connect.");
+
+  assert.ok(!result.includes("sk-1234567890"));
+  assert.ok(result.includes("[REDACTED]"));
+  assert.ok(result.includes("Use key"));
+  assert.ok(result.includes("to connect."));
+});
+
+test("redactSecrets replaces password patterns", () => {
+  const result = redactSecrets("Use password=mysecretvalue123456 to authenticate.");
+
+  assert.ok(!result.includes("mysecretvalue"));
+  assert.ok(result.includes("[REDACTED]"));
+});
+
+// ---------------------------------------------------------------------------
+// redactJsonObject
+// ---------------------------------------------------------------------------
+
+test("redactJsonObject recursively redacts string values in nested objects", () => {
+  const input = {
+    level1: "key_abcdefghijklmnop123456789",
+    nested: {
+      level2: "sk-1234567890abcdef1234567890",
+      deep: {
+        level3: "password=supersecretpassword123",
+      },
+    },
+    safe: "this is fine",
+  };
+
+  const result = redactJsonObject(input);
+
+  assert.ok(!result.level1?.toString().includes("abcdefghijklmnop"));
+  const nested = result.nested as JsonObject;
+  assert.ok(!String(nested?.level2 ?? "").includes("sk-123456"));
+  const deep = nested?.deep as JsonObject;
+  assert.ok(!String(deep?.level3 ?? "").includes("supersecret"));
+  assert.equal(result.safe, "this is fine");
+});
+
+test("redactJsonObject handles arrays containing secrets", () => {
+  const input = {
+    keys: ["sk-1234567890abcdef1234567890", "normal value"],
+    items: [
+      { token: "token_abcdefghijklmnop12345678" },
+      { token: "clean" },
+    ],
+  };
+
+  const result = redactJsonObject(input);
+
+  const keys = result.keys as string[];
+  assert.ok(keys[0]!.includes("[REDACTED]"));
+  assert.equal(keys[1], "normal value");
+
+  const items = result.items as Array<{ token: string }>;
+  assert.ok(items[0]!.token.includes("[REDACTED]"));
+  assert.equal(items[1]!.token, "clean");
+});
+
+test("redactJsonObject preserves non-string values", () => {
+  const input = {
+    count: 42,
+    active: true,
+    empty: null,
+    data: { nested: 99 },
+  };
+
+  const result = redactJsonObject(input);
+
+  assert.equal(result.count, 42);
+  assert.equal(result.active, true);
+  assert.equal(result.empty, null);
+  assert.deepEqual(result.data, { nested: 99 });
 });

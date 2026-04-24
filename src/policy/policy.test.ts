@@ -213,8 +213,8 @@ test("evaluateRules uses custom rules when provided", () => {
 // rules.ts — BASELINE_RULES
 // ---------------------------------------------------------------------------
 
-test("BASELINE_RULES has six rules", () => {
-  assert.equal(BASELINE_RULES.length, 6);
+test("BASELINE_RULES has seven rules", () => {
+  assert.equal(BASELINE_RULES.length, 7);
 });
 
 test("BASELINE_RULES every rule has an id and description", () => {

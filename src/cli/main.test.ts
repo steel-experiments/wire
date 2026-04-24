@@ -9,6 +9,7 @@ import { saveTask } from "../storage/tasks.js";
 import { saveRun } from "../storage/runs.js";
 import { saveTraceEvent } from "../storage/events.js";
 import { main } from "./main.js";
+import { parseArgs } from "./args.js";
 
 test("main list prints stored tasks and runs", async () => {
   const root = await mkdtemp(join(tmpdir(), "wire-cli-"));
@@ -280,4 +281,28 @@ test("main result falls back to persisted note artifacts for task runs", async (
   }
 
   assert.deepEqual(lines, ["Completed search for San Francisco May 15-17 and New York May 20-22"]);
+});
+
+// ---------------------------------------------------------------------------
+// parseArgs — --json flag
+// ---------------------------------------------------------------------------
+
+test("parseArgs parses --json flag as true", () => {
+  const args = parseArgs(["node", "wire", "review", "--run-id", "run_test123", "--json"]);
+
+  assert.equal(args.json, true);
+});
+
+test("parseArgs defaults json to undefined when --json is absent", () => {
+  const args = parseArgs(["node", "wire", "list"]);
+
+  assert.equal(args.json, undefined);
+});
+
+test("parseArgs parses --json flag for result command", () => {
+  const args = parseArgs(["node", "wire", "result", "--run-id", "run_test123", "--json"]);
+
+  assert.equal(args.json, true);
+  assert.equal(args.command, "result");
+  assert.equal(args.runId, "run_test123");
 });

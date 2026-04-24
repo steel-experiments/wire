@@ -76,6 +76,10 @@ export const runClassificationKindSchema = z.enum([
   "infra-error",
   "counterexample",
   "ambiguous",
+  "browser-crash",
+  "captcha",
+  "rate-limited",
+  "network-timeout",
 ]);
 export const hypothesisStatusSchema = z.enum(["active", "supported", "rejected", "ambiguous"]);
 export const skillScopeSchema = z.enum(["domain", "workflow", "interaction"]);
@@ -114,6 +118,17 @@ export const comparisonDimensionSchema = z.enum([
   "profile",
   "artifacts",
   "outcome",
+]);
+
+export const actionKindSchema = z.enum([
+  "observe",
+  "exec",
+  "raw",
+  "request-approval",
+  "branch-experiment",
+  "load-skill",
+  "propose-skill",
+  "finish",
 ]);
 
 export const taskBudgetSchema = z

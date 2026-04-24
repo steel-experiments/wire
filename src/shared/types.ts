@@ -17,7 +17,11 @@ export type RunClassificationKind =
   | "agent-error"
   | "infra-error"
   | "counterexample"
-  | "ambiguous";
+  | "ambiguous"
+  | "browser-crash"
+  | "captcha"
+  | "rate-limited"
+  | "network-timeout";
 export type HypothesisStatus = "active" | "supported" | "rejected" | "ambiguous";
 export type SkillScope = "domain" | "workflow" | "interaction";
 export type SkillSource = "builtin" | "team" | "generated";
@@ -52,6 +56,7 @@ export type BrowserExecTarget = "active-tab" | "all-tabs" | { tabId: string };
 export type ActionKind =
   | "observe"
   | "exec"
+  | "raw"
   | "request-approval"
   | "branch-experiment"
   | "load-skill"

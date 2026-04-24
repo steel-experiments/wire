@@ -6,6 +6,7 @@ import { ensureDir } from "../storage/atomic.js";
 
 import { matchSkillsByHostname, matchSkillsByTags, sortByRelevance } from "./matcher.js";
 import { extractSections, parseSkillFile } from "./parser.js";
+import { sanitizeSkillContent } from "../agent/context.js";
 
 // ---------------------------------------------------------------------------
 // Load all skills from a directory
@@ -65,7 +66,7 @@ export async function loadSkillDocsFromDir(dir: string): Promise<LoadedSkill[]> 
         updatedAt: frontmatter.updatedAt,
         source: frontmatter.source,
         path: filePath,
-        body: raw,
+        body: sanitizeSkillContent(raw),
         sections,
         ...(frontmatter.hostnamePatterns
           ? { hostnamePatterns: frontmatter.hostnamePatterns }
