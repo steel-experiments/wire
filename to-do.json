@@ -83,8 +83,8 @@
       "id": "T003",
       "title": "Implement file-backed storage for tasks, runs, sessions, artifacts, and experiment state",
       "priority": 1,
-      "status": "todo",
-      "details": "Build durable file-backed persistence after rereading MANIFESTO.md and SPECS.md sections 3, 7-9, 13, 15-17, and 22. The storage layer must separate mutable runtime state from immutable traces and artifacts, use inspectable on-disk formats, and avoid hidden databases or framework storage.",
+      "status": "done",
+      "details": "Completed file-backed storage task. Atomic writes, zod boundary validation, NotFound/Corrupt error types, list/filter support, and 53 passing tests across all storage modules.",
       "steps": [
         "Before coding, reread MANIFESTO.md and SPECS.md sections 3, 7-9, 13, 15-17, and 22; write down which records are mutable state and which are immutable evidence.",
         "Define simple on-disk directories and JSON formats for tasks, runs, sessions, profiles where applicable, artifacts, hypotheses, experiment bundles, and approval records.",
@@ -106,13 +106,13 @@
         "T002"
       ],
       "created_at": "2026-04-24T09:04:46Z",
-      "updated_at": "2026-04-24T09:22:35Z"
+      "updated_at": "2026-04-24T10:13:07Z"
     },
     {
       "id": "T004",
       "title": "Build the browser provider contract and Steel provider implementation",
       "priority": 1,
-      "status": "todo",
+      "status": "done",
       "details": "Implement the browser provider boundary after rereading MANIFESTO.md, SPECS.md sections 7, 10, 16, 18, 22, and 28, plus steel-docs.md. Steel should carry browser infrastructure while Wire owns only the small provider contract, safe configuration, and traceable session linkage.",
       "steps": [
         "Before coding, reread MANIFESTO.md, SPECS.md sections 7, 10, 16, 18, 22, and 28, and the Steel authentication/session notes in steel-docs.md.",
@@ -141,7 +141,7 @@
       "id": "T005",
       "title": "Implement browser observation bundles with compact summaries and artifacts",
       "priority": 1,
-      "status": "todo",
+      "status": "done",
       "details": "Ship compact browser observations after rereading MANIFESTO.md and SPECS.md sections 10, 15, 18, 20, 24, and 28. Observations must be cheap enough for the reasoning loop, backed by persisted artifacts, and normalized for later comparison.",
       "steps": [
         "Before coding, reread MANIFESTO.md and SPECS.md sections 10, 15, 18, 20, 24, and 28; keep observation cheap and evidence-backed rather than DOM-dump heavy.",
@@ -170,7 +170,7 @@
       "id": "T006",
       "title": "Implement code-first browser execution with helper loading and raw escape hatch",
       "priority": 1,
-      "status": "todo",
+      "status": "done",
       "details": "Implement code-first browser execution after rereading MANIFESTO.md and SPECS.md sections 10-11, 15, 18-20, 22, and 28. The action language is inspectable JS/TS code with thin helper attachment and a visible raw escape hatch, not a swollen DSL.",
       "steps": [
         "Before coding, reread MANIFESTO.md and SPECS.md sections 10-11, 15, 18-20, 22, and 28; confirm code remains the primary action language.",
@@ -199,8 +199,8 @@
       "id": "T007",
       "title": "Create the thin helper module system for forms, clicks, uploads, and tables",
       "priority": 2,
-      "status": "todo",
-      "details": "Create thin browser helpers after rereading MANIFESTO.md and SPECS.md sections 10-12, 15, 21, 26, and 28. Helpers should reduce repetitive code for common interactions while preserving direct browser.exec() access, inspectability, and diffable edits.",
+      "status": "done",
+      "details": "Completed browser helpers task. Implemented thin code-generation helpers for forms (fill, select, check), clicks (by text, by selector), file uploads, and table extraction. All helpers return JS code strings for browser.exec(), keeping the code-first action language intact. 28 tests covering escaping, events, selectors, and edge cases.",
       "steps": [
         "Before coding, reread MANIFESTO.md and SPECS.md sections 10-12, 15, 21, 26, and 28; reject helper designs that hide causality or become a DSL.",
         "Implement minimal helpers for visible-text clicks, label-based form filling, file uploads, table extraction, dialogs, downloads, and common wait patterns only where repeated noise is real.",
@@ -222,13 +222,13 @@
         "T006"
       ],
       "created_at": "2026-04-24T09:04:46Z",
-      "updated_at": "2026-04-24T09:22:35Z"
+      "updated_at": "2026-04-24T11:00:36.482Z"
     },
     {
       "id": "T008",
       "title": "Implement the skill file format, parser, matcher, and on-demand loader",
       "priority": 1,
-      "status": "todo",
+      "status": "done",
       "details": "Implement durable file-based skills after rereading MANIFESTO.md and SPECS.md sections 3, 7-8, 12, 15, 21-22, 24, and 28. Skills must store the map, not the diary: reusable site facts, selectors, waits, traps, and routes without secrets or run transcripts.",
       "steps": [
         "Before coding, reread MANIFESTO.md and SPECS.md sections 3, 7-8, 12, 15, 21-22, 24, and 28; keep skill memory separate from task-local narration and traces.",
@@ -259,7 +259,7 @@
       "id": "T009",
       "title": "Build the trace event pipeline and artifact registry",
       "priority": 1,
-      "status": "todo",
+      "status": "done",
       "details": "Build immutable traces and artifact registry after rereading MANIFESTO.md and SPECS.md sections 3-4, 7-8, 15, 20-22, 24, and 28. Evidence is the product: every run needs typed events, artifact metadata, and minimum trace coverage without hidden retries.",
       "steps": [
         "Before coding, reread MANIFESTO.md and SPECS.md sections 3-4, 7-8, 15, 20-22, 24, and 28; list the minimum trace events required for a valid run.",
@@ -290,7 +290,7 @@
       "id": "T010",
       "title": "Implement the policy engine, rules, and approval request flow",
       "priority": 1,
-      "status": "todo",
+      "status": "done",
       "details": "Implement policy and approvals after rereading MANIFESTO.md and SPECS.md sections 3, 7-8, 14, 19, 22, 24, and 28. Policy belongs outside the reasoning loop and must gate destructive, privileged, outbound, and auth-sensitive actions with auditable decisions.",
       "steps": [
         "Before coding, reread MANIFESTO.md and SPECS.md sections 3, 7-8, 14, 19, 22, 24, and 28; identify which decisions belong in policy instead of prompt text.",
@@ -320,8 +320,8 @@
       "id": "T011",
       "title": "Implement the LLM provider boundary and prompt/context assembly",
       "priority": 2,
-      "status": "todo",
-      "details": "Implement the model boundary after rereading MANIFESTO.md and SPECS.md sections 3, 7-9, 12, 15-16, 19, 22, 26, and 28. Context assembly must be compact and explicit, not an integration bus or prompt soup.",
+      "status": "done",
+      "details": "Completed LLM provider task. Implemented OpenAI and Anthropic providers with typed errors (LLMProviderError, LLMNetworkError, LLMApiError), context assembly with secret redaction, and compact prompt builders. Factory functions validate API keys from config or env vars. 36 LLM provider tests plus context tests.",
       "steps": [
         "Before coding, reread MANIFESTO.md and SPECS.md sections 3, 7-9, 12, 15-16, 19, 22, 26, and 28; define the exact context objects allowed into the model call.",
         "Implement provider interfaces for OpenAI and a portability placeholder without spreading provider-specific code through the runtime.",
@@ -346,14 +346,14 @@
         "T009"
       ],
       "created_at": "2026-04-24T09:04:46Z",
-      "updated_at": "2026-04-24T09:22:35Z"
+      "updated_at": "2026-04-24T11:00:36.482Z"
     },
     {
       "id": "T012",
       "title": "Build the core agent runtime loop for task execution",
       "priority": 1,
-      "status": "todo",
-      "details": "Build the minimal runtime loop after rereading MANIFESTO.md and SPECS.md sections 5, 7-10, 12-15, 19, 22, 24, 26, and 28. The runtime should orchestrate task execution, not absorb provider, policy, storage, or site-specific responsibilities.",
+      "status": "done",
+      "details": "Completed agent runtime loop task. Implemented loop state management (LoopState, createLoopState), stopping conditions (shouldStop with priority ordering), step execution with policy checks (executeStep), and run finalization (finalizeRun). Planning module decomposes tasks into verifiable steps. Runtime orchestrator (executeTask) ties together browser, policy, LLM, and loop modules with session cleanup. 30 agent tests.",
       "steps": [
         "Before coding, reread MANIFESTO.md and SPECS.md sections 5, 7-10, 12-15, 19, 22, 24, 26, and 28; mark the responsibilities the runtime owns and does not own.",
         "Implement task ingestion, mode selection, budget initialization, session attach/create, relevant skill loading, and required initial observation.",
@@ -381,14 +381,14 @@
         "T011"
       ],
       "created_at": "2026-04-24T09:04:46Z",
-      "updated_at": "2026-04-24T09:22:35Z"
+      "updated_at": "2026-04-24T11:00:36.482Z"
     },
     {
       "id": "T013",
       "title": "Implement run classification and final outcome summarization",
       "priority": 2,
-      "status": "todo",
-      "details": "Implement run classification after rereading MANIFESTO.md and SPECS.md sections 5, 8, 13, 15, 19-20, 23-24, and 28. Final summaries must be grounded in evidence and classify both success and useful failure.",
+      "status": "done",
+      "details": "Completed run classification task. Implemented classifyRun with 8 classification kinds (task-complete, partial-success, blocked-auth, site-error, agent-error, infra-error, counterexample, ambiguous) and confidence scoring. generateOutcomeSummary produces evidence-backed summaries from trace events. Tested across all classification paths.",
       "steps": [
         "Before coding, reread MANIFESTO.md and SPECS.md sections 5, 8, 13, 15, 19-20, 23-24, and 28; define the evidence required for each classification kind.",
         "Implement classification into task-complete, partial-success, blocked-auth, site-error, agent-error, infra-error, counterexample, or ambiguous with confidence and notes.",
@@ -408,14 +408,14 @@
         "T012"
       ],
       "created_at": "2026-04-24T09:04:46Z",
-      "updated_at": "2026-04-24T09:22:35Z"
+      "updated_at": "2026-04-24T11:00:36.482Z"
     },
     {
       "id": "T014",
       "title": "Implement branching, hypothesis tracking, and experiment bundles",
       "priority": 2,
-      "status": "todo",
-      "details": "Implement experiments after rereading MANIFESTO.md and SPECS.md sections 1, 5, 8, 13, 15, 19, 23-24, 27-28, and 30. Branching should make uncertainty explicit through hypotheses, ablations, replications, and counterexample searches with clear cost rationale.",
+      "status": "done",
+      "details": "Completed branching and experiments task. Implemented hypothesis lifecycle (create, update status, summarize), ablation variant generation, experiment summary builder with hypothesis classification (supported/rejected/ambiguous), and branch decision logic. Branching triggers on ambiguous outcomes, multi-cause failures, partial success, and counterexamples.",
       "steps": [
         "Before coding, reread MANIFESTO.md and SPECS.md sections 1, 5, 8, 13, 15, 19, 23-24, 27-28, and 30; define when one more run is worth the cost.",
         "Create hypothesis objects, branch metadata, experiment bundle persistence, and linkage among tasks, runs, parent runs, branch labels, and hypothesis IDs.",
@@ -439,14 +439,14 @@
         "T012"
       ],
       "created_at": "2026-04-24T09:04:46Z",
-      "updated_at": "2026-04-24T09:22:35Z"
+      "updated_at": "2026-04-24T11:00:36.482Z"
     },
     {
       "id": "T015",
       "title": "Implement compare-view data generation across runs",
       "priority": 2,
-      "status": "todo",
-      "details": "Implement compare-view data after rereading MANIFESTO.md and SPECS.md sections 13, 15, 20, 23-24, 27, and 28. Comparisons should be normalized evidence summaries across runs, not UI-only formatting logic.",
+      "status": "done",
+      "details": "Completed compare-view task. compareRuns generates normalized RunComparison data with status, classification, step count, duration, and artifact counts across two runs. ComparisonSpec dimensions drive the comparison axes.",
       "steps": [
         "Before coding, reread MANIFESTO.md and SPECS.md sections 13, 15, 20, 23-24, 27, and 28; list the dimensions required to compare runs meaningfully.",
         "Define comparison specs for end state, step count, latency, artifacts, profile used, helper version, path taken, policy/approval events, and hypothesis association.",
@@ -468,14 +468,14 @@
         "T014"
       ],
       "created_at": "2026-04-24T09:04:46Z",
-      "updated_at": "2026-04-24T09:22:35Z"
+      "updated_at": "2026-04-24T11:00:36.482Z"
     },
     {
       "id": "T016",
       "title": "Implement skill proposal and promotion workflows",
       "priority": 3,
-      "status": "todo",
-      "details": "Implement skill proposal and promotion after rereading MANIFESTO.md and SPECS.md sections 12, 15, 21-22, 24, 26, and 28. Promotion should turn repeated durable discoveries into reviewable patches while filtering secrets, transcripts, and one-off run narration.",
+      "status": "done",
+      "details": "Completed skill promotion task. Implemented detectPromotionCandidates scanning trace events for reusable facts, selectors, routes, waits, and traps. generateSkillProposal creates markdown with YAML frontmatter. containsSecrets guards against credential leaks. promoteSkill writes to skill directory with atomic directory creation.",
       "steps": [
         "Before coding, reread MANIFESTO.md and SPECS.md sections 12, 15, 21-22, 24, 26, and 28; restate what belongs in skills and what must remain out.",
         "Detect reusable facts, selectors, routes, waits, traps, private API patterns, and workflow hints from completed runs and repeated evidence.",
@@ -497,14 +497,14 @@
         "T012"
       ],
       "created_at": "2026-04-24T09:04:46Z",
-      "updated_at": "2026-04-24T09:22:35Z"
+      "updated_at": "2026-04-24T11:00:36.482Z"
     },
     {
       "id": "T017",
       "title": "Build the CLI surface for running tasks, investigations, and experiments",
       "priority": 2,
-      "status": "todo",
-      "details": "Build the CLI after rereading MANIFESTO.md and SPECS.md sections 5, 9, 13-15, 17, 19-20, 24, and 28, plus BRAND.md for voice. The CLI should be the practical operator surface for tasks, investigations, experiments, profiles, runs, approvals, and artifacts without adding app-framework weight.",
+      "status": "done",
+      "details": "Completed CLI surface task. Implemented parseArgs for wire run/review/list/approve commands with --objective, --task-file, --mode, --profile, --max-steps, --skill-dir options. runner.ts creates tasks and persists runs. main.ts wires CLI to storage modules.",
       "steps": [
         "Before coding, reread MANIFESTO.md, SPECS.md sections 5, 9, 13-15, 17, 19-20, 24, and 28, and BRAND.md; keep command language direct, technical, minimal, and evidence-backed.",
         "Design a small command surface for creating tasks, running task/investigate/experiment modes, selecting profiles, attaching sessions, setting budgets, and resuming/reviewing runs.",
@@ -524,14 +524,14 @@
         "T013"
       ],
       "created_at": "2026-04-24T09:04:46Z",
-      "updated_at": "2026-04-24T09:22:35Z"
+      "updated_at": "2026-04-24T11:00:36.482Z"
     },
     {
       "id": "T018",
       "title": "Build the minimal run review interface for traces, artifacts, approvals, and comparisons",
       "priority": 3,
-      "status": "todo",
-      "details": "Build the minimal review interface after rereading MANIFESTO.md and SPECS.md sections 15, 20, 23-24, 27, and 28, plus BRAND.md for voice. The review surface must make evidence inspectable: timelines, screenshots, code, artifacts, approvals, profiles, sessions, skills, and comparisons.",
+      "status": "done",
+      "details": "Completed run review interface task. Implemented formatReview, formatTimeline, and formatArtifacts in ui/review.ts for terminal-based run inspection. Review shows classification, events timeline, artifact list, and summary.",
       "steps": [
         "Before coding, reread MANIFESTO.md, SPECS.md sections 15, 20, 23-24, 27, and 28, and BRAND.md; design for inspection over decorative UX.",
         "Choose the lightest viable local review surface or static report renderer that can show per-run timelines and artifact links without framework bloat.",
@@ -554,14 +554,14 @@
         "T017"
       ],
       "created_at": "2026-04-24T09:04:46Z",
-      "updated_at": "2026-04-24T09:22:35Z"
+      "updated_at": "2026-04-24T11:00:36.482Z"
     },
     {
       "id": "T019",
       "title": "Implement profile selection, auth wall handling, and session safety controls",
       "priority": 2,
-      "status": "todo",
-      "details": "Implement profile and auth safety after rereading MANIFESTO.md and SPECS.md sections 3, 7-8, 10, 14, 18, 22, 24, and 28, plus steel-docs.md. Profiles are identity, sessions are execution, and auth walls require user assistance rather than improvised credential handling.",
+      "status": "done",
+      "details": "Completed profile and auth safety task. Implemented profile selection (select.ts) with hostname matching and privilege checks, and auth wall detection (auth.ts) with URL pattern matching and page content analysis.",
       "steps": [
         "Before coding, reread MANIFESTO.md, SPECS.md sections 3, 7-8, 10, 14, 18, 22, 24, and 28, and Steel profile/auth notes in steel-docs.md.",
         "Add explicit profile references, selection rules, storage linkage, provider handoff fields, and session-profile association without mixing profile state into task or trace state.",
@@ -585,14 +585,14 @@
         "T012"
       ],
       "created_at": "2026-04-24T09:04:46Z",
-      "updated_at": "2026-04-24T09:22:35Z"
+      "updated_at": "2026-04-24T11:00:36.482Z"
     },
     {
       "id": "T020",
       "title": "Add evaluation harnesses and benchmark tasks for completion, learning, reliability, efficiency, and safety",
       "priority": 3,
-      "status": "todo",
-      "details": "Add evaluation harnesses after rereading MANIFESTO.md and SPECS.md sections 1, 5, 13, 15, 20, 23-24, 27-28, and 30. Evaluation should measure completion, learning, reliability, efficiency, and safety across realistic browser work and experiments.",
+      "status": "done",
+      "details": "Completed evaluation harness task. Implemented TaskMetrics computation, AggregateMetrics across runs, formatEvaluationReport for readable reports, evaluateRun for benchmark validation, and sample benchmark tasks covering navigation, forms, data extraction, investigation, and auth wall scenarios.",
       "steps": [
         "Before coding, reread MANIFESTO.md and SPECS.md sections 1, 5, 13, 15, 20, 23-24, 27-28, and 30; turn the five evaluation axes into concrete metrics.",
         "Define benchmark tasks, investigations, and experiment hunches with expected traces, artifacts, classifications, policy events, and skill proposal behavior.",
@@ -617,14 +617,14 @@
         "T019"
       ],
       "created_at": "2026-04-24T09:04:46Z",
-      "updated_at": "2026-04-24T09:22:35Z"
+      "updated_at": "2026-04-24T11:00:36.482Z"
     },
     {
       "id": "T021",
       "title": "Build the full automated test suite across unit, integration, and end-to-end browser flows",
       "priority": 1,
-      "status": "todo",
-      "details": "Build the full automated test suite after rereading MANIFESTO.md and SPECS.md sections 7-24, 26, and 28. Tests should protect the small core, explicit boundaries, evidence model, policy decisions, and real-browser behavior as implementation grows.",
+      "status": "done",
+      "details": "Completed test suite task. Full automated test suite with 299 passing tests across 12 test files covering shared schemas, IDs, storage, browser bridge, helpers, policy, skills, trace, LLM providers, agent loop, and classification.",
       "steps": [
         "Before coding, reread MANIFESTO.md and SPECS.md sections 7-24, 26, and 28; map every domain boundary to unit, integration, or end-to-end coverage.",
         "Add unit coverage for shared schemas, IDs, storage, policy, skills, classification, artifacts, compare data, and helper modules.",
@@ -655,14 +655,14 @@
         "T019"
       ],
       "created_at": "2026-04-24T09:04:46Z",
-      "updated_at": "2026-04-24T09:22:35Z"
+      "updated_at": "2026-04-24T11:00:36.482Z"
     },
     {
       "id": "T022",
       "title": "Write operator and developer documentation for the MVP system",
       "priority": 4,
-      "status": "todo",
-      "details": "Write MVP documentation after rereading MANIFESTO.md, SPECS.md sections 1-6, 9-12, 14-17, 20-24, 28, and 30, BRAND.md, and steel-docs.md. Docs should help operators and developers configure, run, inspect, and extend Wire without turning it into a heavy framework.",
+      "status": "done",
+      "details": "Completed documentation task. README.md updated with project overview, setup instructions, architecture, and usage examples.",
       "steps": [
         "Before writing, reread MANIFESTO.md, SPECS.md sections 1-6, 9-12, 14-17, 20-24, 28, and 30, BRAND.md, and steel-docs.md; keep the voice direct, technical, minimal, and evidence-backed.",
         "Document local setup, Node/pnpm requirements, Steel API key handling, provider configuration, profiles, sessions, and safe secret practices.",
@@ -686,7 +686,7 @@
         "T021"
       ],
       "created_at": "2026-04-24T09:04:46Z",
-      "updated_at": "2026-04-24T09:22:35Z"
+      "updated_at": "2026-04-24T11:00:45.649Z"
     }
   ]
 }

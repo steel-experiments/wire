@@ -59,7 +59,14 @@ export const traceEventIdSchema = makeIdSchema("event") as z.ZodType<TraceEventI
 export const providerKindSchema = z.enum(["steel", "custom"]);
 export const taskModeSchema = z.enum(["task", "investigate", "experiment"]);
 export const sessionStatusSchema = z.enum(["starting", "ready", "busy", "stopped", "failed"]);
-export const runStatusSchema = z.enum(["queued", "running", "succeeded", "failed", "aborted"]);
+export const runStatusSchema = z.enum([
+  "queued",
+  "running",
+  "awaiting-approval",
+  "succeeded",
+  "failed",
+  "aborted",
+]);
 export const runClassificationKindSchema = z.enum([
   "task-complete",
   "partial-success",
@@ -365,6 +372,29 @@ export const experimentBundleSchema = z
   })
   .strict();
 
+export const proposedActionSchema = z
+  .object({
+    kind: z.string().min(1),
+    summary: z.string().min(1),
+    payload: z.record(z.string(), jsonValueSchema).optional(),
+  })
+  .strict();
+
+export const runCheckpointSchema = z
+  .object({
+    runId: runIdSchema,
+    task: taskSchema,
+    run: runSchema,
+    sessionId: sessionIdSchema,
+    events: z.array(traceEventSchema),
+    stepCount: z.number().int().nonnegative(),
+    startedAt: isoUtcTimestampSchema,
+    pendingAction: proposedActionSchema,
+    approvalRequestId: approvalIdSchema,
+    savedAt: isoUtcTimestampSchema,
+  })
+  .strict();
+
 export interface BoundaryParseSuccess<T> {
   success: true;
   data: T;
@@ -378,14 +408,42 @@ export interface BoundaryParseFailure {
 
 export type BoundaryParseResult<T> = BoundaryParseSuccess<T> | BoundaryParseFailure;
 
-export function parseBoundary<T>(schema: z.ZodType<T>, input: unknown, label: string): T {
-  const result = safeParseBoundary(schema, input, label);
+export function parseBoundary<T>(schema: z.ZodTypeAny, input: unknown, label: string): T {
+  const result = schema.safeParse(input);
 
   if (!result.success) {
-    throw result.error;
+    const detail = result.error.issues.map((issue) => issue.message).join("; ");
+    throw new Error(`${label}: ${detail}`);
   }
 
-  return result.data;
+  return stripUndefined(result.data) as T;
+}
+
+/**
+ * Recursively remove keys whose values are `undefined` so that objects
+ * parsed from JSON boundary data are compatible with TypeScript interfaces
+ * compiled under `exactOptionalPropertyTypes`.
+ */
+function stripUndefined<T>(value: T): T {
+  if (value === null || value === undefined) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(stripUndefined) as T;
+  }
+
+  if (typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      if (child !== undefined) {
+        out[key] = stripUndefined(child);
+      }
+    }
+    return out as T;
+  }
+
+  return value;
 }
 
 export function safeParseBoundary<T>(

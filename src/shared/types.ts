@@ -2,7 +2,13 @@ export type ProviderKind = "steel" | "custom";
 
 export type TaskMode = "task" | "investigate" | "experiment";
 export type SessionStatus = "starting" | "ready" | "busy" | "stopped" | "failed";
-export type RunStatus = "queued" | "running" | "succeeded" | "failed" | "aborted";
+export type RunStatus =
+  | "queued"
+  | "running"
+  | "awaiting-approval"
+  | "succeeded"
+  | "failed"
+  | "aborted";
 export type RunClassificationKind =
   | "task-complete"
   | "partial-success"
@@ -280,4 +286,23 @@ export interface ExperimentBundle {
   runIds: RunId[];
   comparisons: ComparisonSpec[];
   summary?: ExperimentSummary;
+}
+
+export interface ProposedAction {
+  kind: string;
+  summary: string;
+  payload?: JsonObject;
+}
+
+export interface RunCheckpoint {
+  runId: RunId;
+  task: Task;
+  run: Run;
+  sessionId: SessionId;
+  events: TraceEvent[];
+  stepCount: number;
+  startedAt: string;
+  pendingAction: ProposedAction;
+  approvalRequestId: ApprovalId;
+  savedAt: string;
 }

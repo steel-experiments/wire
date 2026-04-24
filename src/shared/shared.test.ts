@@ -9,6 +9,14 @@ import {
   nowIsoUtc,
   stableJsonStringify,
 } from "./ids.js";
+import type {
+  BrowserExecRequest,
+  BrowserExecResult,
+  BrowserObservation,
+  CreateSessionInput,
+  SkillFrontmatter,
+  Task,
+} from "./types.js";
 import {
   browserExecRequestSchema,
   browserExecResultSchema,
@@ -59,7 +67,7 @@ test("cloneJson returns a deep clone", () => {
 });
 
 test("taskSchema accepts persisted task boundaries", () => {
-  const task = parseBoundary(
+  const task = parseBoundary<Task>(
     taskSchema,
     {
       id: createId("task"),
@@ -81,7 +89,7 @@ test("taskSchema accepts persisted task boundaries", () => {
 });
 
 test("skillFrontmatterSchema validates boundary-only skill metadata", () => {
-  const skill = parseBoundary(
+  const skill = parseBoundary<SkillFrontmatter>(
     skillFrontmatterSchema,
     {
       id: createId("skill"),
@@ -99,7 +107,7 @@ test("skillFrontmatterSchema validates boundary-only skill metadata", () => {
 });
 
 test("provider input and output schemas validate browser boundaries", () => {
-  const sessionInput = parseBoundary(
+  const sessionInput = parseBoundary<CreateSessionInput>(
     createSessionInputSchema,
     {
       profileId: createId("profile"),
@@ -111,7 +119,7 @@ test("provider input and output schemas validate browser boundaries", () => {
     "create-session-input",
   );
 
-  const execRequest = parseBoundary(
+  const execRequest = parseBoundary<BrowserExecRequest>(
     browserExecRequestSchema,
     {
       sessionId: createId("session"),
@@ -123,7 +131,7 @@ test("provider input and output schemas validate browser boundaries", () => {
     "browser-exec-request",
   );
 
-  const execResult = parseBoundary(
+  const execResult = parseBoundary<BrowserExecResult>(
     browserExecResultSchema,
     {
       ok: true,
@@ -135,7 +143,7 @@ test("provider input and output schemas validate browser boundaries", () => {
     "browser-exec-result",
   );
 
-  const observation = parseBoundary(
+  const observation = parseBoundary<BrowserObservation>(
     browserObservationSchema,
     {
       sessionId: createId("session"),

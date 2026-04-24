@@ -1,0 +1,369 @@
+import { strict as assert } from "node:assert";
+import { test } from "node:test";
+
+import {
+  SteelProvider,
+  createSteelProvider,
+} from "../../providers/browser/steel.js";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Build a fake Steel session response. */
+function fakeSteelSession(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    status: "active",
+    websocketUrl: "wss://connect.steel.dev?sessionId=aaa-bbb-ccc",
+    sessionViewerUrl: "https://api.steel.dev/v1/sessions/aaa-bbb-ccc/player",
+    createdAt: "2026-04-24T10:00:00.000Z",
+    ...overrides,
+  };
+}
+
+/** Create a provider with mocked fetch. Returns the provider and a function
+ *  to set the mock response for the next request. */
+function createMockedProvider() {
+  const responses = new Map<string, { ok: boolean; status: number; body: unknown }>();
+  const cdpResponses = new Map<string, unknown>();
+
+  class MockSocket {
+    onopen: ((event: any) => void) | null = null;
+    onmessage: ((event: any) => void) | null = null;
+    onerror: ((event: any) => void) | null = null;
+    onclose: ((event: any) => void) | null = null;
+
+    constructor() {
+      queueMicrotask(() => this.onopen?.({}));
+    }
+
+    send(data: string): void {
+      const message = JSON.parse(data) as { id: number; method: string };
+      const result = cdpResponses.get(message.method);
+      queueMicrotask(() => {
+        this.onmessage?.({ data: JSON.stringify({ id: message.id, result }) });
+      });
+    }
+
+    close(): void {
+      this.onclose?.({});
+    }
+  }
+
+  const provider = new SteelProvider({
+    apiKey: "ste-test-key",
+    baseUrl: "http://localhost:0/v1",
+    webSocketFactory: () => new MockSocket(),
+  });
+
+  // Monkey-patch global fetch for test isolation
+  const originalFetch = globalThis.fetch;
+
+  const mockFetch = async (url: string | URL | Request, _init?: RequestInit) => {
+    const key = String(url).replace("http://localhost:0/v1", "");
+    const nextResponse = responses.get(key) ?? { ok: true, status: 200, body: {} };
+    if (!nextResponse.ok) {
+      return new Response(
+        JSON.stringify({ message: String(nextResponse.body) }),
+        { status: nextResponse.status, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return new Response(
+      JSON.stringify(nextResponse.body),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  };
+
+  globalThis.fetch = mockFetch as typeof fetch;
+
+  const setNextResponse = (path: string, body: unknown, ok = true, status = 200) => {
+    responses.set(path, { ok, status, body });
+  };
+
+  const setCdpResponse = (method: string, body: unknown) => {
+    cdpResponses.set(method, body);
+  };
+
+  const restore = () => {
+    globalThis.fetch = originalFetch;
+  };
+
+  return { provider, setNextResponse, setCdpResponse, restore };
+}
+
+// ---------------------------------------------------------------------------
+// createSession
+// ---------------------------------------------------------------------------
+
+test("SteelProvider.createSession returns mapped BrowserSession", async () => {
+  const { provider, setNextResponse, restore } = createMockedProvider();
+  setNextResponse("/sessions", fakeSteelSession());
+
+  try {
+    const session = await provider.createSession({});
+
+    assert.ok(session.id.startsWith("session_"));
+    assert.equal(session.provider, "steel");
+    assert.equal(session.status, "ready");
+    assert.ok(session.wsUrl);
+    assert.ok(session.liveUrl);
+  } finally {
+    restore();
+  }
+});
+
+test("SteelProvider.createSession maps profile and region", async () => {
+  const { provider, setNextResponse, restore } = createMockedProvider();
+  setNextResponse(
+    "/sessions",
+    fakeSteelSession({ profileId: "saved-profile-1", region: "us-west-2" }),
+  );
+
+  try {
+    const session = await provider.createSession({
+      profileId: "profile_saved-profile-1" as never,
+      region: "us-west-2",
+    });
+
+    assert.equal(session.profileId, "profile_saved-profile-1");
+    assert.equal(session.region, "us-west-2");
+  } finally {
+    restore();
+  }
+});
+
+test("SteelProvider.createSession maps Steel status correctly", async () => {
+  const { provider, setNextResponse, restore } = createMockedProvider();
+
+  const cases: Array<[string, string]> = [
+    ["active", "ready"],
+    ["live", "ready"],
+    ["created", "starting"],
+    ["queued", "starting"],
+    ["released", "stopped"],
+    ["closed", "stopped"],
+    ["timeout", "failed"],
+    ["error", "failed"],
+  ];
+
+  for (const [steelStatus, expected] of cases) {
+    setNextResponse("/sessions", fakeSteelSession({ status: steelStatus }));
+
+    const session = await provider.createSession({});
+    assert.equal(session.status, expected, `Expected ${steelStatus} → ${expected}`);
+  }
+
+  restore();
+});
+
+// ---------------------------------------------------------------------------
+// getSession
+// ---------------------------------------------------------------------------
+
+test("SteelProvider.getSession retrieves existing session", async () => {
+  const { provider, setNextResponse, restore } = createMockedProvider();
+  setNextResponse("/sessions/aaa-bbb-ccc", fakeSteelSession());
+
+  try {
+    const session = await provider.getSession("session_aaa-bbb-ccc" as never);
+    assert.equal(session.provider, "steel");
+    assert.equal(session.status, "ready");
+  } finally {
+    restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// stopSession
+// ---------------------------------------------------------------------------
+
+test("SteelProvider.stopSession succeeds on 200", async () => {
+  const { provider, setNextResponse, restore } = createMockedProvider();
+  setNextResponse("/sessions/aaa-bbb-ccc/release", {});
+
+  try {
+    await provider.stopSession("session_aaa-bbb-ccc" as never);
+    // No error means success
+  } finally {
+    restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Error handling
+// ---------------------------------------------------------------------------
+
+test("SteelProvider throws on auth failure (401)", async () => {
+  const { provider, setNextResponse, restore } = createMockedProvider();
+  setNextResponse("/sessions", "Invalid Steel API Key", false, 401);
+
+  try {
+    await assert.rejects(
+      () => provider.createSession({}),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /401/);
+        assert.match(err.message, /Invalid Steel API Key/);
+        // Secret must not leak into error messages
+        assert.doesNotMatch(err.message, /ste-test-key/);
+        return true;
+      },
+    );
+  } finally {
+    restore();
+  }
+});
+
+test("SteelProvider throws on network error", async () => {
+  const { provider, restore } = createMockedProvider();
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("ECONNREFUSED"); };
+
+  try {
+    await assert.rejects(
+      () => provider.createSession({}),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /Network error/);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// observe/exec/raw
+// ---------------------------------------------------------------------------
+
+test("SteelProvider.observe returns page snapshot", async () => {
+  const { provider, setNextResponse, setCdpResponse, restore } = createMockedProvider();
+  setNextResponse("/sessions/aaa-bbb-ccc", fakeSteelSession({ id: "aaa-bbb-ccc" }));
+  setCdpResponse("Target.getTargets", {
+    targetInfos: [{ targetId: "tab-1", type: "page", title: "Example", url: "https://example.com" }],
+  });
+  setCdpResponse("Target.attachToTarget", { sessionId: "cdp-session-1" });
+  setCdpResponse("Runtime.evaluate", {
+    result: {
+      value: {
+        url: "https://example.com/dashboard",
+        title: "Dashboard",
+        pageSummary: { forms: 1, buttons: 2, dialogs: 0, tables: 0, visibleTexts: ["Dashboard"] },
+      },
+    },
+  });
+
+  try {
+    const observation = await provider.observe({ sessionId: "session_aaa-bbb-ccc" as never });
+    assert.equal(observation.url, "https://example.com/dashboard");
+    assert.equal(observation.title, "Dashboard");
+    assert.equal(observation.tabs.length, 1);
+  } finally {
+    restore();
+  }
+});
+
+test("SteelProvider.exec evaluates code in the page target", async () => {
+  const { provider, setNextResponse, setCdpResponse, restore } = createMockedProvider();
+  setNextResponse("/sessions/aaa-bbb-ccc", fakeSteelSession({ id: "aaa-bbb-ccc" }));
+  setCdpResponse("Target.getTargets", {
+    targetInfos: [{ targetId: "tab-1", type: "page", title: "Example", url: "https://example.com" }],
+  });
+  setCdpResponse("Target.attachToTarget", { sessionId: "cdp-session-1" });
+  setCdpResponse("Runtime.evaluate", {
+    result: { value: { title: "Example" } },
+  });
+
+  try {
+    const result = await provider.exec({ sessionId: "session_aaa-bbb-ccc" as never, code: "return { title: document.title };" });
+    assert.equal(result.ok, true);
+    assert.match(result.stdout ?? "", /Example/);
+  } finally {
+    restore();
+  }
+});
+
+test("SteelProvider.raw sends a CDP command over websocket", async () => {
+  const { provider, setNextResponse, setCdpResponse, restore } = createMockedProvider();
+  setNextResponse("/sessions/aaa-bbb-ccc", fakeSteelSession({ id: "aaa-bbb-ccc" }));
+  setCdpResponse("Browser.getVersion", { product: "Chrome/123" });
+
+  try {
+    const result = await provider.raw({
+      sessionId: "session_aaa-bbb-ccc" as never,
+      method: "Browser.getVersion",
+    });
+    assert.deepEqual(result, { product: "Chrome/123" });
+  } finally {
+    restore();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// createSteelProvider factory
+// ---------------------------------------------------------------------------
+
+test("createSteelProvider throws when no API key is available", () => {
+  const original = process.env.STEEL_API_KEY;
+  delete process.env.STEEL_API_KEY;
+
+  try {
+    assert.throws(
+      () => createSteelProvider(),
+      { message: /STEEL_API_KEY is required/ },
+    );
+  } finally {
+    if (original) process.env.STEEL_API_KEY = original;
+  }
+});
+
+test("createSteelProvider uses env var when no config provided", () => {
+  const original = process.env.STEEL_API_KEY;
+  process.env.STEEL_API_KEY = "ste-from-env";
+
+  try {
+    const provider = createSteelProvider();
+    assert.ok(provider instanceof SteelProvider);
+  } finally {
+    if (original) {
+      process.env.STEEL_API_KEY = original;
+    } else {
+      delete process.env.STEEL_API_KEY;
+    }
+  }
+});
+
+test("createSteelProvider uses explicit config over env var", () => {
+  process.env.STEEL_API_KEY = "ste-from-env";
+
+  try {
+    const provider = createSteelProvider({ apiKey: "ste-explicit" });
+    assert.ok(provider instanceof SteelProvider);
+  } finally {
+    delete process.env.STEEL_API_KEY;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Secret redaction
+// ---------------------------------------------------------------------------
+
+test("displaySafeUrl strips apiKey from query params", async () => {
+  const { displaySafeUrl } = await import("../../browser/session.js");
+
+  const url = "wss://connect.steel.dev?apiKey=ste-secret-key&sessionId=abc";
+  const safe = displaySafeUrl(url);
+
+  assert.ok(safe);
+  assert.doesNotMatch(safe, /ste-secret-key/);
+  assert.match(safe, /sessionId=abc/);
+});
+
+test("displaySafeUrl returns undefined for undefined input", async () => {
+  const { displaySafeUrl } = await import("../../browser/session.js");
+  assert.equal(displaySafeUrl(undefined), undefined);
+});

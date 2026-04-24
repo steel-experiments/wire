@@ -1,1 +1,525 @@
-export {};
+import type {
+  BrowserExecRequest,
+  BrowserExecResult,
+  BrowserObservation,
+  BrowserRawRequest,
+  BrowserSession,
+  CreateSessionInput,
+  SessionId,
+  SessionStatus,
+} from "../../shared/types.js";
+import { nowIsoUtc } from "../../shared/ids.js";
+import type { BrowserObserveInput, BrowserProvider } from "../../browser/bridge.js";
+
+export interface SteelProviderConfig {
+  apiKey: string;
+  baseUrl?: string;
+  webSocketFactory?: (url: string) => WebSocketLike;
+}
+
+const DEFAULT_BASE_URL = "https://api.steel.dev/v1";
+
+interface SteelSessionResponse {
+  id: string;
+  status: string;
+  websocketUrl: string;
+  sessionViewerUrl: string;
+  createdAt: string;
+  expiresAt?: string;
+  profileId?: string;
+  region?: string;
+  proxy?: string | boolean | Record<string, unknown>;
+}
+
+interface TargetInfo {
+  targetId: string;
+  type: string;
+  title: string;
+  url: string;
+}
+
+interface WebSocketLike {
+  onopen: ((event: any) => void) | null;
+  onmessage: ((event: any) => void) | null;
+  onerror: ((event: any) => void) | null;
+  onclose: ((event: any) => void) | null;
+  send(data: string): void;
+  close(): void;
+}
+
+function mapStatus(steelStatus: string): SessionStatus {
+  switch (steelStatus) {
+    case "live":
+    case "active":
+      return "ready";
+    case "created":
+    case "queued":
+    case "launching":
+      return "starting";
+    case "released":
+    case "closed":
+      return "stopped";
+    case "timeout":
+    case "timed_out":
+    case "error":
+    case "failed":
+      return "failed";
+    default:
+      return "starting";
+  }
+}
+
+function toBrowserSession(steel: SteelSessionResponse, region?: string): BrowserSession {
+  const session: BrowserSession = {
+    id: `session_${steel.id}` as SessionId,
+    provider: "steel",
+    liveUrl: steel.sessionViewerUrl,
+    wsUrl: steel.websocketUrl,
+    createdAt: steel.createdAt ?? nowIsoUtc(),
+    status: mapStatus(steel.status),
+  };
+
+  if (steel.profileId) {
+    session.profileId = `profile_${steel.profileId}` as never;
+  }
+
+  if (region) {
+    session.region = region;
+  }
+
+  return session;
+}
+
+class SteelApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(`Steel API error (${status}): ${message}`);
+    this.name = "SteelApiError";
+  }
+}
+
+async function steelFetch<T>(
+  baseUrl: string,
+  apiKey: string,
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const url = `${baseUrl}${path}`;
+  const headers: Record<string, string> = {
+    "steel-api-key": apiKey,
+    "Content-Type": "application/json",
+    ...(options.headers as Record<string, string> | undefined),
+  };
+
+  let response: Response;
+  try {
+    response = await fetch(url, { ...options, headers });
+  } catch (err) {
+    throw new SteelApiError(0, `Network error: ${(err as Error).message}`);
+  }
+
+  if (!response.ok) {
+    let detail: string;
+    try {
+      const body = (await response.json()) as { message?: string; error?: string };
+      detail = body.message ?? body.error ?? response.statusText;
+    } catch {
+      detail = response.statusText;
+    }
+    throw new SteelApiError(response.status, detail);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return (await response.json()) as T;
+}
+
+interface SteelCreateSessionBody {
+  persistProfile?: boolean;
+  profileId?: string;
+  region?: string;
+  useProxy?: boolean | Record<string, unknown>;
+  solveCaptcha?: boolean;
+  timeout?: number;
+  [key: string]: unknown;
+}
+
+function buildCreateSessionBody(input: CreateSessionInput): SteelCreateSessionBody {
+  const body: SteelCreateSessionBody = {};
+
+  if (input.profileId) {
+    body.profileId = input.profileId.replace(/^profile_/u, "");
+    body.persistProfile = true;
+  }
+
+  if (input.region) {
+    body.region = input.region;
+  }
+
+  if (input.proxyCountryCode) {
+    body.useProxy = {
+      geolocation: { country: input.proxyCountryCode },
+    };
+  }
+
+  if (input.timeoutMinutes) {
+    body.timeout = input.timeoutMinutes * 60_000;
+  }
+
+  if (input.metadata) {
+    Object.assign(body, input.metadata);
+  }
+
+  return body;
+}
+
+function extractSteelId(sessionId: SessionId): string {
+  return sessionId.replace(/^session_/u, "");
+}
+
+export class SteelProvider implements BrowserProvider {
+  private readonly apiKey: string;
+  private readonly baseUrl: string;
+  private readonly webSocketFactory: (url: string) => WebSocketLike;
+
+  constructor(config: SteelProviderConfig) {
+    this.apiKey = config.apiKey;
+    this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
+    this.webSocketFactory = config.webSocketFactory ?? ((url) => new WebSocket(url) as unknown as WebSocketLike);
+  }
+
+  async createSession(input: CreateSessionInput = {}): Promise<BrowserSession> {
+    const body = buildCreateSessionBody(input);
+    const steel = await steelFetch<SteelSessionResponse>(
+      this.baseUrl,
+      this.apiKey,
+      "/sessions",
+      { method: "POST", body: JSON.stringify(body) },
+    );
+
+    return toBrowserSession(steel, input.region);
+  }
+
+  async getSession(sessionId: SessionId): Promise<BrowserSession> {
+    const steelId = extractSteelId(sessionId);
+    const steel = await steelFetch<SteelSessionResponse>(
+      this.baseUrl,
+      this.apiKey,
+      `/sessions/${steelId}`,
+    );
+
+    return toBrowserSession(steel);
+  }
+
+  async stopSession(sessionId: SessionId): Promise<void> {
+    const steelId = extractSteelId(sessionId);
+    await steelFetch<void>(
+      this.baseUrl,
+      this.apiKey,
+      `/sessions/${steelId}/release`,
+      { method: "POST" },
+    );
+  }
+
+  private withAuth(session: BrowserSession): BrowserSession {
+    if (!session.wsUrl) return session;
+    const url = new URL(session.wsUrl);
+    url.searchParams.set("apiKey", this.apiKey);
+    return { ...session, wsUrl: url.toString() };
+  }
+
+  async observe(input: BrowserObserveInput): Promise<BrowserObservation> {
+    const session = this.withAuth(await this.getSession(input.sessionId));
+
+    return withConnection(this.webSocketFactory, session, async (cdp) => {
+      const targets = await listPageTargets(cdp);
+      const target = pickTarget(targets, input.targetId);
+      const sessionId = await attachToTarget(cdp, target.targetId);
+      const snapshot = await evaluateJson<Record<string, unknown>>(cdp, sessionId, OBSERVE_SCRIPT);
+
+      const observation: BrowserObservation = {
+        sessionId: input.sessionId,
+        targetId: target.targetId,
+        url: asString(snapshot.url, target.url),
+        title: asString(snapshot.title, target.title),
+        tabs: targets.map((item) => ({
+          id: item.targetId,
+          title: item.title,
+          url: item.url,
+          active: item.targetId === target.targetId,
+        })),
+      };
+
+      const focusedElement = asRecord(snapshot.focusedElement);
+      if (focusedElement) {
+        observation.focusedElement = focusedElement as NonNullable<BrowserObservation["focusedElement"]>;
+      }
+      const pageSummary = asRecord(snapshot.pageSummary);
+      if (pageSummary) {
+        observation.pageSummary = pageSummary as NonNullable<BrowserObservation["pageSummary"]>;
+      }
+
+      return observation;
+    });
+  }
+
+  async exec(input: BrowserExecRequest): Promise<BrowserExecResult> {
+    const session = this.withAuth(await this.getSession(input.sessionId));
+
+    return withConnection(this.webSocketFactory, session, async (cdp) => {
+      const startedAt = Date.now();
+      const targets = await listPageTargets(cdp);
+      const selected = pickExecTargets(targets, input.target);
+      const stdout: string[] = [];
+      const stderr: string[] = [];
+      let ok = true;
+      let returnValue: unknown;
+
+      for (const target of selected) {
+        try {
+          const sessionId = await attachToTarget(cdp, target.targetId);
+          const value = await evaluateJson<unknown>(cdp, sessionId, wrapUserCode(input.code), input.timeoutMs);
+          returnValue = value;
+          if (value !== undefined) {
+            stdout.push(typeof value === "string" ? value : JSON.stringify(value));
+          }
+        } catch (err) {
+          ok = false;
+          stderr.push(err instanceof Error ? err.message : String(err));
+        }
+      }
+
+      const result: BrowserExecResult = {
+        ok,
+        durationMs: Date.now() - startedAt,
+      };
+      if (stdout.length > 0) {
+        result.stdout = stdout.join("\n");
+      }
+      if (stderr.length > 0) {
+        result.stderr = stderr.join("\n");
+      }
+      if (returnValue !== undefined) {
+        result.returnValue = returnValue as NonNullable<BrowserExecResult["returnValue"]>;
+      }
+      return result;
+    });
+  }
+
+  async raw(input: BrowserRawRequest): Promise<unknown> {
+    const session = this.withAuth(await this.getSession(input.sessionId));
+    return withConnection(this.webSocketFactory, session, async (cdp) =>
+      cdp.send(input.method, input.params),
+    );
+  }
+}
+
+const OBSERVE_SCRIPT = `(() => {
+  const visibleTexts = Array.from(document.querySelectorAll("body *"))
+    .map((node) => node.textContent?.trim() ?? "")
+    .filter((text) => text.length > 0)
+    .slice(0, 20);
+  const active = document.activeElement;
+  return {
+    url: window.location.href,
+    title: document.title,
+    focusedElement: active ? {
+      tag: active.tagName?.toLowerCase?.(),
+      role: active.getAttribute?.("role") ?? undefined,
+      label: active.getAttribute?.("aria-label") ?? undefined,
+      selectorHint: active.id ? "#" + active.id : undefined,
+    } : undefined,
+    pageSummary: {
+      visibleTexts,
+      forms: document.forms.length,
+      buttons: document.querySelectorAll("button, input[type=button], input[type=submit]").length,
+      dialogs: document.querySelectorAll("dialog, [role=\\"dialog\\"]").length,
+      tables: document.querySelectorAll("table").length,
+    },
+  };
+})()`;
+
+function wrapUserCode(code: string): string {
+  return `(async () => { ${code} })()`;
+}
+
+class CdpConnection {
+  private nextId = 1;
+  private readonly pending = new Map<number, {
+    resolve: (value: unknown) => void;
+    reject: (reason?: unknown) => void;
+  }>();
+  private readonly ready: Promise<void>;
+
+  constructor(private readonly socket: WebSocketLike) {
+      this.ready = new Promise((resolve, reject) => {
+      this.socket.onopen = () => resolve();
+      this.socket.onerror = () => reject(new Error("WebSocket error"));
+      this.socket.onclose = () => {
+        for (const entry of this.pending.values()) {
+          entry.reject(new Error("CDP socket closed"));
+        }
+        this.pending.clear();
+      };
+      this.socket.onmessage = (event) => {
+        const message = JSON.parse(String(event.data)) as {
+          id?: number;
+          result?: unknown;
+          error?: { message?: string };
+        };
+        if (message.id === undefined) {
+          return;
+        }
+        const entry = this.pending.get(message.id);
+        if (!entry) {
+          return;
+        }
+        this.pending.delete(message.id);
+        if (message.error) {
+          entry.reject(new Error(message.error.message ?? "CDP error"));
+          return;
+        }
+        entry.resolve(message.result);
+      };
+    });
+  }
+
+  async send<T>(method: string, params?: Record<string, unknown>, sessionId?: string): Promise<T> {
+    await this.ready;
+    const id = this.nextId++;
+    return await new Promise<T>((resolve, reject) => {
+      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
+      const message: Record<string, unknown> = { id, method };
+      if (params) {
+        message.params = params;
+      }
+      if (sessionId) {
+        message.sessionId = sessionId;
+      }
+      this.socket.send(JSON.stringify(message));
+    });
+  }
+
+  close(): void {
+    this.socket.close();
+  }
+}
+
+async function withConnection<T>(
+  webSocketFactory: (url: string) => WebSocketLike,
+  session: BrowserSession,
+  run: (cdp: CdpConnection) => Promise<T>,
+): Promise<T> {
+  if (!session.wsUrl) {
+    throw new Error("Steel session missing wsUrl");
+  }
+
+  const cdp = new CdpConnection(webSocketFactory(session.wsUrl));
+  try {
+    return await run(cdp);
+  } finally {
+    cdp.close();
+  }
+}
+
+async function listPageTargets(cdp: CdpConnection): Promise<TargetInfo[]> {
+  const response = await cdp.send<{ targetInfos?: TargetInfo[] }>("Target.getTargets");
+  return (response.targetInfos ?? []).filter((target) => target.type === "page");
+}
+
+function pickTarget(targets: TargetInfo[], targetId?: string): TargetInfo {
+  if (targets.length === 0) {
+    throw new Error("No page targets available");
+  }
+
+  if (targetId) {
+    const exact = targets.find((target) => target.targetId === targetId);
+    if (!exact) {
+      throw new Error(`Target not found: ${targetId}`);
+    }
+    return exact;
+  }
+
+  return targets[0]!;
+}
+
+function pickExecTargets(
+  targets: TargetInfo[],
+  target: BrowserExecRequest["target"],
+): TargetInfo[] {
+  if (target === "all-tabs") {
+    return targets;
+  }
+
+  if (typeof target === "object" && target !== null && "tabId" in target) {
+    return [pickTarget(targets, target.tabId)];
+  }
+
+  return [pickTarget(targets)];
+}
+
+async function attachToTarget(cdp: CdpConnection, targetId: string): Promise<string> {
+  const response = await cdp.send<{ sessionId: string }>("Target.attachToTarget", {
+    targetId,
+    flatten: true,
+  });
+  return response.sessionId;
+}
+
+async function evaluateJson<T>(
+  cdp: CdpConnection,
+  sessionId: string,
+  expression: string,
+  timeoutMs?: number,
+): Promise<T> {
+  const response = await cdp.send<{
+    result?: { value?: T; description?: string };
+    exceptionDetails?: { text?: string };
+  }>(
+    "Runtime.evaluate",
+    {
+      expression,
+      awaitPromise: true,
+      returnByValue: true,
+      timeout: timeoutMs,
+    },
+    sessionId,
+  );
+
+  if (response.exceptionDetails) {
+    throw new Error(response.exceptionDetails.text ?? response.result?.description ?? "Runtime evaluation failed");
+  }
+
+  return response.result?.value as T;
+}
+
+function asString(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.length > 0 ? value : fallback;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" ? value as Record<string, unknown> : undefined;
+}
+
+export function createSteelProvider(
+  config?: Partial<SteelProviderConfig>,
+): SteelProvider {
+  const apiKey = config?.apiKey ?? process.env.STEEL_API_KEY ?? "";
+  if (!apiKey) {
+    throw new Error("STEEL_API_KEY is required. Set the environment variable or pass apiKey in config.");
+  }
+
+  const providerConfig: SteelProviderConfig = { apiKey };
+  if (config?.baseUrl) {
+    providerConfig.baseUrl = config.baseUrl;
+  }
+  if (config?.webSocketFactory) {
+    providerConfig.webSocketFactory = config.webSocketFactory;
+  }
+
+  return new SteelProvider(providerConfig);
+}
