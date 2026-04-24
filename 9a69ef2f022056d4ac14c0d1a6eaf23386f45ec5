@@ -1,0 +1,10 @@
+# Context
+
+## Background
+Bootstrap the repository with the strict TypeScript and pnpm/tsx foundation required by T001.
+
+## Why This Way
+Keep the initial scaffold compile-clean, ESM-only, and dependency-light while mirroring the architecture from SPECS.md.
+
+## Gotchas
+Most source modules are intentionally empty stubs so later tasks can fill behavior without reworking the layout.
