@@ -1,0 +1,641 @@
+{
+  "schema_version": 1,
+  "project": {
+    "name": "Wire",
+    "root": "."
+  },
+  "source_files": [
+    "AGENTS.md",
+    "MANIFESTO.md",
+    "SPECS.md",
+    "BRAND.md",
+    "steel-docs.md"
+  ],
+  "tasks": [
+    {
+      "id": "T001",
+      "title": "Bootstrap the TypeScript workspace and zero-weight project skeleton",
+      "priority": 1,
+      "status": "done",
+      "details": "Create the Node.js 22+, strict TypeScript, ESM-only foundation with the minimal dependency policy and the directory layout described in the spec.",
+      "steps": [
+        "Create package metadata, tsconfig, lint/format conventions, and dev scripts with pnpm and tsx.",
+        "Create the src/, skills/, and docs-facing root files expected by the architecture.",
+        "Document the repo conventions so future modules preserve the small-core boundary."
+      ],
+      "tags": [
+        "foundation",
+        "tooling",
+        "typescript"
+      ],
+      "files": [
+        "package.json",
+        "tsconfig.json",
+        "README.md",
+        "CONTRIBUTING.md",
+        "AGENT.md",
+        "SYSTEM.md",
+        "src/",
+        "skills/"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:09:42Z"
+    },
+    {
+      "id": "T002",
+      "title": "Define shared core types, schemas, IDs, and boundary validators",
+      "priority": 1,
+      "status": "todo",
+      "details": "Implement the shared contracts for Task, Run, Session, Profile, Skill, Artifact, Hypothesis, approvals, and policy decisions with runtime validation only at system boundaries.",
+      "steps": [
+        "Author TypeScript interfaces in shared types modules.",
+        "Add zod schemas for persisted state, provider I/O, and skill frontmatter boundaries.",
+        "Centralize ID generation, timestamps, and serialization helpers."
+      ],
+      "tags": [
+        "foundation",
+        "types",
+        "schemas"
+      ],
+      "files": [
+        "src/shared/types.ts",
+        "src/shared/schemas.ts",
+        "src/shared/ids.ts"
+      ],
+      "depends_on": [
+        "T001"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T003",
+      "title": "Implement file-backed storage for tasks, runs, sessions, artifacts, and experiment state",
+      "priority": 1,
+      "status": "todo",
+      "details": "Build durable local persistence with clear separation between immutable trace/evidence and mutable runtime state.",
+      "steps": [
+        "Define on-disk formats and directory structure for persisted objects.",
+        "Implement CRUD modules for tasks, runs, sessions, artifacts, and experiment bundles.",
+        "Add tests for atomic writes, reload behavior, and schema validation."
+      ],
+      "tags": [
+        "storage",
+        "persistence"
+      ],
+      "files": [
+        "src/storage/tasks.ts",
+        "src/storage/runs.ts",
+        "src/storage/sessions.ts",
+        "src/storage/artifacts.ts"
+      ],
+      "depends_on": [
+        "T002"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T004",
+      "title": "Build the browser provider contract and Steel provider implementation",
+      "priority": 1,
+      "status": "todo",
+      "details": "Implement the provider abstraction around session lifecycle, observation, execution, and optional raw access, starting with Steel as the primary remote browser backend.",
+      "steps": [
+        "Create the BrowserProvider interface and provider-specific input/output schemas.",
+        "Implement Steel session creation, lookup, shutdown, and connection plumbing.",
+        "Handle API key configuration and provider errors without leaking secrets into model context."
+      ],
+      "tags": [
+        "browser",
+        "provider",
+        "steel"
+      ],
+      "files": [
+        "src/providers/browser/steel.ts",
+        "src/browser/session.ts",
+        "src/browser/bridge.ts"
+      ],
+      "depends_on": [
+        "T002"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T005",
+      "title": "Implement browser observation bundles with compact summaries and artifacts",
+      "priority": 1,
+      "status": "todo",
+      "details": "Ship browser.observe() so the runtime can inspect a real page cheaply before and after actions.",
+      "steps": [
+        "Capture active tab, tab list, URL, title, focus context, and compact page summary.",
+        "Persist screenshot, HTML, and markdown artifacts and link them from the observation.",
+        "Normalize output for compare views and tests."
+      ],
+      "tags": [
+        "browser",
+        "observe",
+        "artifacts"
+      ],
+      "files": [
+        "src/browser/observe.ts",
+        "src/trace/artifacts.ts"
+      ],
+      "depends_on": [
+        "T003",
+        "T004"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T006",
+      "title": "Implement code-first browser execution with helper loading and raw escape hatch",
+      "priority": 1,
+      "status": "todo",
+      "details": "Ship browser.exec() and browser.raw() so the agent can act through inspectable code while preserving a lower-level escape hatch.",
+      "steps": [
+        "Execute JS or TS snippets against the current session with timeout and target routing.",
+        "Support helper imports or attachments without growing a DSL.",
+        "Trace executed code, outputs, artifacts, and raw protocol usage explicitly."
+      ],
+      "tags": [
+        "browser",
+        "exec",
+        "helpers"
+      ],
+      "files": [
+        "src/browser/exec.ts",
+        "src/browser/raw.ts",
+        "src/browser/targets.ts"
+      ],
+      "depends_on": [
+        "T004"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T007",
+      "title": "Create the thin helper module system for forms, clicks, uploads, and tables",
+      "priority": 2,
+      "status": "todo",
+      "details": "Add editable helper modules that reduce noise for common interactions but preserve direct code access and diffable changes.",
+      "steps": [
+        "Implement minimal helpers for forms, clicks, uploads, and table extraction.",
+        "Define conventions for task-local edits and helper artifact diffs.",
+        "Add tests showing helper use and escape-hatch fallback."
+      ],
+      "tags": [
+        "browser",
+        "helpers"
+      ],
+      "files": [
+        "src/browser/helpers/forms.ts",
+        "src/browser/helpers/clicks.ts",
+        "src/browser/helpers/uploads.ts",
+        "src/browser/helpers/tables.ts"
+      ],
+      "depends_on": [
+        "T006"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T008",
+      "title": "Implement the skill file format, parser, matcher, and on-demand loader",
+      "priority": 1,
+      "status": "todo",
+      "details": "Build durable file-based skills that capture reusable site knowledge without secrets or run diaries.",
+      "steps": [
+        "Define skill frontmatter and section parsing for facts, selectors, routes, waits, and traps.",
+        "Match skills by hostname, tags, and explicit user hints.",
+        "Load only relevant skills into runtime context and trace every load."
+      ],
+      "tags": [
+        "skills",
+        "loader",
+        "parser"
+      ],
+      "files": [
+        "src/skills/parser.ts",
+        "src/skills/matcher.ts",
+        "src/skills/loader.ts",
+        "skills/"
+      ],
+      "depends_on": [
+        "T002",
+        "T003"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T009",
+      "title": "Build the trace event pipeline and artifact registry",
+      "priority": 1,
+      "status": "todo",
+      "details": "Implement immutable trace capture for every run so evidence is the product, not an afterthought.",
+      "steps": [
+        "Persist typed trace events for observations, code execs, policy checks, approvals, skills, and errors.",
+        "Register and retrieve artifact metadata across screenshots, HTML, markdown, downloads, diffs, and notes.",
+        "Enforce the minimum trace policy from the spec."
+      ],
+      "tags": [
+        "trace",
+        "artifacts",
+        "observability"
+      ],
+      "files": [
+        "src/trace/events.ts",
+        "src/trace/artifacts.ts"
+      ],
+      "depends_on": [
+        "T003",
+        "T005",
+        "T006",
+        "T008"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T010",
+      "title": "Implement the policy engine, rules, and approval request flow",
+      "priority": 1,
+      "status": "todo",
+      "details": "Keep policy outside the reasoning loop with explicit allow, deny, and require-approval decisions for destructive or privileged actions.",
+      "steps": [
+        "Encode baseline approval-required actions and auth wall rules.",
+        "Implement policy checks for proposed actions and profile usage.",
+        "Persist approval requests and outcomes into run trace and storage."
+      ],
+      "tags": [
+        "policy",
+        "approvals",
+        "safety"
+      ],
+      "files": [
+        "src/policy/engine.ts",
+        "src/policy/rules.ts",
+        "src/policy/approvals.ts"
+      ],
+      "depends_on": [
+        "T002",
+        "T003"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T011",
+      "title": "Implement the LLM provider boundary and prompt/context assembly",
+      "priority": 2,
+      "status": "todo",
+      "details": "Create a small model boundary that assembles task, skill, observation, and trace context without turning prompt context into the integration bus.",
+      "steps": [
+        "Implement provider interfaces for OpenAI and placeholder portability hooks.",
+        "Build compact context assembly with task, skills, observations, and recent evidence.",
+        "Define the proposed action schema and model response validation."
+      ],
+      "tags": [
+        "agent",
+        "llm",
+        "context"
+      ],
+      "files": [
+        "src/providers/llm/openai.ts",
+        "src/providers/llm/anthropic.ts",
+        "src/agent/context.ts"
+      ],
+      "depends_on": [
+        "T002",
+        "T005",
+        "T008",
+        "T009"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T012",
+      "title": "Build the core agent runtime loop for task execution",
+      "priority": 1,
+      "status": "todo",
+      "details": "Implement the minimal runtime that loads context, attaches a session, requests the next move, executes it, records evidence, and stops on the right conditions.",
+      "steps": [
+        "Implement task ingestion, session attachment, initial observation, and loop orchestration.",
+        "Integrate policy checks, browser operations, trace persistence, and progress evaluation.",
+        "Stop on completion, denial, auth wall, cancellation, or budget exhaustion."
+      ],
+      "tags": [
+        "agent",
+        "runtime",
+        "loop"
+      ],
+      "files": [
+        "src/agent/runtime.ts",
+        "src/agent/loop.ts",
+        "src/agent/planning.ts"
+      ],
+      "depends_on": [
+        "T004",
+        "T005",
+        "T006",
+        "T008",
+        "T009",
+        "T010",
+        "T011"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T013",
+      "title": "Implement run classification and final outcome summarization",
+      "priority": 2,
+      "status": "todo",
+      "details": "Classify each run into task-complete, partial success, blocked auth, site error, agent error, infra error, counterexample, or ambiguous, with confidence and notes.",
+      "steps": [
+        "Implement classification rules and summary generation from evidence.",
+        "Store final outcome summaries on runs and expose them to downstream compare views.",
+        "Test edge cases for ambiguous and failure-heavy runs."
+      ],
+      "tags": [
+        "agent",
+        "classification"
+      ],
+      "files": [
+        "src/agent/classify.ts"
+      ],
+      "depends_on": [
+        "T009",
+        "T012"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T014",
+      "title": "Implement branching, hypothesis tracking, and experiment bundles",
+      "priority": 2,
+      "status": "todo",
+      "details": "Make experiments first-class so the runtime can branch when uncertainty matters and record the rationale for each variant.",
+      "steps": [
+        "Create hypothesis objects, branch metadata, and experiment bundle persistence.",
+        "Implement branch creation triggers and run linkage.",
+        "Support ablations, replications, and counterexample search as explicit run types."
+      ],
+      "tags": [
+        "experiments",
+        "branching",
+        "hypotheses"
+      ],
+      "files": [
+        "src/agent/branching.ts",
+        "src/experiments/hypotheses.ts",
+        "src/experiments/ablations.ts",
+        "src/experiments/summaries.ts"
+      ],
+      "depends_on": [
+        "T003",
+        "T012"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T015",
+      "title": "Implement compare-view data generation across runs",
+      "priority": 2,
+      "status": "todo",
+      "details": "Generate compare-ready summaries for run end state, step count, latency, artifacts, profile used, helper version, and hypothesis association.",
+      "steps": [
+        "Define comparison specs and normalized dimensions.",
+        "Build compare data from traces, runs, artifacts, and sessions.",
+        "Test cross-branch comparisons and partial-data cases."
+      ],
+      "tags": [
+        "trace",
+        "compare",
+        "experiments"
+      ],
+      "files": [
+        "src/trace/compare.ts"
+      ],
+      "depends_on": [
+        "T009",
+        "T013",
+        "T014"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T016",
+      "title": "Implement skill proposal and promotion workflows",
+      "priority": 3,
+      "status": "todo",
+      "details": "Convert reusable discoveries into reviewable skill patches without storing secrets, transcripts, or one-off narration.",
+      "steps": [
+        "Detect reusable facts, selectors, routes, waits, and traps from completed runs.",
+        "Persist skill proposals as artifacts and diffs.",
+        "Add promotion flow support with review or policy gates."
+      ],
+      "tags": [
+        "skills",
+        "promotion",
+        "artifacts"
+      ],
+      "files": [
+        "src/skills/promote.ts"
+      ],
+      "depends_on": [
+        "T008",
+        "T009",
+        "T012"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T017",
+      "title": "Build the CLI surface for running tasks, investigations, and experiments",
+      "priority": 2,
+      "status": "todo",
+      "details": "Provide a practical operator-facing entry point for creating tasks, selecting profiles, invoking runs, and reviewing outputs without framework overhead.",
+      "steps": [
+        "Design a minimal command surface for task creation and run execution.",
+        "Support mode selection, profile/session options, and approval interaction.",
+        "Print concise summaries and artifact locations for completed runs."
+      ],
+      "tags": [
+        "cli",
+        "ux"
+      ],
+      "files": [
+        "src/cli/"
+      ],
+      "depends_on": [
+        "T012",
+        "T013"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T018",
+      "title": "Build the minimal run review interface for traces, artifacts, approvals, and comparisons",
+      "priority": 3,
+      "status": "todo",
+      "details": "Expose the required observability features so users can inspect evidence, not just final prose.",
+      "steps": [
+        "Design a lightweight local review surface or report renderer for timelines and artifacts.",
+        "Show latest screenshot, executed code, loaded skills, session/profile info, and approvals.",
+        "Add compare views for branched runs."
+      ],
+      "tags": [
+        "ui",
+        "observability",
+        "trace"
+      ],
+      "files": [
+        "src/trace/replay.ts",
+        "src/ui/"
+      ],
+      "depends_on": [
+        "T009",
+        "T015",
+        "T017"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T019",
+      "title": "Implement profile selection, auth wall handling, and session safety controls",
+      "priority": 2,
+      "status": "todo",
+      "details": "Keep identity separate from execution, stop at auth walls, and never silently escalate to privileged profiles.",
+      "steps": [
+        "Add profile references, explicit selection rules, and session-profile linkage.",
+        "Handle missing credentials by requesting user assistance instead of improvising.",
+        "Test privileged-profile policy interactions and auth-failure flows."
+      ],
+      "tags": [
+        "profiles",
+        "security",
+        "sessions"
+      ],
+      "files": [
+        "src/browser/session.ts",
+        "src/policy/rules.ts",
+        "src/storage/sessions.ts"
+      ],
+      "depends_on": [
+        "T004",
+        "T010",
+        "T012"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T020",
+      "title": "Add evaluation harnesses and benchmark tasks for completion, learning, reliability, efficiency, and safety",
+      "priority": 3,
+      "status": "todo",
+      "details": "Turn the spec’s evaluation strategy into repeatable measurements against realistic browser tasks and investigations.",
+      "steps": [
+        "Define benchmark tasks and expected evidence outputs.",
+        "Collect metrics for success, rerun consistency, token/browser minute cost, and policy compliance.",
+        "Automate reports for regression tracking."
+      ],
+      "tags": [
+        "evaluation",
+        "metrics",
+        "testing"
+      ],
+      "files": [
+        "tests/",
+        "benchmarks/"
+      ],
+      "depends_on": [
+        "T012",
+        "T013",
+        "T014",
+        "T015",
+        "T019"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T021",
+      "title": "Build the full automated test suite across unit, integration, and end-to-end browser flows",
+      "priority": 1,
+      "status": "todo",
+      "details": "Back the runtime with extensive tests so the core stays small, inspectable, and hard to accidentally braid together.",
+      "steps": [
+        "Add unit coverage for schemas, storage, policy, skills, and classification.",
+        "Add integration coverage for provider, bridge, trace, and runtime orchestration.",
+        "Add end-to-end task, investigate, and experiment flow tests against controlled targets."
+      ],
+      "tags": [
+        "testing",
+        "quality"
+      ],
+      "files": [
+        "tests/"
+      ],
+      "depends_on": [
+        "T002",
+        "T003",
+        "T004",
+        "T005",
+        "T006",
+        "T008",
+        "T009",
+        "T010",
+        "T012",
+        "T013",
+        "T014",
+        "T015",
+        "T019"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    },
+    {
+      "id": "T022",
+      "title": "Write operator and developer documentation for the MVP system",
+      "priority": 4,
+      "status": "todo",
+      "details": "Document how to configure providers, define skills, run tasks, inspect traces, handle approvals, and extend the system without adding framework weight.",
+      "steps": [
+        "Write setup and usage docs for local development and Steel configuration.",
+        "Document skill authoring, promotion, and safety rules.",
+        "Document architecture boundaries and extension points for future maintainers."
+      ],
+      "tags": [
+        "docs",
+        "onboarding"
+      ],
+      "files": [
+        "README.md",
+        "docs/"
+      ],
+      "depends_on": [
+        "T012",
+        "T016",
+        "T017",
+        "T018",
+        "T021"
+      ],
+      "created_at": "2026-04-24T09:04:46Z",
+      "updated_at": "2026-04-24T09:04:46Z"
+    }
+  ]
+}
