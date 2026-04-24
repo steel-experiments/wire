@@ -122,9 +122,7 @@ function createRuntimeConfig(
   if (llmProvider) {
     config.llmProvider = llmProvider;
   }
-  if (options.skillDir) {
-    config.skillDir = options.skillDir;
-  }
+  config.skillDir = options.skillDir ?? "./skills";
   if (options.profileId) {
     config.sessionInput = { profileId: options.profileId as never };
   }

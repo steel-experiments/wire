@@ -538,15 +538,22 @@ async function appendSkillProposalEvents(
   skillDir?: string,
   llmProvider?: LLMProvider,
 ): Promise<void> {
-  if (!llmProvider) return;
+  if (!llmProvider) {
+    console.error("[skill-promote] No LLM provider configured, skipping skill proposal");
+    return;
+  }
 
   const alreadyProposed = state.events.some((event) => event.kind === "skill-proposal");
   if (alreadyProposed) {
+    console.error("[skill-promote] Skill already proposed, skipping");
     return;
   }
 
   const candidate = await llmProposeSkill(state.events, state.run.id, llmProvider);
-  if (!candidate) return;
+  if (!candidate) {
+    console.error("[skill-promote] No candidate produced from LLM");
+    return;
+  }
 
   const payload: JsonObject = {
     skillId: candidate.skillId,
