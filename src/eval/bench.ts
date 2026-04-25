@@ -11,6 +11,8 @@ import { listArtifacts } from "../storage/artifacts.js";
 import { computeTaskMetrics, type TaskMetrics } from "./metrics.js";
 import { createOpenAIProvider } from "../providers/llm/openai.js";
 import { createAnthropicProvider } from "../providers/llm/anthropic.js";
+import { nowIsoUtc } from "../shared/ids.js";
+import { atomicWriteJson, ensureDir, entityDir, entityPath, listJsonFiles, readJsonFile } from "../storage/atomic.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,6 +47,8 @@ export interface BenchResult {
 }
 
 export interface BenchReport {
+  id: string;
+  runAt: string;
   results: BenchResult[];
   passed: boolean;
   passRate: number;
@@ -82,7 +86,10 @@ export async function bench(options: BenchOptions): Promise<BenchReport> {
     .filter((r) => r.judgeScore !== null)
     .map((r) => r.judgeScore!);
 
-  return {
+  const runAt = nowIsoUtc();
+  const report: BenchReport = {
+    id: `bench-${runAt.replace(/[:.]/gu, "-")}`,
+    runAt,
     results,
     passed: results.every((r) => r.passed),
     passRate: results.length > 0 ? passedCount / results.length : 0,
@@ -99,6 +106,11 @@ export async function bench(options: BenchOptions): Promise<BenchReport> {
         ? results.reduce((a, b) => a + b.durationMs, 0) / results.length
         : 0,
   };
+
+  const root = defaultStorageRoot();
+  await saveBenchReport(root, report);
+
+  return report;
 }
 
 // ---------------------------------------------------------------------------
@@ -282,6 +294,45 @@ function createJudgeProvider(
 export async function loadBenchmarks(filePath: string): Promise<BenchmarkCase[]> {
   const raw = await readFile(filePath, "utf-8");
   return JSON.parse(raw) as BenchmarkCase[];
+}
+
+// ---------------------------------------------------------------------------
+// Report persistence
+// ---------------------------------------------------------------------------
+
+const BENCH_KIND = "benchmarks";
+
+function defaultStorageRoot(): string {
+  return process.env.WIRE_ROOT ?? ".wire";
+}
+
+function benchReportPath(root: string, id: string): string {
+  return entityPath(root, BENCH_KIND, id);
+}
+
+export async function saveBenchReport(root: string, report: BenchReport): Promise<void> {
+  await atomicWriteJson(benchReportPath(root, report.id), report);
+}
+
+export async function loadBenchReport(root: string, id: string): Promise<BenchReport> {
+  const raw = await readJsonFile(benchReportPath(root, id));
+  return raw as BenchReport;
+}
+
+export async function listBenchReports(root: string): Promise<BenchReport[]> {
+  const dir = entityDir(root, BENCH_KIND);
+  const files = await listJsonFiles(dir);
+  const reports: BenchReport[] = [];
+
+  for (const name of files) {
+    const id = name.replace(/\.json$/u, "");
+    const raw = await readJsonFile(benchReportPath(root, id));
+    if (raw) {
+      reports.push(raw as BenchReport);
+    }
+  }
+
+  return reports.sort((a, b) => b.runAt.localeCompare(a.runAt));
 }
 
 // ---------------------------------------------------------------------------

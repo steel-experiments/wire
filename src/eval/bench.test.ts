@@ -5,7 +5,53 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { parseArgs } from "../cli/args.js";
-import { loadBenchmarks, formatBenchReport, type BenchReport, type BenchResult } from "./bench.js";
+import { nowIsoUtc } from "../shared/ids.js";
+import {
+  loadBenchmarks,
+  formatBenchReport,
+  saveBenchReport,
+  loadBenchReport,
+  listBenchReports,
+  type BenchReport,
+  type BenchResult,
+} from "./bench.js";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeReport(overrides: Partial<BenchReport> = {}): BenchReport {
+  return {
+    id: "bench-test",
+    runAt: nowIsoUtc(),
+    results: [],
+    passed: true,
+    passRate: 1,
+    avgJudge: 0,
+    avgSteps: 0,
+    avgDurationMs: 0,
+    ...overrides,
+  };
+}
+
+function makeResult(overrides: Partial<BenchResult> = {}): BenchResult {
+  return {
+    id: "test-result",
+    passed: true,
+    classification: "task-complete",
+    confidence: 0.9,
+    classificationMatch: true,
+    answerRelevance: 1,
+    stepCount: 3,
+    stepEfficiency: 1,
+    durationMs: 1000,
+    errorCount: 0,
+    judgeScore: null,
+    result: "ok",
+    notes: [],
+    ...overrides,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // loadBenchmarks
@@ -45,30 +91,15 @@ test("loadBenchmarks rejects missing file", async () => {
 // ---------------------------------------------------------------------------
 
 test("formatBenchReport formats passing results", () => {
-  const report: BenchReport = {
-    results: [
-      {
-        id: "example-title",
-        passed: true,
-        classification: "task-complete",
-        confidence: 0.85,
-        classificationMatch: true,
-        answerRelevance: 1,
-        stepCount: 3,
-        stepEfficiency: 0.75,
-        durationMs: 2100,
-        errorCount: 0,
-        judgeScore: 1.0,
-        result: "Example Domain",
-        notes: [],
-      },
-    ],
-    passed: true,
-    passRate: 1,
-    avgJudge: 1.0,
-    avgSteps: 3,
-    avgDurationMs: 2100,
-  };
+  const report = makeReport({
+    results: [makeResult({
+      id: "example-title",
+      confidence: 0.85,
+      stepCount: 3,
+      durationMs: 2100,
+      judgeScore: 1.0,
+    })],
+  });
 
   const text = formatBenchReport(report);
   assert.ok(text.includes("=== Wire Benchmark Report ==="));
@@ -82,30 +113,23 @@ test("formatBenchReport formats passing results", () => {
 });
 
 test("formatBenchReport formats failing results", () => {
-  const report: BenchReport = {
-    results: [
-      {
-        id: "httpbin-fail",
-        passed: false,
-        classification: "partial-success",
-        confidence: 0.6,
-        classificationMatch: false,
-        answerRelevance: 0.5,
-        stepCount: 4,
-        stepEfficiency: 1,
-        durationMs: 3000,
-        errorCount: 1,
-        judgeScore: 0.4,
-        result: "",
-        notes: ["Expected task-complete, got partial-success"],
-      },
-    ],
+  const report = makeReport({
     passed: false,
     passRate: 0,
-    avgJudge: 0.4,
-    avgSteps: 4,
-    avgDurationMs: 3000,
-  };
+    results: [makeResult({
+      id: "httpbin-fail",
+      passed: false,
+      classification: "partial-success",
+      confidence: 0.6,
+      classificationMatch: false,
+      answerRelevance: 0.5,
+      stepCount: 4,
+      durationMs: 3000,
+      errorCount: 1,
+      judgeScore: 0.4,
+      notes: ["Expected task-complete, got partial-success"],
+    })],
+  });
 
   const text = formatBenchReport(report);
   assert.ok(text.includes("[ ] httpbin-fail"));
@@ -114,75 +138,25 @@ test("formatBenchReport formats failing results", () => {
 });
 
 test("formatBenchReport omits judge score when null", () => {
-  const report: BenchReport = {
-    results: [
-      {
-        id: "no-judge",
-        passed: true,
-        classification: "task-complete",
-        confidence: 0.9,
-        classificationMatch: true,
-        answerRelevance: 1,
-        stepCount: 2,
-        stepEfficiency: 1,
-        durationMs: 1000,
-        errorCount: 0,
-        judgeScore: null,
-        result: "ok",
-        notes: [],
-      },
-    ],
-    passed: true,
-    passRate: 1,
-    avgJudge: 0,
-    avgSteps: 2,
-    avgDurationMs: 1000,
-  };
+  const report = makeReport({
+    results: [makeResult({ id: "no-judge", judgeScore: null })],
+  });
 
   const text = formatBenchReport(report);
   assert.ok(!text.includes("judge:"));
 });
 
 test("formatBenchReport formats multiple results with aggregate stats", () => {
-  const report: BenchReport = {
-    results: [
-      {
-        id: "bench-a",
-        passed: true,
-        classification: "task-complete",
-        confidence: 0.85,
-        classificationMatch: true,
-        answerRelevance: 1,
-        stepCount: 3,
-        stepEfficiency: 0.75,
-        durationMs: 2100,
-        errorCount: 0,
-        judgeScore: 1.0,
-        result: "ok",
-        notes: [],
-      },
-      {
-        id: "bench-b",
-        passed: true,
-        classification: "task-complete",
-        confidence: 0.7,
-        classificationMatch: true,
-        answerRelevance: 1,
-        stepCount: 5,
-        stepEfficiency: 0.6,
-        durationMs: 6200,
-        errorCount: 0,
-        judgeScore: 0.8,
-        result: "ok",
-        notes: [],
-      },
-    ],
-    passed: true,
+  const report = makeReport({
     passRate: 1,
     avgJudge: 0.9,
     avgSteps: 4,
     avgDurationMs: 4150,
-  };
+    results: [
+      makeResult({ id: "bench-a", confidence: 0.85, stepCount: 3, durationMs: 2100, judgeScore: 1.0 }),
+      makeResult({ id: "bench-b", confidence: 0.7, stepCount: 5, durationMs: 6200, judgeScore: 0.8 }),
+    ],
+  });
 
   const text = formatBenchReport(report);
   assert.ok(text.includes("[x] bench-a"));
@@ -191,6 +165,89 @@ test("formatBenchReport formats multiple results with aggregate stats", () => {
   assert.ok(text.includes("Avg judge: 0.90"));
   assert.ok(text.includes("Avg steps: 4.0"));
   assert.ok(text.includes("Avg time: 4.2s"));
+});
+
+// ---------------------------------------------------------------------------
+// Report persistence
+// ---------------------------------------------------------------------------
+
+test("saveBenchReport + loadBenchReport round-trips a report", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wire-bench-"));
+  const report = makeReport({
+    id: "bench-rt",
+    runAt: "2026-04-25T12:00:00.000Z",
+    results: [makeResult({ id: "example-title", result: "Example Domain" })],
+  });
+
+  await saveBenchReport(root, report);
+  const loaded = await loadBenchReport(root, "bench-rt");
+
+  assert.equal(loaded.id, "bench-rt");
+  assert.equal(loaded.runAt, "2026-04-25T12:00:00.000Z");
+  assert.equal(loaded.results.length, 1);
+  assert.equal(loaded.results[0]!.id, "example-title");
+  assert.equal(loaded.results[0]!.result, "Example Domain");
+});
+
+test("listBenchReports returns reports sorted newest first", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wire-bench-"));
+
+  await saveBenchReport(root, makeReport({
+    id: "bench-old",
+    runAt: "2026-04-24T10:00:00.000Z",
+  }));
+  await saveBenchReport(root, makeReport({
+    id: "bench-new",
+    runAt: "2026-04-25T10:00:00.000Z",
+  }));
+  await saveBenchReport(root, makeReport({
+    id: "bench-mid",
+    runAt: "2026-04-24T18:00:00.000Z",
+  }));
+
+  const reports = await listBenchReports(root);
+  assert.equal(reports.length, 3);
+  assert.equal(reports[0]!.id, "bench-new");
+  assert.equal(reports[1]!.id, "bench-mid");
+  assert.equal(reports[2]!.id, "bench-old");
+});
+
+test("listBenchReports returns empty for no reports", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wire-bench-"));
+  const reports = await listBenchReports(root);
+  assert.deepEqual(reports, []);
+});
+
+test("saveBenchReport persists all BenchResult fields", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wire-bench-"));
+  const result: BenchResult = {
+    id: "full-result",
+    passed: false,
+    classification: "partial-success",
+    confidence: 0.65,
+    classificationMatch: false,
+    answerRelevance: 0.5,
+    stepCount: 7,
+    stepEfficiency: 0.43,
+    durationMs: 12345,
+    errorCount: 2,
+    judgeScore: 0.3,
+    result: "partial output",
+    notes: ["Expected task-complete, got partial-success", "Missing answer keywords (50% relevance)"],
+  };
+
+  const report = makeReport({
+    id: "bench-full",
+    runAt: "2026-04-25T12:00:00.000Z",
+    passed: false,
+    passRate: 0,
+    results: [result],
+  });
+
+  await saveBenchReport(root, report);
+  const loaded = await loadBenchReport(root, "bench-full");
+
+  assert.deepEqual(loaded.results[0], result);
 });
 
 // ---------------------------------------------------------------------------
