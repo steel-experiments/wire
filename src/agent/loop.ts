@@ -342,27 +342,65 @@ export async function executeStep(
     }
 
     case "raw": {
-      const method = action.payload?.method as string;
-      if (method) {
+      // Support both single command (method/params) and batch (commands array)
+      const commands: Array<{ method: string; params?: JsonObject }> = [];
+      const singleMethod = action.payload?.method as string | undefined;
+      if (singleMethod) {
+        const entry: { method: string; params?: JsonObject } = { method: singleMethod };
+        const params = action.payload?.params as JsonObject | undefined;
+        if (params) entry.params = params;
+        commands.push(entry);
+      }
+      const batch = action.payload?.commands as Array<{ method: string; params?: JsonObject }> | undefined;
+      if (Array.isArray(batch)) {
+        for (const cmd of batch) {
+          if (typeof cmd.method === "string") {
+            const entry: { method: string; params?: JsonObject } = { method: cmd.method };
+            if (cmd.params) entry.params = cmd.params;
+            commands.push(entry);
+          }
+        }
+      }
+
+      if (commands.length > 0) {
         state.events.push({
           id: createId("event"),
           runId: state.run.id,
           ts: nowIsoUtc(),
           kind: "code-exec",
-          payload: redactJsonObject({ rawMethod: method }),
+          payload: redactJsonObject({ rawCommands: commands.length, methods: commands.map((c) => c.method) }),
         });
 
-        const rawOptions: { provider: BrowserProvider; sessionId: SessionId; method: string; params?: JsonObject } = {
-          provider,
-          sessionId: state.sessionId,
-          method,
-        };
-        const params = action.payload?.params as JsonObject | undefined;
-        if (params) {
-          rawOptions.params = params;
-        }
+        let lastResult: unknown;
+        let ok = true;
+        const startedAt = Date.now();
 
-        const rawResult = await execRaw(rawOptions);
+        // Use batch method if provider supports it (single connection for all commands)
+        const steelProvider = provider as unknown as { rawBatch?(sessionId: SessionId, commands: Array<{ method: string; params?: Record<string, unknown> }>): Promise<unknown> };
+        if (commands.length > 1 && steelProvider.rawBatch) {
+          try {
+            lastResult = await steelProvider.rawBatch(state.sessionId, commands);
+          } catch (err) {
+            ok = false;
+            lastResult = err instanceof Error ? err.message : String(err);
+          }
+        } else {
+          for (const cmd of commands) {
+            try {
+              const rawOpts: { provider: BrowserProvider; sessionId: SessionId; method: string; params?: JsonObject } = {
+                provider,
+                sessionId: state.sessionId,
+                method: cmd.method,
+              };
+              if (cmd.params) rawOpts.params = cmd.params;
+              lastResult = await execRaw(rawOpts);
+            } catch (err) {
+              ok = false;
+              lastResult = err instanceof Error ? err.message : String(err);
+              break;
+            }
+          }
+        }
 
         state.events.push({
           id: createId("event"),
@@ -370,9 +408,10 @@ export async function executeStep(
           ts: nowIsoUtc(),
           kind: "code-result",
           payload: {
-            ok: true,
-            durationMs: 0,
-            returnValue: rawResult as unknown as import("../shared/types.js").JsonValue,
+            ok,
+            durationMs: Date.now() - startedAt,
+            ...(ok ? { commandsExecuted: commands.length } : {}),
+            returnValue: lastResult as unknown as import("../shared/types.js").JsonValue,
           },
         });
       }

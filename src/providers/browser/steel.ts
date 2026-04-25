@@ -370,6 +370,35 @@ export class SteelProvider implements BrowserProvider {
       return cdp.send(input.method, input.params);
     });
   }
+
+  /**
+   * Send multiple CDP commands over a single connection.
+   * Reuses one WebSocket and target session attachment for all commands.
+   * Returns the result of the last command, or throws on the first failure.
+   */
+  async rawBatch(
+    sessionId: SessionId,
+    commands: Array<{ method: string; params?: Record<string, unknown> }>,
+  ): Promise<unknown> {
+    const session = this.withAuth(await this.getSession(sessionId));
+    return withConnection(this.webSocketFactory, session, this.cdpCommandTimeoutMs, async (cdp) => {
+      // Check if any commands need a target session
+      const needsTarget = commands.some((c) => c.method.startsWith("Input."));
+      let targetSessionId: string | undefined;
+      if (needsTarget) {
+        const targets = await listPageTargets(cdp);
+        const target = pickTarget(targets);
+        targetSessionId = await attachToTarget(cdp, target.targetId);
+      }
+
+      let lastResult: unknown;
+      for (const cmd of commands) {
+        const sid = cmd.method.startsWith("Input.") ? targetSessionId : undefined;
+        lastResult = await cdp.send(cmd.method, cmd.params, sid);
+      }
+      return lastResult;
+    });
+  }
 }
 
 const OBSERVE_SCRIPT = `(() => {

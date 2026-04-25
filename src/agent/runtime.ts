@@ -91,22 +91,23 @@ function deriveSkillTags(task: Task): string[] {
 }
 
 function skillGuidance(skill: LoadedSkill): string {
-  const preferredSections = ["Facts", "Routes", "Selectors", "Traps", "Workflow", "Notes"];
+  // Prioritize actionable sections over static reference data
+  const preferredSections = ["Workflow", "Traps", "Facts", "Routes", "Selectors", "Notes"];
   const snippets: string[] = [];
 
   for (const section of preferredSections) {
     const body = skill.sections[section];
     if (body && body.trim().length > 0) {
-      snippets.push(`${section}: ${body.trim().replace(/\s+/gu, " ").slice(0, 180)}`);
+      snippets.push(`${section}: ${body.trim().replace(/\s+/gu, " ")}`);
     }
-    if (snippets.length >= 2) {
+    if (snippets.length >= 4) {
       break;
     }
   }
 
   if (snippets.length === 0) {
     const fallback = skill.body.replace(/\s+/gu, " ").trim();
-    return fallback.slice(0, 220);
+    return fallback;
   }
 
   return snippets.join(" | ");
@@ -250,7 +251,7 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number): 
         'Use this shape: {"kind":"observe|exec|raw|finish","summary":"short text","payload":{...}}.',
         'For "observe", omit payload unless you need {"targetId":"..."}',
         'For "exec", set payload.code to JavaScript that runs in the browser.',
-        'For "raw", set payload.method to a CDP method and payload.params to its parameters. Example: {"kind":"raw","summary":"Press arrow key","payload":{"method":"Input.dispatchKeyEvent","params":{"type":"keyDown","key":"ArrowUp","windowsVirtualKeyCode":38}}} sends a trusted keypress that pages cannot ignore. Always pair keyDown + keyUp. Use for keyboard input, mouse events, or any low-level browser control that exec cannot achieve.',
+        'For "raw", set payload.method to a CDP method and payload.params to its parameters. Example: {"kind":"raw","summary":"Press arrow key","payload":{"method":"Input.dispatchKeyEvent","params":{"type":"keyDown","key":"ArrowUp","windowsVirtualKeyCode":38}}} sends a trusted keypress that pages cannot ignore. Always pair keyDown + keyUp. For batch input (e.g. games), use payload.commands: [{"method":"Input.dispatchKeyEvent","params":{...}},{"method":"Input.dispatchKeyEvent","params":{...}},...] to send many CDP commands in a single step.',
         "For interactive apps and games: prefer exec to access the app's internal JavaScript API directly. Most games expose state and methods on global objects or via DOM element references (e.g., a game manager instance). One exec call can trigger many moves — far more efficient than one raw keypress per step. Use raw only when exec truly cannot reach the target API.",
         "Prefer direct URL patterns before brittle DOM hunting when the destination is obvious, such as /pricing or /docs.",
         "Wire auto-observes after navigation code (location.href etc). Do NOT emit a separate observe after navigating.",
