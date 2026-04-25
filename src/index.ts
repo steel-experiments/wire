@@ -6,6 +6,7 @@ export * from "./storage/tasks.js";
 export * from "./storage/runs.js";
 export * from "./storage/sessions.js";
 export * from "./storage/artifacts.js";
+export * from "./storage/artifact-registry.js";
 export * from "./storage/events.js";
 export * from "./storage/approvals.js";
 export * from "./storage/checkpoints.js";
@@ -31,7 +32,6 @@ export * from "./skills/matcher.js";
 export * from "./skills/loader.js";
 export * from "./skills/promote.js";
 export * from "./trace/events.js";
-export * from "./trace/artifacts.js";
 export * from "./trace/compare.js";
 export * from "./trace/replay.js";
 export * from "./agent/context.js";
@@ -51,6 +51,7 @@ export * from "./cli/main.js";
 export * from "./ui/review.js";
 export * from "./eval/metrics.js";
 export * from "./eval/harness.js";
+export * from "./eval/bench.js";
 
 import { pathToFileURL } from "node:url";
 

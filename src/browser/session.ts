@@ -35,7 +35,11 @@ export function displaySafeUrl(url: string | undefined): string | undefined {
   if (!url) return undefined;
   try {
     const parsed = new URL(url);
-    parsed.searchParams.delete("apiKey");
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (/(api[-_]?key|token|secret|password|auth|bearer)/iu.test(key)) {
+        parsed.searchParams.delete(key);
+      }
+    }
     return parsed.toString();
   } catch {
     return url;

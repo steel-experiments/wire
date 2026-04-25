@@ -76,10 +76,6 @@ export const runClassificationKindSchema = z.enum([
   "infra-error",
   "counterexample",
   "ambiguous",
-  "browser-crash",
-  "captcha",
-  "rate-limited",
-  "network-timeout",
 ]);
 export const hypothesisStatusSchema = z.enum(["active", "supported", "rejected", "ambiguous"]);
 export const skillScopeSchema = z.enum(["domain", "workflow", "interaction"]);

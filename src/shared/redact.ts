@@ -6,6 +6,9 @@ import type { JsonValue, JsonObject } from "./types.js";
 
 export const SECRET_PATTERNS = [
   /sk-[a-zA-Z0-9]{20,}/gu,
+  /AKIA[0-9A-Z]{16}/gu,
+  /AIza[0-9A-Za-z_-]{35}/gu,
+  /ya29\.[a-zA-Z0-9_-]{50,}/gu,
   /key[_-]?[a-zA-Z0-9]{16,}/giu,
   /token[_-]?[a-zA-Z0-9]{16,}/giu,
   /password\s*[:=]\s*\S+/giu,

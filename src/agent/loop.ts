@@ -3,7 +3,6 @@ import type {
   ActionId,
   ApprovalRequest,
   JsonObject,
-  JsonValue,
   ProposedAction,
   Run,
   RunId,
@@ -20,8 +19,8 @@ import type { PolicyAction } from "../policy/rules.js";
 import { createApprovalRequest } from "../policy/approvals.js";
 import { stableJsonStringify } from "../shared/ids.js";
 
-import { observeBrowser } from "../browser/observe.js";
-import { execCode } from "../browser/exec.js";
+import { observeBrowser, toObservationPayload } from "../browser/observe.js";
+import { execCode, isLikelyNavigationCode } from "../browser/exec.js";
 import { execRaw } from "../browser/raw.js";
 import { classifyRun, generateOutcomeSummary } from "./classify.js";
 import { detectAuthWall } from "../profiles/auth.js";
@@ -246,25 +245,7 @@ export async function executeStep(
 
       const observation = await observeBrowser(observeOptions);
 
-      const obsPayload: JsonObject = {
-        url: observation.url,
-        title: observation.title,
-      };
-      if (observation.targetId) {
-        obsPayload.targetId = observation.targetId;
-      }
-      if (observation.tabs.length > 0) {
-        obsPayload.tabs = observation.tabs as unknown as JsonValue;
-      }
-      if (observation.focusedElement) {
-        obsPayload.focusedElement = observation.focusedElement as unknown as JsonObject;
-      }
-      if (observation.pageSummary) {
-        obsPayload.pageSummary = observation.pageSummary as unknown as JsonObject;
-      }
-      if (observation.screenshotArtifactId) {
-        obsPayload.screenshotArtifactId = observation.screenshotArtifactId;
-      }
+      const obsPayload = toObservationPayload(observation, { includeScreenshotArtifactId: true });
 
       state.events.push({
         id: createId("event"),
@@ -319,27 +300,20 @@ export async function executeStep(
         // Auto-observe after navigation: when exec code navigates the page
         // (location.href/assign/replace), the code-result has no output and
         // the agent needs an observation of the new page before its next turn.
-        const isNavigation = isNavigationCode(code);
+        const isNavigation = isLikelyNavigationCode(code);
         const producedOutput = result.ok && (
           (typeof result.stdout === "string" && result.stdout.length > 0) ||
           result.returnValue !== undefined
         );
         if (isNavigation && !producedOutput) {
           const observation = await observeBrowser({ provider, sessionId: state.sessionId });
-          const obsPayload: JsonObject = {
-            url: observation.url,
-            title: observation.title,
-          };
-          if (observation.targetId) obsPayload.targetId = observation.targetId;
-          if (observation.tabs.length > 0) obsPayload.tabs = observation.tabs as unknown as JsonValue;
-          if (observation.focusedElement) obsPayload.focusedElement = observation.focusedElement as unknown as JsonObject;
-          if (observation.pageSummary) obsPayload.pageSummary = observation.pageSummary as unknown as JsonObject;
+          const obsPayload = toObservationPayload(observation);
           state.events.push({
             id: createId("event"),
             runId: state.run.id,
             ts: nowIsoUtc(),
             kind: "observation",
-            payload: obsPayload,
+            payload: redactJsonObject(obsPayload),
           });
           authWallHit = detectAuthWall(observation).detected;
         }
@@ -407,21 +381,6 @@ export async function executeStep(
 }
 
 // ---------------------------------------------------------------------------
-// Detect navigation code patterns
-// ---------------------------------------------------------------------------
-
-const NAVIGATION_PATTERNS = [
-  /\bwindow\s*\.\s*location\s*[\[.]/u,
-  /\blocation\s*\.\s*(href|assign|replace|reload)\b/u,
-  /\blocation\s*=/u,
-  /\bdocument\s*\.\s*location\s*[\[.]/u,
-];
-
-function isNavigationCode(code: string): boolean {
-  return NAVIGATION_PATTERNS.some((p) => p.test(code));
-}
-
-// ---------------------------------------------------------------------------
 // Finalize a run
 // ---------------------------------------------------------------------------
 
@@ -435,7 +394,7 @@ export interface FinalizeOptions {
   pendingAction?: ProposedAction;
 }
 
-function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | undefined {
+export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | undefined {
   const latestAnswerEvent = [...events].reverse().find((event) =>
     event.kind === "code-result" &&
     event.payload.ok === true &&

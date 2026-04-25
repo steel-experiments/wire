@@ -1,0 +1,57 @@
+[
+  {
+    "id": "example-title",
+    "objective": "Go to example.com and return the heading text",
+    "mode": "task",
+    "maxSteps": 8,
+    "expected": {
+      "classification": "task-complete",
+      "answerContains": ["Example Domain"],
+      "maxSteps": 4
+    }
+  },
+  {
+    "id": "booking-search",
+    "objective": "Navigate directly to https://www.booking.com/searchresults.html?ss=Tokyo&checkin=2026-06-10&checkout=2026-06-12, wait 5 seconds, then extract the first 5 hotel names and prices as JSON",
+    "mode": "task",
+    "maxSteps": 10,
+    "expected": {
+      "classification": "task-complete",
+      "answerContains": ["hotel"],
+      "maxSteps": 6
+    }
+  },
+  {
+    "id": "sec-edgar-filing",
+    "objective": "Navigate to https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company=Apple&type=10-K&dateb=&owner=include&count=5, wait 3 seconds, and return the most recent filing date and form type",
+    "mode": "task",
+    "maxSteps": 10,
+    "expected": {
+      "classification": "task-complete",
+      "answerContains": ["10-K"],
+      "maxSteps": 6
+    }
+  },
+  {
+    "id": "lesswrong-posts",
+    "objective": "Navigate to https://www.lesswrong.com, wait 3 seconds, and extract the titles of the first 3 posts on the front page",
+    "mode": "task",
+    "maxSteps": 10,
+    "expected": {
+      "classification": "task-complete",
+      "answerContains": [],
+      "maxSteps": 6
+    }
+  },
+  {
+    "id": "httpbin-headers",
+    "objective": "Navigate to https://httpbin.org/headers and return the User-Agent and Accept headers from the response JSON",
+    "mode": "task",
+    "maxSteps": 8,
+    "expected": {
+      "classification": "task-complete",
+      "answerContains": ["User-Agent"],
+      "maxSteps": 4
+    }
+  }
+]

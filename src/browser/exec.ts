@@ -49,3 +49,14 @@ export async function execCode(options: ExecOptions): Promise<BrowserExecResult>
 
   return options.provider.exec(input);
 }
+
+const NAVIGATION_PATTERNS = [
+  /\bwindow\s*\.\s*location\s*[\[.]/u,
+  /\blocation\s*\.\s*(href|assign|replace|reload)\b/u,
+  /\blocation\s*=/u,
+  /\bdocument\s*\.\s*location\s*[\[.]/u,
+];
+
+export function isLikelyNavigationCode(code: string): boolean {
+  return NAVIGATION_PATTERNS.some((pattern) => pattern.test(code));
+}

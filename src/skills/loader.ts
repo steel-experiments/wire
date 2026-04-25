@@ -96,31 +96,8 @@ export async function findMatchingSkills(
   hostname?: string,
   tags?: string[],
 ): Promise<SkillMetadata[]> {
-  const all = await loadSkillDocsFromDir(skillsDir);
-
-  const hasHostname = hostname !== undefined && hostname.length > 0;
-  const hasTags = tags !== undefined && tags.length > 0;
-
-  // No filters: return all, sorted
-  if (!hasHostname && !hasTags) {
-    return sortByRelevance(all);
-  }
-
-  const matched = new Set<LoadedSkill>();
-
-  if (hasHostname) {
-    for (const skill of matchSkillsByHostname(all, hostname!)) {
-      matched.add(skill);
-    }
-  }
-
-  if (hasTags) {
-    for (const skill of matchSkillsByTags(all, tags!)) {
-      matched.add(skill);
-    }
-  }
-
-  return sortByRelevance([...matched]).map((skill) => ({
+  const matched = await findMatchingSkillDocs(skillsDir, hostname, tags);
+  return matched.map((skill) => ({
     id: skill.id,
     scope: skill.scope,
     tags: skill.tags,
@@ -138,6 +115,14 @@ export async function findMatchingSkillDocs(
   tags?: string[],
 ): Promise<LoadedSkill[]> {
   const all = await loadSkillDocsFromDir(skillsDir);
+  return filterMatchingSkillDocs(all, hostname, tags);
+}
+
+function filterMatchingSkillDocs(
+  all: LoadedSkill[],
+  hostname?: string,
+  tags?: string[],
+): LoadedSkill[] {
 
   const hasHostname = hostname !== undefined && hostname.length > 0;
   const hasTags = tags !== undefined && tags.length > 0;

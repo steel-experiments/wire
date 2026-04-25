@@ -2,7 +2,7 @@ import type { TaskMode } from "../shared/types.js";
 import type { LlmProvider } from "./config.js";
 
 export interface CliArgs {
-  command: "run" | "review" | "result" | "list" | "approve";
+  command: "run" | "review" | "result" | "list" | "approve" | "bench";
   taskFile?: string;
   objective?: string;
   mode?: TaskMode;
@@ -13,11 +13,12 @@ export interface CliArgs {
   model?: string;
   maxSteps?: number;
   skillDir?: string;
+  benchmarksFile?: string;
   json?: boolean;
   help?: boolean;
 }
 
-const VALID_COMMANDS = new Set(["run", "review", "result", "list", "approve"]);
+const VALID_COMMANDS = new Set(["run", "review", "result", "list", "approve", "bench"]);
 
 export function parseArgs(argv: string[]): CliArgs {
   const args = argv.slice(2); // drop node and script path
@@ -136,6 +137,16 @@ export function parseArgs(argv: string[]): CliArgs {
       continue;
     }
 
+    if (arg === "--benchmarks") {
+      i++;
+      const val = args[i];
+      if (val !== undefined) {
+        result.benchmarksFile = val;
+      }
+      i++;
+      continue;
+    }
+
     if (arg === "--json") {
       result.json = true;
       i++;
@@ -169,6 +180,7 @@ export function formatHelp(): string {
     "  result    Print the final result for a run",
     "  list      List tasks or runs",
     "  approve   Approve pending actions",
+    "  bench     Run benchmark suite",
     "",
     "Run options:",
     "  --objective <text>       Task objective (required unless --task-file)",
@@ -192,6 +204,11 @@ export function formatHelp(): string {
     "",
     "Approve options:",
     "  --run-id <id>            Run with pending approvals (required)",
+    "",
+    "Bench options:",
+    "  --benchmarks <path>      Benchmark file (default: benchmarks/default.json)",
+    "  --provider <provider>    LLM provider for agent and judge",
+    "  --model <model-id>       LLM model for agent and judge",
     "",
     "General:",
     "  --json                   Output machine-readable JSON",

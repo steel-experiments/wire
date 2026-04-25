@@ -43,48 +43,48 @@ describe("classifyRun", () => {
     assert.equal(result.confidence, 0.85);
   });
 
-  it("classifies browser-crash when session error with no recovery", () => {
+  it("classifies infra-error when session error with no recovery", () => {
     const events = [
       makeEvent("error", { message: "Session crashed unexpectedly" }),
     ];
     const result = classifyRun(makeInput({ events }));
-    assert.equal(result.kind, "browser-crash");
+    assert.equal(result.kind, "infra-error");
     assert.equal(result.confidence, 0.85);
   });
 
-  it("does not classify browser-crash when recovered with observation", () => {
+  it("does not classify infra-error from a recovered crash observation sequence", () => {
     const events = [
       makeEvent("error", { message: "Session crashed unexpectedly" }),
       makeEvent("observation", { url: "https://example.com", title: "Example" }),
     ];
     const result = classifyRun(makeInput({ events }));
-    assert.notEqual(result.kind, "browser-crash");
+    assert.notEqual(result.kind, "infra-error");
   });
 
-  it("classifies captcha when captcha in URL", () => {
+  it("classifies blocked-auth when captcha in URL", () => {
     const events = [
       makeEvent("observation", { url: "https://example.com/captcha", title: "Verify" }),
     ];
     const result = classifyRun(makeInput({ events }));
-    assert.equal(result.kind, "captcha");
+    assert.equal(result.kind, "blocked-auth");
     assert.equal(result.confidence, 0.8);
   });
 
-  it("classifies rate-limited on 429 error", () => {
+  it("classifies site-error on 429 error", () => {
     const events = [
       makeEvent("error", { message: "429 Too Many Requests", code: "429" }),
     ];
     const result = classifyRun(makeInput({ events }));
-    assert.equal(result.kind, "rate-limited");
+    assert.equal(result.kind, "site-error");
     assert.equal(result.confidence, 0.85);
   });
 
-  it("classifies network-timeout on ETIMEDOUT", () => {
+  it("classifies infra-error on ETIMEDOUT", () => {
     const events = [
       makeEvent("error", { message: "ETIMEDOUT connection timed out", code: "ETIMEDOUT" }),
     ];
     const result = classifyRun(makeInput({ events }));
-    assert.equal(result.kind, "network-timeout");
+    assert.equal(result.kind, "infra-error");
     assert.equal(result.confidence, 0.85);
   });
 

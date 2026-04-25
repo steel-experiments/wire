@@ -5,16 +5,20 @@ import type { LoopState } from "./loop.js";
 // State query helpers — pure functions over LoopState
 // ---------------------------------------------------------------------------
 
+function latestEventByKind(state: LoopState, kind: TraceEvent["kind"]): TraceEvent | undefined {
+  return [...state.events].reverse().find((event) => event.kind === kind);
+}
+
 export function latestObservation(state: LoopState): TraceEvent | undefined {
-  return [...state.events].reverse().find((event) => event.kind === "observation");
+  return latestEventByKind(state, "observation");
 }
 
 export function latestError(state: LoopState): TraceEvent | undefined {
-  return [...state.events].reverse().find((event) => event.kind === "error");
+  return latestEventByKind(state, "error");
 }
 
 export function latestCodeResult(state: LoopState): TraceEvent | undefined {
-  return [...state.events].reverse().find((event) => event.kind === "code-result");
+  return latestEventByKind(state, "code-result");
 }
 
 export function hasRecordedTaskArtifact(state: LoopState): boolean {

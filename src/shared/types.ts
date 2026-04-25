@@ -17,11 +17,7 @@ export type RunClassificationKind =
   | "agent-error"
   | "infra-error"
   | "counterexample"
-  | "ambiguous"
-  | "browser-crash"
-  | "captcha"
-  | "rate-limited"
-  | "network-timeout";
+  | "ambiguous";
 export type HypothesisStatus = "active" | "supported" | "rejected" | "ambiguous";
 export type SkillScope = "domain" | "workflow" | "interaction";
 export type SkillSource = "builtin" | "team" | "generated";

@@ -123,7 +123,7 @@ export function classifyRun(input: ClassificationInput): RunClassification {
       return e.kind === "observation" && crashIdx !== -1;
     });
     if (!hasSubsequentObservation) {
-      return { kind: "browser-crash", confidence: 0.85, notes: ["Browser session crashed or disconnected"] };
+      return { kind: "infra-error", confidence: 0.85, notes: ["Browser session crashed or disconnected"] };
     }
   }
 
@@ -137,7 +137,7 @@ export function classifyRun(input: ClassificationInput): RunClassification {
     return text.includes("captcha") || text.includes("recaptcha") || text.includes("cloudflare");
   });
   if (captchaObservation) {
-    return { kind: "captcha", confidence: 0.8, notes: ["Captcha or anti-bot challenge detected"] };
+    return { kind: "blocked-auth", confidence: 0.8, notes: ["Captcha or anti-bot challenge detected"] };
   }
 
   // Rate-limited: error events with 429/rate limit indicators
@@ -147,7 +147,7 @@ export function classifyRun(input: ClassificationInput): RunClassification {
     return msg.includes("429") || msg.includes("rate limit") || msg.includes("too many requests") || code === "429";
   });
   if (rateLimitedError) {
-    return { kind: "rate-limited", confidence: 0.85, notes: ["Rate limit or 429 response detected"] };
+    return { kind: "site-error", confidence: 0.85, notes: ["Rate limit or 429 response detected"] };
   }
 
   // Network timeout: error events with ETIMEDOUT/network timeout
@@ -157,7 +157,7 @@ export function classifyRun(input: ClassificationInput): RunClassification {
     return msg.includes("etimedout") || msg.includes("network timeout") || code === "ETIMEDOUT";
   });
   if (networkTimeoutError) {
-    return { kind: "network-timeout", confidence: 0.85, notes: ["Network timeout detected"] };
+    return { kind: "infra-error", confidence: 0.85, notes: ["Network timeout detected"] };
   }
 
   // Policy denial or auth wall → specific classifications

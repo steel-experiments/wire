@@ -1,4 +1,4 @@
-import type { BrowserObservation, SessionId } from "../shared/types.js";
+import type { BrowserObservation, JsonObject, JsonValue, SessionId } from "../shared/types.js";
 
 import type { BrowserProvider, BrowserObserveInput } from "./bridge.js";
 
@@ -11,6 +11,10 @@ export interface ObserveOptions {
   sessionId: SessionId;
   targetId?: string;
   artifactDir?: string;
+}
+
+export interface ObservationPayloadOptions {
+  includeScreenshotArtifactId?: boolean;
 }
 
 /**
@@ -30,4 +34,35 @@ export async function observeBrowser(options: ObserveOptions): Promise<BrowserOb
   }
 
   return options.provider.observe(input);
+}
+
+/**
+ * Normalize a BrowserObservation into trace-safe JSON payload shape.
+ */
+export function toObservationPayload(
+  observation: BrowserObservation,
+  options: ObservationPayloadOptions = {},
+): JsonObject {
+  const payload: JsonObject = {
+    url: observation.url,
+    title: observation.title,
+  };
+
+  if (observation.targetId) {
+    payload.targetId = observation.targetId;
+  }
+  if (observation.tabs.length > 0) {
+    payload.tabs = observation.tabs as unknown as JsonValue;
+  }
+  if (observation.focusedElement) {
+    payload.focusedElement = observation.focusedElement as unknown as JsonObject;
+  }
+  if (observation.pageSummary) {
+    payload.pageSummary = observation.pageSummary as unknown as JsonObject;
+  }
+  if (options.includeScreenshotArtifactId && observation.screenshotArtifactId) {
+    payload.screenshotArtifactId = observation.screenshotArtifactId;
+  }
+
+  return payload;
 }

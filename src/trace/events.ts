@@ -122,17 +122,6 @@ export function skillLoadEvent(
   });
 }
 
-export function skillProposalEvent(
-  runId: RunId,
-  skillId: SkillId,
-  rationale: string,
-): TraceEvent {
-  return createTraceEvent(runId, "skill-proposal", {
-    skillId,
-    rationale,
-  });
-}
-
 export function errorEvent(
   runId: RunId,
   message: string,

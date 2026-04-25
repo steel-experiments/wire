@@ -29,7 +29,7 @@ import {
 } from "./loop.js";
 import { assembleSystemPrompt, assembleUserPrompt, type ContextBundle } from "./context.js";
 import { createPlan, planToContext, advancePlanBy, type TaskPlan } from "./planning.js";
-import { observeBrowser } from "../browser/observe.js";
+import { observeBrowser, toObservationPayload } from "../browser/observe.js";
 import { detectAuthWall } from "../profiles/auth.js";
 import { llmProposeSkill, generateSkillProposal, promoteSkill } from "../skills/promote.js";
 import { findMatchingSkillDocs } from "../skills/loader.js";
@@ -510,14 +510,7 @@ async function initializeState(
       provider: config.provider,
       sessionId: state.sessionId,
     });
-    const obsPayload: JsonObject = {
-      url: observation.url,
-      title: observation.title,
-    };
-    if (observation.targetId) obsPayload.targetId = observation.targetId;
-    if (observation.tabs.length > 0) obsPayload.tabs = observation.tabs as unknown as import("../shared/types.js").JsonValue;
-    if (observation.focusedElement) obsPayload.focusedElement = observation.focusedElement as unknown as JsonObject;
-    if (observation.pageSummary) obsPayload.pageSummary = observation.pageSummary as unknown as JsonObject;
+    const obsPayload = toObservationPayload(observation);
 
     state.events.push({
       id: createId("event"),

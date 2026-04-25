@@ -1,4 +1,4 @@
-import type { ComparisonDimension, ExperimentBundle, Run, RunClassification, RunId, Task } from "../shared/types.js";
+import type { ComparisonDimension, ExperimentBundle, Run, RunClassification, RunId, Task, TaskId } from "../shared/types.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
 import { saveTask, loadTask } from "../storage/tasks.js";
 import { saveExperimentBundle, saveHypothesis, saveRun } from "../storage/runs.js";
@@ -240,7 +240,7 @@ async function persistTraceArtifacts(root: string, events: TraceEvent[]): Promis
   }
 }
 
-export async function runTask(options: RunOptions): Promise<void> {
+export async function runTask(options: RunOptions): Promise<{ taskId: TaskId; runId: RunId }> {
   const root = defaultStorageRoot();
   const mode = options.mode ?? "task";
 
@@ -337,7 +337,7 @@ export async function runTask(options: RunOptions): Promise<void> {
         console.log(formatExperimentSummary(bundle.summary));
       }
     }
-    return;
+    return { taskId: task.id, runId: last.run.id };
   }
 
   if (isJson) {
@@ -369,6 +369,8 @@ export async function runTask(options: RunOptions): Promise<void> {
       console.log(`Approval:     ${result.pendingApproval.id} pending for run ${result.run.id}`);
     }
   }
+
+  return { taskId: task.id, runId: result.run.id };
 }
 
 export async function approveRun(runId: RunId, jsonOutput?: boolean): Promise<void> {

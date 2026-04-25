@@ -1452,10 +1452,10 @@ test("executeStep denies raw CDP action when policy denies it", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// classifyRun — new failure classification kinds
+// classifyRun — failure classification mapping
 // ---------------------------------------------------------------------------
 
-test("classifyRun returns browser-crash when session error detected", () => {
+test("classifyRun returns infra-error when session crash is detected", () => {
   const events: TraceEvent[] = [
     {
       id: createId("event"),
@@ -1476,11 +1476,11 @@ test("classifyRun returns browser-crash when session error detected", () => {
     budgetExhausted: false,
   });
 
-  assert.equal(result.kind, "browser-crash");
+  assert.equal(result.kind, "infra-error");
   assert.ok(result.confidence >= 0.8);
 });
 
-test("classifyRun returns captcha when captcha indicators in observation", () => {
+test("classifyRun returns blocked-auth when captcha indicators are present", () => {
   const events: TraceEvent[] = [
     {
       id: createId("event"),
@@ -1501,11 +1501,11 @@ test("classifyRun returns captcha when captcha indicators in observation", () =>
     budgetExhausted: false,
   });
 
-  assert.equal(result.kind, "captcha");
+  assert.equal(result.kind, "blocked-auth");
   assert.ok(result.confidence >= 0.7);
 });
 
-test("classifyRun returns rate-limited when 429 error detected", () => {
+test("classifyRun returns site-error when 429 error is detected", () => {
   const events: TraceEvent[] = [
     {
       id: createId("event"),
@@ -1526,11 +1526,11 @@ test("classifyRun returns rate-limited when 429 error detected", () => {
     budgetExhausted: false,
   });
 
-  assert.equal(result.kind, "rate-limited");
+  assert.equal(result.kind, "site-error");
   assert.ok(result.confidence >= 0.8);
 });
 
-test("classifyRun returns network-timeout when ETIMEDOUT detected", () => {
+test("classifyRun returns infra-error when ETIMEDOUT is detected", () => {
   const events: TraceEvent[] = [
     {
       id: createId("event"),
@@ -1551,7 +1551,7 @@ test("classifyRun returns network-timeout when ETIMEDOUT detected", () => {
     budgetExhausted: false,
   });
 
-  assert.equal(result.kind, "network-timeout");
+  assert.equal(result.kind, "infra-error");
   assert.ok(result.confidence >= 0.8);
 });
 

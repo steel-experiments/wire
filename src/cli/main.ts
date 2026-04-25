@@ -6,68 +6,11 @@ import { loadRun, listRuns } from "../storage/runs.js";
 import { listArtifacts } from "../storage/artifacts.js";
 import { loadTask, listTasks } from "../storage/tasks.js";
 import { listTraceEvents } from "../storage/events.js";
-import { stableJsonStringify } from "../shared/ids.js";
-import type { TraceEvent } from "../shared/types.js";
+import { deriveRunResult } from "../agent/loop.js";
+import { bench as runBench, formatBenchReport } from "../eval/bench.js";
 
 function defaultStorageRoot(): string {
   return process.env["WIRE_ROOT"] ?? ".wire";
-}
-
-function deriveExtractedResultFromEvents(events: TraceEvent[]): string | undefined {
-  const latestAnswerEvent = [...events].reverse().find((event) =>
-    event.kind === "code-result" &&
-    event.payload.ok === true &&
-    (
-      typeof event.payload.stdout === "string" ||
-      event.payload.returnValue !== undefined
-    )
-  );
-
-  if (latestAnswerEvent) {
-    const stdout = latestAnswerEvent.payload.stdout;
-    if (typeof stdout === "string" && stdout.trim().length > 0) {
-      return stdout;
-    }
-
-    const returnValue = latestAnswerEvent.payload.returnValue;
-    if (returnValue !== undefined) {
-      return typeof returnValue === "string"
-        ? returnValue
-        : stableJsonStringify(returnValue);
-    }
-  }
-
-  return undefined;
-}
-
-function deriveNoteArtifactResult(events: TraceEvent[]): string | undefined {
-  const latestNoteArtifact = [...events].reverse().find((event) =>
-    event.kind === "artifact" &&
-    event.payload.kind === "note" &&
-    typeof event.payload.content === "string" &&
-    event.payload.content.trim().length > 0
-  );
-
-  if (latestNoteArtifact && typeof latestNoteArtifact.payload.content === "string") {
-    return latestNoteArtifact.payload.content;
-  }
-
-  return undefined;
-}
-
-function deriveFinishSummary(events: TraceEvent[]): string | undefined {
-  const latestFinishSummary = [...events].reverse().find((event) =>
-    event.kind === "thought-summary" &&
-    event.payload.kind === "finish" &&
-    typeof event.payload.summary === "string" &&
-    event.payload.summary.trim().length > 0
-  );
-
-  if (latestFinishSummary && typeof latestFinishSummary.payload.summary === "string") {
-    return latestFinishSummary.payload.summary;
-  }
-
-  return undefined;
 }
 
 export async function main(argv: string[]): Promise<void> {
@@ -97,6 +40,10 @@ export async function main(argv: string[]): Promise<void> {
     }
     case "approve": {
       await handleApprove(args);
+      break;
+    }
+    case "bench": {
+      await handleBench(args);
       break;
     }
     default: {
@@ -255,13 +202,10 @@ async function handleResult(
   const run = await loadRun(root, runId);
   const task = await loadTask(root, run.taskId);
   const events = await listTraceEvents(root, runId);
-  const finishSummary = deriveFinishSummary(events);
-
+  const finishSummary = task.mode === "task" ? deriveRunResult(events, "investigate") : undefined;
   const result = run.result ??
-    deriveExtractedResultFromEvents(events) ??
-    (task.mode === "task"
-      ? (deriveNoteArtifactResult(events) ?? finishSummary)
-      : finishSummary);
+    deriveRunResult(events, task.mode) ??
+    finishSummary;
 
   if (!result) {
     console.error(`No final result recorded for ${runId}.`);
@@ -294,4 +238,25 @@ async function handleApprove(
   }
 
   await approveRun(args.runId as `run_${string}`, args.json);
+}
+
+async function handleBench(
+  args: CliArgs,
+): Promise<void> {
+  const report = await runBench({
+    benchmarksFile: args.benchmarksFile,
+    provider: args.provider,
+    model: args.model,
+    json: args.json,
+  });
+
+  if (args.json) {
+    console.log(JSON.stringify(report));
+  } else {
+    console.log(formatBenchReport(report));
+  }
+
+  if (!report.passed) {
+    process.exitCode = 1;
+  }
 }

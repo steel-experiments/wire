@@ -15,7 +15,7 @@ import {
   skillLoadEvent,
   thoughtSummaryEvent,
 } from "./events.js";
-import { createArtifactRegistry } from "./artifacts.js";
+import { createArtifactRegistry } from "../storage/artifact-registry.js";
 import { compareRuns } from "./compare.js";
 import { buildTimeline, filterByKind, summarizeTimeline } from "./replay.js";
 
