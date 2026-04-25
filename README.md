@@ -27,7 +27,7 @@ A small TypeScript core orchestrates real remote Chrome sessions through Steel's
 - `pnpm dev` — run entry point via tsx
 - `pnpm build` — compile TypeScript to dist/
 - `pnpm typecheck` — type-check without emitting
-- `pnpm test` — run all tests (302 tests across 12 test files)
+- `pnpm test` — run all tests (432 tests across 17 test files)
 - `pnpm check` — typecheck + test
 
 ## Architecture
@@ -73,6 +73,11 @@ wire list --mode task
 
 # Approve pending actions
 wire approve --run-id run_abc123
+
+# Run benchmark suite
+wire bench
+wire bench --benchmarks benchmarks/default.json --provider openai --model gpt-5.4-mini
+wire bench --json   # JSON output for CI, exits 1 on failures
 ```
 
 ## Key Domain Objects
@@ -140,3 +145,21 @@ mkdir -p ~/.wire && echo '{"llm":{"provider":"anthropic","model":"claude-sonnet-
 - `WIRE_PROVIDER` — Override the LLM provider (`openai` or `anthropic`)
 - `WIRE_MODEL` — Override the LLM model
 - `WIRE_ROOT` — Storage root directory (default: `.wire`)
+
+## Benchmarks
+
+Benchmark tasks are defined in JSON files under `benchmarks/`. Each task specifies an objective, mode, step budget, and expected outcomes (classification, answer keywords). The runner executes each task via the full agent loop, scores with hard metrics (classification match, answer relevance, step efficiency) and optional LLM-as-judge, then persists the report to `.wire/benchmarks/` for comparison across changes.
+
+```bash
+# Run the default 5-task suite (example.com, booking.com, SEC EDGAR, LessWrong, httpbin)
+wire bench
+
+# Custom benchmark file
+wire bench --benchmarks benchmarks/regression.json
+
+# JSON output for CI (exits 1 if any task fails)
+wire bench --json
+
+# Compare two runs
+diff <(jq '.' .wire/benchmarks/bench-old.json) <(jq '.' .wire/benchmarks/bench-new.json)
+```
