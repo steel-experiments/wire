@@ -251,6 +251,7 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number): 
         'For "observe", omit payload unless you need {"targetId":"..."}',
         'For "exec", set payload.code to JavaScript that runs in the browser.',
         'For "raw", set payload.method to a CDP method and payload.params to its parameters. Example: {"kind":"raw","summary":"Press arrow key","payload":{"method":"Input.dispatchKeyEvent","params":{"type":"keyDown","key":"ArrowUp","windowsVirtualKeyCode":38}}} sends a trusted keypress that pages cannot ignore. Always pair keyDown + keyUp. Use for keyboard input, mouse events, or any low-level browser control that exec cannot achieve.',
+        "For interactive apps and games: prefer exec to access the app's internal JavaScript API directly. Most games expose state and methods on global objects or via DOM element references (e.g., a game manager instance). One exec call can trigger many moves — far more efficient than one raw keypress per step. Use raw only when exec truly cannot reach the target API.",
         "Prefer direct URL patterns before brittle DOM hunting when the destination is obvious, such as /pricing or /docs.",
         "Wire auto-observes after navigation code (location.href etc). Do NOT emit a separate observe after navigating.",
         "CRITICAL: navigation alone is NOT task completion. After reaching the target page, you MUST emit a final exec that EXTRACTS the answer as a JSON object or plain text string.",
@@ -685,7 +686,7 @@ async function runMainLoop(
       if (isRecoverableStepError(message)) {
         consecutiveRecoverableErrors++;
         const budgetRemaining = state.stepCount < config.maxSteps;
-        if (budgetRemaining && consecutiveRecoverableErrors < 3) {
+        if (budgetRemaining && consecutiveRecoverableErrors < 5) {
           continue;
         }
       }

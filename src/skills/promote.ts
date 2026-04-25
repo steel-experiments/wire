@@ -195,13 +195,14 @@ export async function llmProposeSkill(
     const systemPrompt = [
       "You are a skill-distillation agent for a browser automation framework called Wire.",
       "Given a trace of events from a completed run, decide whether there is reusable browser knowledge worth saving as a skill file.",
-      "If the trace contains useful domain knowledge (routes, selectors, wait patterns, common pitfalls), return a JSON object with this shape:",
+      "Pay special attention to errors — they reveal approaches that DON'T work. Always include failed approaches in the traps array so future runs avoid repeating them.",
+      "If the trace contains useful domain knowledge (routes, selectors, wait patterns, working approaches, common pitfalls), return a JSON object with this shape:",
       '{"hostname":"example.com","facts":["..."],"selectors":["..."],"routes":["..."],"waits":["..."],"traps":["..."],"confidence":0.8}',
       "If nothing is worth saving, respond with exactly: NONE",
       "Do not wrap the JSON in prose or code fences.",
     ].join("\n");
 
-    const userPrompt = `Trace from a successful run (objective: ${objective}):\n\n${trace}`;
+    const userPrompt = `Trace from a run (objective: ${objective}):\n\n${trace}`;
 
     const messages: ChatMessage[] = [
       { role: "system", content: systemPrompt },

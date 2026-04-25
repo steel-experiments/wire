@@ -83,7 +83,7 @@ export function buildFailureSummary(state: LoopState): string | undefined {
 }
 
 export function isRecoverableStepError(message: string): boolean {
-  return /Target not found|timeout|network|ECONN|ETIMEDOUT|ENOTFOUND|fetch|Execution context was destroyed|Cannot find context/i
+  return /Target not found|timeout|network|ECONN|ETIMEDOUT|ENOTFOUND|fetch|Execution context was destroyed|Cannot find context|wasn't found|Not supported|CDP error|Session closed/iu
     .test(message);
 }
 
