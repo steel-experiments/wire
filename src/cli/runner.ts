@@ -156,18 +156,25 @@ function createLlmProvider(provider?: LlmProvider, model?: string): LLMProvider 
 }
 
 function createRuntimeConfig(
-  options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "provider" | "model" | "yes">,
+  options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "provider" | "model" | "yes" | "json">,
 ): RuntimeConfig {
   let policyEngine: PolicyEngine = createPolicyEngine();
   if (options.yes) {
     policyEngine = autoApprovingEngine(policyEngine);
   }
 
+  const isJson = options.json === true;
+
   const config: RuntimeConfig = {
     provider: createSteelProvider(),
     policyEngine,
     maxSteps: options.maxSteps ?? 10,
     async onSessionCreated(session) {
+      const url = session.debugUrl ?? session.liveUrl;
+      if (!isJson && url) {
+        console.log(`Debug URL:    ${url}`);
+        console.log("");
+      }
       await saveSession(defaultStorageRoot(), session);
     },
   };
@@ -377,9 +384,6 @@ export async function runTask(options: RunOptions): Promise<RunResult> {
       console.log(
         `Classification: ${last.run.classification?.kind ?? "unknown"} (${(((last.run.classification?.confidence) ?? 0) * 100).toFixed(0)}%)`,
       );
-      if (last.sessionLiveUrl) {
-        console.log(`Debug URL:    ${last.sessionLiveUrl}`);
-      }
       if (last.run.result) {
         console.log(`Result:       ${last.run.result}`);
       }
@@ -414,9 +418,6 @@ export async function runTask(options: RunOptions): Promise<RunResult> {
     console.log(
       `Classification: ${result.run.classification?.kind ?? "unknown"} (${(((result.run.classification?.confidence) ?? 0) * 100).toFixed(0)}%)`,
     );
-    if (result.sessionLiveUrl) {
-      console.log(`Debug URL:    ${result.sessionLiveUrl}`);
-    }
     if (result.run.result) {
       console.log(`Result:       ${result.run.result}`);
     }
