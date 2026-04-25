@@ -16,19 +16,20 @@ import { AnthropicProvider, createAnthropicProvider } from "./anthropic.js";
 
 function makeOpenAIResponse(overrides: Record<string, unknown> = {}): Response {
   const body = {
-    id: "chatcmpl-test",
-    object: "chat.completion",
+    id: "resp-test",
+    object: "response",
+    status: "completed",
     model: "gpt-4o",
-    choices: [
+    output: [
       {
-        message: { role: "assistant", content: "Hello!" },
-        finish_reason: "stop",
-        index: 0,
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "Hello!" }],
       },
     ],
     usage: {
-      prompt_tokens: 10,
-      completion_tokens: 5,
+      input_tokens: 10,
+      output_tokens: 5,
       total_tokens: 15,
     },
     ...overrides,
@@ -134,9 +135,9 @@ test("OpenAIProvider.chat sends messages and returns ChatResponse", async () => 
     assert.ok(result.usage);
     assert.equal(result.usage.inputTokens, 10);
     assert.equal(result.usage.outputTokens, 5);
-    assert.ok(capturedUrl.endsWith("/chat/completions"));
-    assert.deepEqual(capturedBody.messages, [
-      { role: "system", content: "You are a helpful assistant." },
+    assert.ok(capturedUrl.endsWith("/responses"));
+    assert.equal(capturedBody.instructions, "You are a helpful assistant.");
+    assert.deepEqual(capturedBody.input, [
       { role: "user", content: "Say hello." },
     ]);
   } finally {
@@ -212,7 +213,7 @@ test("OpenAIProvider.chat sends temperature and maxTokens when provided", async 
     const provider = new OpenAIProvider({ apiKey: "test-key" });
     await provider.chat(makeMessages(), { temperature: 0.5, maxTokens: 100 });
     assert.equal(capturedBody.temperature, 0.5);
-    assert.equal(capturedBody.max_tokens, 100);
+    assert.equal(capturedBody.max_output_tokens, 100);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -231,7 +232,7 @@ test("OpenAIProvider.chat omits temperature and maxTokens when not set", async (
     const provider = new OpenAIProvider({ apiKey: "test-key" });
     await provider.chat(makeMessages());
     assert.equal(capturedBody.temperature, undefined);
-    assert.equal(capturedBody.max_tokens, undefined);
+    assert.equal(capturedBody.max_output_tokens, undefined);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -281,11 +282,11 @@ test("OpenAIProvider.chat throws LLMApiError on non-2xx response", async () => {
   }
 });
 
-test("OpenAIProvider.chat throws LLMApiError when no choices returned", async () => {
+test("OpenAIProvider.chat throws LLMApiError when no message in output", async () => {
   const originalFetch = globalThis.fetch;
 
   globalThis.fetch = async () => {
-    return makeOpenAIResponse({ choices: [] });
+    return makeOpenAIResponse({ output: [] });
   };
 
   try {
@@ -294,7 +295,7 @@ test("OpenAIProvider.chat throws LLMApiError when no choices returned", async ()
       () => provider.chat(makeMessages()),
       (err: unknown) => {
         assert.ok(err instanceof LLMApiError);
-        assert.ok(err.message.includes("No choices"));
+        assert.ok(err.message.includes("No message in output"));
         return true;
       },
     );

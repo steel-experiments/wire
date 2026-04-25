@@ -79,23 +79,25 @@ const DEFAULT_MODEL = "gpt-5.4-mini";
 // OpenAI API response types
 // ---------------------------------------------------------------------------
 
-interface OpenAIChatChoice {
-  message: { role: string; content: string };
-  finish_reason: string;
+interface OpenAIOutputMessage {
+  type: "message";
+  role: string;
+  content: Array<{ type: "output_text"; text: string }>;
 }
 
-interface OpenAIChatUsage {
-  prompt_tokens: number;
-  completion_tokens: number;
+interface OpenAIResponseUsage {
+  input_tokens: number;
+  output_tokens: number;
   total_tokens: number;
 }
 
-interface OpenAIChatResponse {
+interface OpenAIResponse {
   id: string;
   object: string;
+  status: string;
   model: string;
-  choices: OpenAIChatChoice[];
-  usage?: OpenAIChatUsage;
+  output: OpenAIOutputMessage[];
+  usage?: OpenAIResponseUsage;
 }
 
 interface OpenAIErrorResponse {
@@ -120,20 +122,35 @@ export class OpenAIProvider implements LLMProvider {
   async chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResponse> {
     const model = options?.model ?? this.defaultModel;
 
+    // Separate system messages for the `instructions` field
+    const systemParts: string[] = [];
+    const input: Array<{ role: string; content: string }> = [];
+    for (const m of messages) {
+      if (m.role === "system") {
+        systemParts.push(m.content);
+      } else {
+        input.push({ role: m.role, content: m.content });
+      }
+    }
+
     const body: Record<string, unknown> = {
       model,
-      messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      input,
     };
+
+    if (systemParts.length > 0) {
+      body.instructions = systemParts.join("\n\n");
+    }
 
     if (options?.temperature !== undefined) {
       body.temperature = options.temperature;
     }
 
     if (options?.maxTokens !== undefined) {
-      body.max_tokens = options.maxTokens;
+      body.max_output_tokens = options.maxTokens;
     }
 
-    const url = `${this.baseUrl}/chat/completions`;
+    const url = `${this.baseUrl}/responses`;
     const headers: Record<string, string> = {
       Authorization: `Bearer ${this.apiKey}`,
       "Content-Type": "application/json",
@@ -161,22 +178,27 @@ export class OpenAIProvider implements LLMProvider {
       throw new LLMApiError("openai", response.status, detail);
     }
 
-    const data = (await response.json()) as OpenAIChatResponse;
+    const data = (await response.json()) as OpenAIResponse;
 
-    const choice = data.choices[0];
-    if (!choice) {
-      throw new LLMApiError("openai", response.status, "No choices returned");
+    const message = data.output.find((o) => o.type === "message");
+    if (!message) {
+      throw new LLMApiError("openai", response.status, "No message in output");
     }
 
+    const content = message.content
+      .filter((c) => c.type === "output_text")
+      .map((c) => c.text)
+      .join("");
+
     const result: ChatResponse = {
-      content: choice.message.content,
+      content,
       model: data.model,
     };
 
     if (data.usage) {
       result.usage = {
-        inputTokens: data.usage.prompt_tokens,
-        outputTokens: data.usage.completion_tokens,
+        inputTokens: data.usage.input_tokens,
+        outputTokens: data.usage.output_tokens,
       };
     }
 
