@@ -358,9 +358,17 @@ export class SteelProvider implements BrowserProvider {
 
   async raw(input: BrowserRawRequest): Promise<unknown> {
     const session = this.withAuth(await this.getSession(input.sessionId));
-    return withConnection(this.webSocketFactory, session, this.cdpCommandTimeoutMs, async (cdp) =>
-      cdp.send(input.method, input.params),
-    );
+    return withConnection(this.webSocketFactory, session, this.cdpCommandTimeoutMs, async (cdp) => {
+      // Input methods require targeting a specific page session
+      const needsTargetSession = input.method.startsWith("Input.");
+      if (needsTargetSession) {
+        const targets = await listPageTargets(cdp);
+        const target = pickTarget(targets);
+        const targetSessionId = await attachToTarget(cdp, target.targetId);
+        return cdp.send(input.method, input.params, targetSessionId);
+      }
+      return cdp.send(input.method, input.params);
+    });
   }
 }
 
