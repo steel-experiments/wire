@@ -92,6 +92,22 @@ const PRIVILEGED_KINDS = new Set([
   "escalate",
 ]);
 
+/**
+ * CDP methods that are safe to auto-allow — they inject trusted input events
+ * equivalent to what a user could do physically, no more dangerous than exec.
+ */
+const SAFE_CDP_METHOD_PREFIXES = [
+  "Input.dispatchKeyEvent",
+  "Input.dispatchMouseEvent",
+  "Input.insertText",
+  "Input.dispatchTouchEvent",
+];
+
+function isSafeCdpMethod(method: string | undefined): boolean {
+  if (!method) return false;
+  return SAFE_CDP_METHOD_PREFIXES.includes(method);
+}
+
 // ---------------------------------------------------------------------------
 // Baseline rules
 // ---------------------------------------------------------------------------
@@ -135,9 +151,9 @@ export const BASELINE_RULES: PolicyRule[] = [
   ),
   makeRule(
     "baseline-raw-cdp",
-    "Raw CDP access requires approval.",
+    "Raw CDP access requires approval, except safe input methods.",
     "require-approval",
-    (a) => a.kind === "raw",
+    (a) => a.kind === "raw" && !isSafeCdpMethod(a.payload?.method as string | undefined),
   ),
 ];
 
