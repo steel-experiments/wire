@@ -15,9 +15,11 @@ export interface SteelProviderConfig {
   apiKey: string;
   baseUrl?: string;
   webSocketFactory?: (url: string) => WebSocketLike;
+  cdpCommandTimeoutMs?: number;
 }
 
 const DEFAULT_BASE_URL = "https://api.steel.dev/v1";
+const DEFAULT_CDP_COMMAND_TIMEOUT_MS = 30_000;
 
 interface SteelSessionResponse {
   id: string;
@@ -185,11 +187,13 @@ export class SteelProvider implements BrowserProvider {
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly webSocketFactory: (url: string) => WebSocketLike;
+  private readonly cdpCommandTimeoutMs: number;
 
   constructor(config: SteelProviderConfig) {
     this.apiKey = config.apiKey;
     this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
     this.webSocketFactory = config.webSocketFactory ?? ((url) => new WebSocket(url) as unknown as WebSocketLike);
+    this.cdpCommandTimeoutMs = config.cdpCommandTimeoutMs ?? DEFAULT_CDP_COMMAND_TIMEOUT_MS;
   }
 
   async createSession(input: CreateSessionInput = {}): Promise<BrowserSession> {
@@ -254,7 +258,7 @@ export class SteelProvider implements BrowserProvider {
   async observe(input: BrowserObserveInput): Promise<BrowserObservation> {
     const session = this.withAuth(await this.getSession(input.sessionId));
 
-    return withConnection(this.webSocketFactory, session, async (cdp) => {
+    return withConnection(this.webSocketFactory, session, this.cdpCommandTimeoutMs, async (cdp) => {
       const targets = await listPageTargets(cdp);
       const target = pickTarget(targets, input.targetId);
       const sessionId = await attachToTarget(cdp, target.targetId);
@@ -289,7 +293,7 @@ export class SteelProvider implements BrowserProvider {
   async exec(input: BrowserExecRequest): Promise<BrowserExecResult> {
     const session = this.withAuth(await this.getSession(input.sessionId));
 
-    return withConnection(this.webSocketFactory, session, async (cdp) => {
+    return withConnection(this.webSocketFactory, session, this.cdpCommandTimeoutMs, async (cdp) => {
       const startedAt = Date.now();
       const targets = await listPageTargets(cdp);
       const selected = pickExecTargets(targets, input.target);
@@ -332,7 +336,7 @@ export class SteelProvider implements BrowserProvider {
 
   async raw(input: BrowserRawRequest): Promise<unknown> {
     const session = this.withAuth(await this.getSession(input.sessionId));
-    return withConnection(this.webSocketFactory, session, async (cdp) =>
+    return withConnection(this.webSocketFactory, session, this.cdpCommandTimeoutMs, async (cdp) =>
       cdp.send(input.method, input.params),
     );
   }
@@ -371,25 +375,176 @@ function wrapUserCode(code: string): string {
 // Code validation — reject dangerous patterns before browser execution
 // ---------------------------------------------------------------------------
 
-const BLOCKED_CODE_PATTERNS = [
-  "eval(",
-  "Function(",
-  "new Function",
-  "fetch(",
+type CodeToken =
+  | { kind: "identifier"; value: string }
+  | { kind: "string"; value: string }
+  | { kind: "punct"; value: string };
+
+const BLOCKED_GLOBAL_IDENTIFIERS = new Set([
+  "eval",
+  "Function",
+  "fetch",
   "XMLHttpRequest",
   "WebSocket",
-  "importScripts(",
-  "navigator.sendBeacon",
-  "document.cookie",
-];
+  "importScripts",
+]);
+
+const BLOCKED_MEMBER_PROPERTIES = new Map([
+  ["navigator", new Set(["sendBeacon"])],
+  ["document", new Set(["cookie"])],
+  ["window", new Set(["eval", "Function", "fetch", "XMLHttpRequest", "WebSocket", "importScripts"])],
+  ["globalThis", new Set(["eval", "Function", "fetch", "XMLHttpRequest", "WebSocket", "importScripts"])],
+]);
+
+function tokenizeCode(code: string): CodeToken[] {
+  const tokens: CodeToken[] = [];
+  let i = 0;
+
+  while (i < code.length) {
+    const ch = code[i]!;
+    const next = code[i + 1];
+
+    if (/\s/u.test(ch)) {
+      i++;
+      continue;
+    }
+
+    if (ch === "/" && next === "/") {
+      i += 2;
+      while (i < code.length && code[i] !== "\n") i++;
+      continue;
+    }
+
+    if (ch === "/" && next === "*") {
+      i += 2;
+      while (i + 1 < code.length && !(code[i] === "*" && code[i + 1] === "/")) i++;
+      i = Math.min(code.length, i + 2);
+      continue;
+    }
+
+    if (ch === "\"" || ch === "'" || ch === "`") {
+      const quote = ch;
+      let value = "";
+      i++;
+      while (i < code.length) {
+        const current = code[i]!;
+        if (current === "\\") {
+          i += 2;
+          continue;
+        }
+        if (current === quote) {
+          i++;
+          break;
+        }
+        value += current;
+        i++;
+      }
+      tokens.push({ kind: "string", value });
+      continue;
+    }
+
+    if (/[A-Za-z_$]/u.test(ch)) {
+      let value = ch;
+      i++;
+      while (i < code.length && /[A-Za-z0-9_$]/u.test(code[i]!)) {
+        value += code[i]!;
+        i++;
+      }
+      tokens.push({ kind: "identifier", value });
+      continue;
+    }
+
+    tokens.push({ kind: "punct", value: ch });
+    i++;
+  }
+
+  return tokens;
+}
+
+function staticStringExpression(tokens: CodeToken[], start: number, end: number): string | undefined {
+  let value = "";
+  let expectString = true;
+
+  for (let i = start; i < end; i++) {
+    const token = tokens[i]!;
+    if (expectString) {
+      if (token.kind !== "string") {
+        return undefined;
+      }
+      value += token.value;
+      expectString = false;
+      continue;
+    }
+
+    if (token.kind !== "punct" || token.value !== "+") {
+      return undefined;
+    }
+    expectString = true;
+  }
+
+  return expectString ? undefined : value;
+}
+
+function isCallLike(tokens: CodeToken[], index: number): boolean {
+  const next = tokens[index + 1];
+  if (next?.kind === "punct" && next.value === "(") {
+    return true;
+  }
+
+  const previous = tokens[index - 1];
+  return previous?.kind === "identifier" && previous.value === "new";
+}
 
 export function validateBrowserCode(code: string): void {
   const found: string[] = [];
-  for (const pattern of BLOCKED_CODE_PATTERNS) {
-    if (code.includes(pattern)) {
-      found.push(pattern);
+  const tokens = tokenizeCode(code);
+
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!;
+    if (token.kind !== "identifier") {
+      continue;
+    }
+
+    const previous = tokens[i - 1];
+    const isProperty = previous?.kind === "punct" && previous.value === ".";
+    if (!isProperty && BLOCKED_GLOBAL_IDENTIFIERS.has(token.value) && isCallLike(tokens, i)) {
+      found.push(token.value);
+      continue;
+    }
+
+    const blockedProperties = BLOCKED_MEMBER_PROPERTIES.get(token.value);
+    if (!blockedProperties) {
+      continue;
+    }
+
+    const dot = tokens[i + 1];
+    const property = tokens[i + 2];
+    if (dot?.kind === "punct" && dot.value === "." && property?.kind === "identifier" && blockedProperties.has(property.value)) {
+      found.push(`${token.value}.${property.value}`);
+      continue;
+    }
+
+    const open = tokens[i + 1];
+    if (open?.kind !== "punct" || open.value !== "[") {
+      continue;
+    }
+    let closeIndex = i + 2;
+    while (closeIndex < tokens.length) {
+      const close = tokens[closeIndex]!;
+      if (close.kind === "punct" && close.value === "]") {
+        break;
+      }
+      closeIndex++;
+    }
+    if (closeIndex >= tokens.length) {
+      continue;
+    }
+    const computed = staticStringExpression(tokens, i + 2, closeIndex);
+    if (computed && blockedProperties.has(computed)) {
+      found.push(`${token.value}[${computed}]`);
     }
   }
+
   if (found.length > 0) {
     throw new Error(`Browser code contains blocked patterns: ${found.join(", ")}`);
   }
@@ -400,25 +555,36 @@ class CdpConnection {
   private readonly pending = new Map<number, {
     resolve: (value: unknown) => void;
     reject: (reason?: unknown) => void;
+    timer: ReturnType<typeof setTimeout>;
   }>();
   private readonly ready: Promise<void>;
 
-  constructor(private readonly socket: WebSocketLike) {
-      this.ready = new Promise((resolve, reject) => {
+  constructor(
+    private readonly socket: WebSocketLike,
+    private readonly commandTimeoutMs: number,
+  ) {
+    this.ready = new Promise((resolve, reject) => {
       this.socket.onopen = () => resolve();
-      this.socket.onerror = () => reject(new Error("WebSocket error"));
+      this.socket.onerror = () => {
+        const error = new Error("WebSocket error");
+        this.rejectPending(error);
+        reject(error);
+      };
       this.socket.onclose = () => {
-        for (const entry of this.pending.values()) {
-          entry.reject(new Error("CDP socket closed"));
-        }
-        this.pending.clear();
+        this.rejectPending(new Error("CDP socket closed"));
       };
       this.socket.onmessage = (event) => {
-        const message = JSON.parse(String(event.data)) as {
+        let message: {
           id?: number;
           result?: unknown;
           error?: { message?: string };
         };
+        try {
+          message = JSON.parse(String(event.data)) as typeof message;
+        } catch (err) {
+          this.rejectPending(new Error(`Invalid CDP message: ${err instanceof Error ? err.message : String(err)}`));
+          return;
+        }
         if (message.id === undefined) {
           return;
         }
@@ -427,6 +593,7 @@ class CdpConnection {
           return;
         }
         this.pending.delete(message.id);
+        clearTimeout(entry.timer);
         if (message.error) {
           entry.reject(new Error(message.error.message ?? "CDP error"));
           return;
@@ -440,7 +607,11 @@ class CdpConnection {
     await this.ready;
     const id = this.nextId++;
     return await new Promise<T>((resolve, reject) => {
-      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`CDP command timed out after ${this.commandTimeoutMs}ms: ${method}`));
+      }, this.commandTimeoutMs);
+      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
       const message: Record<string, unknown> = { id, method };
       if (params) {
         message.params = params;
@@ -448,25 +619,40 @@ class CdpConnection {
       if (sessionId) {
         message.sessionId = sessionId;
       }
-      this.socket.send(JSON.stringify(message));
+      try {
+        this.socket.send(JSON.stringify(message));
+      } catch (err) {
+        this.pending.delete(id);
+        clearTimeout(timer);
+        reject(err);
+      }
     });
   }
 
   close(): void {
     this.socket.close();
   }
+
+  private rejectPending(error: Error): void {
+    for (const entry of this.pending.values()) {
+      clearTimeout(entry.timer);
+      entry.reject(error);
+    }
+    this.pending.clear();
+  }
 }
 
 async function withConnection<T>(
   webSocketFactory: (url: string) => WebSocketLike,
   session: BrowserSession,
+  commandTimeoutMs: number,
   run: (cdp: CdpConnection) => Promise<T>,
 ): Promise<T> {
   if (!session.wsUrl) {
     throw new Error("Steel session missing wsUrl");
   }
 
-  const cdp = new CdpConnection(webSocketFactory(session.wsUrl));
+  const cdp = new CdpConnection(webSocketFactory(session.wsUrl), commandTimeoutMs);
   try {
     return await run(cdp);
   } finally {
@@ -567,6 +753,9 @@ export function createSteelProvider(
   }
   if (config?.webSocketFactory) {
     providerConfig.webSocketFactory = config.webSocketFactory;
+  }
+  if (config?.cdpCommandTimeoutMs) {
+    providerConfig.cdpCommandTimeoutMs = config.cdpCommandTimeoutMs;
   }
 
   return new SteelProvider(providerConfig);

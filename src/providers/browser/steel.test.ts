@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   SteelProvider,
   createSteelProvider,
+  validateBrowserCode,
 } from "../../providers/browser/steel.js";
 
 // ---------------------------------------------------------------------------
@@ -301,6 +302,115 @@ test("SteelProvider.raw sends a CDP command over websocket", async () => {
   } finally {
     restore();
   }
+});
+
+test("SteelProvider.raw rejects malformed CDP frames", async () => {
+  class BadFrameSocket {
+    onopen: ((event: any) => void) | null = null;
+    onmessage: ((event: any) => void) | null = null;
+    onerror: ((event: any) => void) | null = null;
+    onclose: ((event: any) => void) | null = null;
+
+    constructor() {
+      queueMicrotask(() => {
+        this.onopen?.({});
+        queueMicrotask(() => this.onmessage?.({ data: "not-json" }));
+      });
+    }
+
+    send(_data: string): void {}
+
+    close(): void {
+      this.onclose?.({});
+    }
+  }
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(
+    JSON.stringify(fakeSteelSession({ id: "aaa-bbb-ccc" })),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+
+  const provider = new SteelProvider({
+    apiKey: "ste-test-key",
+    webSocketFactory: () => new BadFrameSocket(),
+  });
+
+  try {
+    await assert.rejects(
+      () => provider.raw({
+        sessionId: "session_aaa-bbb-ccc" as never,
+        method: "Browser.getVersion",
+      }),
+      /Invalid CDP message/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("SteelProvider.raw times out when CDP does not answer", async () => {
+  class NoResponseSocket {
+    onopen: ((event: any) => void) | null = null;
+    onmessage: ((event: any) => void) | null = null;
+    onerror: ((event: any) => void) | null = null;
+    onclose: ((event: any) => void) | null = null;
+
+    constructor() {
+      queueMicrotask(() => this.onopen?.({}));
+    }
+
+    send(_data: string): void {}
+
+    close(): void {
+      this.onclose?.({});
+    }
+  }
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(
+    JSON.stringify(fakeSteelSession({ id: "aaa-bbb-ccc" })),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+
+  const provider = new SteelProvider({
+    apiKey: "ste-test-key",
+    cdpCommandTimeoutMs: 10,
+    webSocketFactory: () => new NoResponseSocket(),
+  });
+
+  try {
+    await assert.rejects(
+      () => provider.raw({
+        sessionId: "session_aaa-bbb-ccc" as never,
+        method: "Browser.getVersion",
+      }),
+      /CDP command timed out after 10ms: Browser\.getVersion/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("validateBrowserCode rejects unsafe calls without scanning string literals", () => {
+  assert.throws(
+    () => validateBrowserCode("window[\"fetch\"](\"https://example.com\")"),
+    /window\[fetch\]/,
+  );
+  assert.throws(
+    () => validateBrowserCode("globalThis[\"ev\" + \"al\"](\"1\")"),
+    /globalThis\[eval\]/,
+  );
+  assert.throws(
+    () => validateBrowserCode("return document.cookie"),
+    /document\.cookie/,
+  );
+  assert.doesNotThrow(
+    () => validateBrowserCode("const message = \"fetch( is text only\"; return message;"),
+  );
+  assert.doesNotThrow(
+    () => validateBrowserCode("const data = { fetch: \"metadata\" }; return data.fetch;"),
+  );
 });
 
 // ---------------------------------------------------------------------------

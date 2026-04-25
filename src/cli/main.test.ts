@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -281,6 +281,50 @@ test("main result falls back to persisted note artifacts for task runs", async (
   }
 
   assert.deepEqual(lines, ["Completed search for San Francisco May 15-17 and New York May 20-22"]);
+});
+
+test("main run reports invalid task-file JSON as structured JSON failure", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wire-cli-"));
+  const previousRoot = process.env.WIRE_ROOT;
+  const previousExitCode = process.exitCode;
+  process.env.WIRE_ROOT = root;
+
+  const taskFile = join(root, "bad-task.json");
+  await writeFile(taskFile, "{invalid", "utf-8");
+
+  const lines: string[] = [];
+  const errors: string[] = [];
+  const originalLog = console.log;
+  const originalError = console.error;
+  console.log = (value?: unknown) => {
+    lines.push(String(value ?? ""));
+  };
+  console.error = (value?: unknown) => {
+    errors.push(String(value ?? ""));
+  };
+
+  try {
+    await main(["node", "wire", "run", "--task-file", taskFile, "--json"]);
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+    process.exitCode = previousExitCode;
+    if (previousRoot === undefined) {
+      delete process.env.WIRE_ROOT;
+    } else {
+      process.env.WIRE_ROOT = previousRoot;
+    }
+  }
+
+  assert.equal(errors.length, 0);
+  assert.equal(lines.length, 1);
+  const output = JSON.parse(lines[0]!) as {
+    status: string;
+    error?: { error_class?: string; error_code?: string };
+  };
+  assert.equal(output.status, "failed");
+  assert.equal(output.error?.error_class, "input");
+  assert.equal(output.error?.error_code, "INVALID_TASK_FILE");
 });
 
 // ---------------------------------------------------------------------------

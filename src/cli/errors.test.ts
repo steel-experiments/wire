@@ -52,6 +52,14 @@ test("classifyError: 'no objective' → MISSING_OBJECTIVE", () => {
   assert.equal(result.retryable, false);
 });
 
+test("classifyError: invalid task-file JSON → INVALID_TASK_FILE", () => {
+  const err = new Error("Invalid task file JSON: bad-task.json");
+  const result = classifyError(err);
+  assert.equal(result.error_code, "INVALID_TASK_FILE");
+  assert.equal(result.error_class, "input");
+  assert.equal(result.retryable, false);
+});
+
 test("classifyError: 'multiple providers' → MULTIPLE_PROVIDERS", () => {
   const err = new Error("Multiple LLM providers are configured");
   const result = classifyError(err);

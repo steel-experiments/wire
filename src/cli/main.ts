@@ -90,31 +90,37 @@ async function handleRun(
 
   let objective = args.objective ?? "";
 
-  if (args.taskFile) {
-    const fs = await import("node:fs/promises");
-    const raw = await fs.readFile(args.taskFile, "utf-8");
-    const parsed = JSON.parse(raw) as { objective?: string };
-    if (typeof parsed.objective === "string" && parsed.objective.length > 0) {
-      objective = parsed.objective;
-    }
-  }
-
-  if (!objective) {
-    if (args.json) {
-      console.log(JSON.stringify(failure("run", {
-        error_class: "input",
-        error_code: "MISSING_OBJECTIVE",
-        retryable: false,
-        hint: "No objective provided.",
-      })));
-    } else {
-      console.error("Error: no objective provided.");
-    }
-    process.exitCode = 1;
-    return;
-  }
-
   try {
+    if (args.taskFile) {
+      const fs = await import("node:fs/promises");
+      const raw = await fs.readFile(args.taskFile, "utf-8");
+      let parsed: { objective?: string };
+      try {
+        parsed = JSON.parse(raw) as { objective?: string };
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        throw new Error(`Invalid task file JSON: ${args.taskFile}: ${detail}`);
+      }
+      if (typeof parsed.objective === "string" && parsed.objective.length > 0) {
+        objective = parsed.objective;
+      }
+    }
+
+    if (!objective) {
+      if (args.json) {
+        console.log(JSON.stringify(failure("run", {
+          error_class: "input",
+          error_code: "MISSING_OBJECTIVE",
+          retryable: false,
+          hint: "No objective provided.",
+        })));
+      } else {
+        console.error("Error: no objective provided.");
+      }
+      process.exitCode = 1;
+      return;
+    }
+
     const config = await loadConfig(undefined, undefined, args.strict);
     const llm = resolveLlmConfig(
       args.provider,

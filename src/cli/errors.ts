@@ -86,6 +86,15 @@ export function classifyError(error: unknown): WireError {
       };
     }
 
+    if (/invalid task file json/i.test(msg)) {
+      return {
+        error_class: "input",
+        error_code: "INVALID_TASK_FILE",
+        retryable: false,
+        hint: "Provide a valid JSON task file with an objective field.",
+      };
+    }
+
     if (/multiple.*provider/i.test(msg)) {
       return {
         error_class: "input",
