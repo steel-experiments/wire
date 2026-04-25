@@ -1,4 +1,4 @@
-import type { ChatMessage, ChatOptions, ChatResponse, LLMProvider } from "./openai.js";
+import type { ChatMessage, ChatOptions, ChatResponse, ContentPart, LLMProvider } from "./openai.js";
 import { LLMNetworkError, LLMApiError } from "./openai.js";
 
 // ---------------------------------------------------------------------------
@@ -62,11 +62,36 @@ export class AnthropicProvider implements LLMProvider {
 
     // Anthropic uses a separate system prompt instead of a system message in the array
     let systemPrompt: string | undefined;
-    const userMessages: { role: string; content: string }[] = [];
+    const userMessages: Array<{ role: string; content: string | Array<Record<string, unknown>> }> = [];
 
     for (const msg of messages) {
       if (msg.role === "system") {
-        systemPrompt = systemPrompt ? `${systemPrompt}\n\n${msg.content}` : msg.content;
+        const text = typeof msg.content === "string"
+          ? msg.content
+          : msg.content.filter((p): p is { type: "text"; text: string } => p.type === "text").map((p) => p.text).join("");
+        systemPrompt = systemPrompt ? `${systemPrompt}\n\n${text}` : text;
+      } else if (Array.isArray(msg.content)) {
+        // Multimodal content: map to Anthropic's content array format
+        const contentParts: Array<Record<string, unknown>> = [];
+        for (const part of msg.content) {
+          if (part.type === "text" && part.text !== undefined) {
+            contentParts.push({ type: "text", text: part.text });
+          } else if (part.type === "image_url" && part.image_url !== undefined) {
+            const dataUrl = part.image_url.url;
+            const base64Match = dataUrl.match(/^data:([^;]+);base64,(.+)$/u);
+            if (base64Match) {
+              contentParts.push({
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: base64Match[1],
+                  data: base64Match[2],
+                },
+              });
+            }
+          }
+        }
+        userMessages.push({ role: msg.role, content: contentParts });
       } else {
         userMessages.push({ role: msg.role, content: msg.content });
       }

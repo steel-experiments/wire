@@ -668,8 +668,8 @@ test("executeTask proposes domain skill updates from reusable trace evidence", a
   const policy = createMockPolicyEngine();
 
   const mockLlmProvider = {
-    async chat(messages: { content: string }[]) {
-      const userMsg = messages.find((m) => m.content.includes("[observation]"));
+    async chat(messages: { content: string | import("../providers/llm/openai.js").ContentPart[] }[]) {
+      const userMsg = messages.find((m) => typeof m.content === "string" && m.content.includes("[observation]"));
       if (userMsg) {
         return {
           content: JSON.stringify({
@@ -765,8 +765,9 @@ test("executeTask loads matched skills into the live agent prompt", async () => 
   await writeFile(join(skillDir, "example.md"), skillContent, "utf-8");
 
   const llmProvider = {
-    async chat(messages: { role: string; content: string }[]) {
-      const userPrompt = messages.find((message) => message.role === "user")?.content ?? "";
+    async chat(messages: { role: string; content: string | import("../providers/llm/openai.js").ContentPart[] }[]) {
+      const raw = messages.find((message) => message.role === "user")?.content ?? "";
+      const userPrompt = typeof raw === "string" ? raw : raw.filter((p): p is { type: "text"; text: string } => p.type === "text").map((p) => p.text).join("");
       if (userPrompt.includes("Loaded skills:")) {
         capturedUserPrompt = userPrompt;
         return {

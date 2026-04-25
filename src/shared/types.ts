@@ -217,6 +217,7 @@ export interface BrowserObservation {
   title: string;
   tabs: BrowserTabSummary[];
   screenshotArtifactId?: ArtifactId;
+  screenshotBase64?: string;
   htmlArtifactId?: ArtifactId;
   markdownArtifactId?: ArtifactId;
   focusedElement?: BrowserFocusContext;

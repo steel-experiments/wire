@@ -269,6 +269,19 @@ export class SteelProvider implements BrowserProvider {
       const sessionId = await attachToTarget(cdp, target.targetId);
       const snapshot = await evaluateJson<Record<string, unknown>>(cdp, sessionId, OBSERVE_SCRIPT);
 
+      // Capture screenshot via CDP for multimodal LLM context
+      let screenshotBase64: string | undefined;
+      try {
+        const screenshotResult = await cdp.send<{ data?: string }>(
+          "Page.captureScreenshot",
+          { format: "jpeg", quality: 50 },
+          sessionId,
+        );
+        screenshotBase64 = screenshotResult.data;
+      } catch {
+        // Screenshot is best-effort; don't block observation if it fails
+      }
+
       const observation: BrowserObservation = {
         sessionId: input.sessionId,
         targetId: target.targetId,
@@ -281,6 +294,10 @@ export class SteelProvider implements BrowserProvider {
           active: item.targetId === target.targetId,
         })),
       };
+
+      if (screenshotBase64) {
+        observation.screenshotBase64 = screenshotBase64;
+      }
 
       const focusedElement = asRecord(snapshot.focusedElement);
       if (focusedElement) {

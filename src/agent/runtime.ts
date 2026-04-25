@@ -16,7 +16,7 @@ import { createBrowserSession, stopBrowserSession } from "../browser/session.js"
 
 import type { PolicyEngine } from "../policy/engine.js";
 
-import type { LLMProvider, ChatMessage } from "../providers/llm/openai.js";
+import type { LLMProvider, ChatMessage, ContentPart } from "../providers/llm/openai.js";
 
 import {
   createLoopState,
@@ -45,6 +45,8 @@ import {
   buildFailureSummary,
   isRecoverableStepError,
   buildGenericExtractionAction,
+  computeObservationDiff,
+  countConsecutiveUnchanged,
 } from "./state-helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -158,7 +160,7 @@ function planForState(state: LoopState): TaskPlan {
 // defaultAgentTurn — uses LLM if available, falls back to observe+finish
 // ---------------------------------------------------------------------------
 
-export function defaultAgentTurn(llmProvider?: LLMProvider): AgentTurnFn {
+export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number): AgentTurnFn {
   return async (state: LoopState, provider: BrowserProvider): Promise<ProposedAction> => {
     const taskPlan = planForState(state);
 
@@ -226,13 +228,29 @@ export function defaultAgentTurn(llmProvider?: LLMProvider): AgentTurnFn {
       plan: planToContext(taskPlan),
     };
 
+    // Compute state diff for progress detection
+    const allObservations = state.events.filter((e) => e.kind === "observation");
+    if (allObservations.length >= 1) {
+      const latest = allObservations[allObservations.length - 1]!;
+      const previous = allObservations.length >= 2 ? allObservations[allObservations.length - 2] : undefined;
+      const diff = computeObservationDiff(previous, latest);
+      const consecutiveUnchanged = countConsecutiveUnchanged(state.events);
+      context.stateDiff = { summary: diff.summary, consecutiveUnchanged };
+    }
+
+    // Populate budget info
+    if (!context.budget && maxSteps !== undefined) {
+      context.budget = { remaining: Math.max(0, maxSteps - state.stepCount), max: maxSteps, unit: "steps" };
+    }
+
     // If an LLM provider is available, use it to decide the next action
     if (llmProvider) {
       const actionInstructions = [
         "Return exactly one next action as JSON.",
-        'Use this shape: {"kind":"observe|exec|finish","summary":"short text","payload":{...}}.',
+        'Use this shape: {"kind":"observe|exec|raw|finish","summary":"short text","payload":{...}}.',
         'For "observe", omit payload unless you need {"targetId":"..."}',
         'For "exec", set payload.code to JavaScript that runs in the browser.',
+        'For "raw", set payload.method to a CDP method and payload.params to its parameters. Example: {"kind":"raw","summary":"Press arrow key","payload":{"method":"Input.dispatchKeyEvent","params":{"type":"keyDown","key":"ArrowUp","windowsVirtualKeyCode":38}}} sends a trusted keypress that pages cannot ignore. Always pair keyDown + keyUp. Use for keyboard input, mouse events, or any low-level browser control that exec cannot achieve.',
         "Prefer direct URL patterns before brittle DOM hunting when the destination is obvious, such as /pricing or /docs.",
         "Wire auto-observes after navigation code (location.href etc). Do NOT emit a separate observe after navigating.",
         "CRITICAL: navigation alone is NOT task completion. After reaching the target page, you MUST emit a final exec that EXTRACTS the answer as a JSON object or plain text string.",
@@ -245,9 +263,20 @@ export function defaultAgentTurn(llmProvider?: LLMProvider): AgentTurnFn {
       const systemPrompt = assembleSystemPrompt(context);
       const userPrompt = `${assembleUserPrompt(context)}\n\n${actionInstructions}`;
 
+      // Build user message — include screenshot if available
+      let userContent: string | ContentPart[];
+      if (state.latestScreenshotBase64) {
+        userContent = [
+          { type: "text", text: userPrompt },
+          { type: "image_url", image_url: { url: `data:image/jpeg;base64,${state.latestScreenshotBase64}` } },
+        ];
+      } else {
+        userContent = userPrompt;
+      }
+
       const messages: ChatMessage[] = [
         { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
+        { role: "user", content: userContent },
       ];
 
       const response = await llmProvider.chat(messages);
@@ -422,7 +451,7 @@ export async function executeTask(
   config: RuntimeConfig,
   agentTurn?: AgentTurnFn,
 ): Promise<LoopResult> {
-  const turn = agentTurn ?? defaultAgentTurn(config.llmProvider);
+  const turn = agentTurn ?? defaultAgentTurn(config.llmProvider, config.maxSteps);
 
   // Create a browser session for this task
   const session = await createBrowserSession(config.provider, config.sessionInput);
@@ -436,7 +465,7 @@ export async function resumeTask(
   config: RuntimeConfig,
   agentTurn?: AgentTurnFn,
 ): Promise<LoopResult> {
-  const turn = agentTurn ?? defaultAgentTurn(config.llmProvider);
+  const turn = agentTurn ?? defaultAgentTurn(config.llmProvider, config.maxSteps);
   const state: LoopState = {
     task: checkpoint.task,
     run: checkpoint.run,
@@ -519,6 +548,9 @@ async function initializeState(
       kind: "observation",
       payload: obsPayload,
     } as TraceEvent);
+    if (observation.screenshotBase64) {
+      state.latestScreenshotBase64 = observation.screenshotBase64;
+    }
     signals.authWallHit = detectAuthWall(observation).detected;
     await syncMatchedSkills(state, config.skillDir);
   } else {

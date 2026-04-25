@@ -155,8 +155,16 @@ function createLlmProvider(provider?: LlmProvider, model?: string): LLMProvider 
   return undefined;
 }
 
+function defaultMaxSteps(mode: "task" | "investigate" | "experiment"): number {
+  switch (mode) {
+    case "investigate": return 20;
+    case "experiment": return 25;
+    default: return 15;
+  }
+}
+
 function createRuntimeConfig(
-  options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "provider" | "model" | "yes" | "json">,
+  options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "provider" | "model" | "yes" | "json" | "mode">,
 ): RuntimeConfig {
   let policyEngine: PolicyEngine = createPolicyEngine();
   if (options.yes) {
@@ -168,7 +176,7 @@ function createRuntimeConfig(
   const config: RuntimeConfig = {
     provider: createSteelProvider(),
     policyEngine,
-    maxSteps: options.maxSteps ?? 10,
+    maxSteps: options.maxSteps ?? defaultMaxSteps(options.mode ?? "task"),
     async onSessionCreated(session) {
       const url = session.debugUrl ?? session.liveUrl;
       if (!isJson && url) {
@@ -498,7 +506,7 @@ export async function approveRun(runId: RunId, jsonOutput?: boolean): Promise<Ap
 
   const resumed = await resumeTask(
     checkpoint,
-    createRuntimeConfig({ maxSteps: 10 }),
+    createRuntimeConfig({ maxSteps: 15, mode: checkpoint.task.mode }),
     undefined,
   );
 

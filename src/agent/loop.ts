@@ -25,6 +25,7 @@ import { execRaw } from "../browser/raw.js";
 import { classifyRun, generateOutcomeSummary } from "./classify.js";
 import { detectAuthWall } from "../profiles/auth.js";
 import { redactJsonObject } from "../shared/redact.js";
+import { countConsecutiveUnchanged } from "./state-helpers.js";
 
 // ---------------------------------------------------------------------------
 // Loop state — decomposed by time scale
@@ -51,7 +52,10 @@ interface StepCounter {
 }
 
 /** Full loop state — composed from sub-interfaces. */
-export interface LoopState extends TaskContext, RunTrace, StepCounter {}
+export interface LoopState extends TaskContext, RunTrace, StepCounter {
+  /** Ephemeral screenshot from the latest observation — not persisted in traces. */
+  latestScreenshotBase64?: string;
+}
 
 // ---------------------------------------------------------------------------
 // Loop result
@@ -263,6 +267,11 @@ export async function executeStep(
         payload: redactJsonObject(obsPayload),
       });
 
+      // Store screenshot ephemerally for multimodal LLM context
+      if (observation.screenshotBase64) {
+        state.latestScreenshotBase64 = observation.screenshotBase64;
+      }
+
       authWallHit = detectAuthWall(observation).detected;
       break;
     }
@@ -323,6 +332,9 @@ export async function executeStep(
             kind: "observation",
             payload: redactJsonObject(obsPayload),
           });
+          if (observation.screenshotBase64) {
+            state.latestScreenshotBase64 = observation.screenshotBase64;
+          }
           authWallHit = detectAuthWall(observation).detected;
         }
       }
@@ -468,6 +480,7 @@ export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): Lo
     policyDenied: options.policyDenied ?? false,
     budgetExhausted: options.budgetExhausted ?? false,
     awaitingApproval: options.awaitingApproval ?? false,
+    consecutiveUnchanged: countConsecutiveUnchanged(state.events),
   });
 
   const outcomeSummary = generateOutcomeSummary(classification, state.events);

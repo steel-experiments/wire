@@ -4,13 +4,39 @@ import type { RunClassification, RunClassificationKind, TaskMode, TraceEvent } f
 // Objective relevance check
 // ---------------------------------------------------------------------------
 
+const STOP_WORDS = new Set([
+  "the", "and", "for", "with", "from", "this", "that", "then", "than",
+  "are", "was", "has", "have", "been", "will", "would", "could", "should",
+  "into", "about", "after", "their", "them", "they", "when", "what", "which",
+  "extract", "return", "using", "page",
+]);
+
+const ACTION_VERBS = new Set([
+  "win", "find", "get", "solve", "complete", "extract", "navigate", "open",
+  "click", "fill", "submit", "download", "upload", "create", "delete",
+  "update", "read", "verify", "check", "confirm", "score", "reach",
+  "achieve", "beat", "finish", "play",
+]);
+
 /**
  * Extract keywords from a string: lowercase alphanumeric tokens of 3+ chars.
  */
 function objectiveKeywords(text: string): Set<string> {
   const matches = text.match(/[a-z0-9]{3,}/giu) ?? [];
-  const STOP = new Set(["the", "and", "for", "with", "from", "this", "that", "then", "than", "are", "was", "has", "have", "been", "will", "would", "could", "should", "into", "about", "after", "their", "them", "they", "when", "what", "which", "extract", "return", "using", "page"]);
-  return new Set(matches.map((m) => m.toLowerCase()).filter((w) => !STOP.has(w)));
+  return new Set(matches.map((m) => m.toLowerCase()).filter((w) => !STOP_WORDS.has(w)));
+}
+
+/**
+ * Extract verb phrases from an objective — words that indicate what "done" looks like.
+ * Example: "win the game" → ["win", "game"]
+ */
+function objectiveVerbPhrases(text: string): Set<string> {
+  const matches = text.match(/[a-z0-9]{3,}/giu) ?? [];
+  return new Set(
+    matches.map((m) => m.toLowerCase())
+      .filter((w) => !STOP_WORDS.has(w))
+      .filter((w) => ACTION_VERBS.has(w) || w.length >= 4),
+  );
 }
 
 /**
@@ -55,15 +81,24 @@ function extractFinalResultText(events: TraceEvent[]): string | undefined {
 
 /**
  * Check whether the extracted result plausibly addresses the objective.
- * Returns true if at least one objective keyword appears in the result text.
+ * Requires at least one verb phrase from the objective to appear in the result,
+ * not just any keyword. This prevents "2048" in a page title from satisfying "win the game".
  */
 function resultAddressesObjective(resultText: string | undefined, objective: string): boolean {
   if (!resultText || !objective) return true; // no objective = no gate
 
-  const objWords = objectiveKeywords(objective);
-  if (objWords.size === 0) return true;
+  const verbPhrases = objectiveVerbPhrases(objective);
+  if (verbPhrases.size === 0) return true;
 
   const resultLower = resultText.toLowerCase();
+  for (const word of verbPhrases) {
+    if (resultLower.includes(word)) {
+      return true;
+    }
+  }
+
+  // Fallback: check broader keywords too, but with lower confidence
+  const objWords = objectiveKeywords(objective);
   for (const word of objWords) {
     if (resultLower.includes(word)) {
       return true;
@@ -87,6 +122,7 @@ export interface ClassificationInput {
   policyDenied: boolean;
   budgetExhausted: boolean;
   awaitingApproval?: boolean;
+  consecutiveUnchanged?: number;
 }
 
 export function classifyRun(input: ClassificationInput): RunClassification {
@@ -99,6 +135,7 @@ export function classifyRun(input: ClassificationInput): RunClassification {
     policyDenied,
     budgetExhausted,
     awaitingApproval,
+    consecutiveUnchanged,
   } = input;
 
   if (awaitingApproval) {
@@ -246,13 +283,13 @@ export function classifyRun(input: ClassificationInput): RunClassification {
     if (taskModeHasCompletionEvidence) {
       if (addressesObjective) {
         if (errorCount > 0) {
-          return {
+          return applyStagnationDowngrade({
             kind: "task-complete",
             confidence: 0.7,
             notes: [`Recovered after ${errorCount} error${errorCount === 1 ? "" : "s"}`],
-          };
+          }, consecutiveUnchanged);
         }
-        return { kind: "task-complete", confidence: 0.85 };
+        return applyStagnationDowngrade({ kind: "task-complete", confidence: 0.85 }, consecutiveUnchanged);
       }
       // Has output but it doesn't address the objective
       return {
@@ -277,11 +314,11 @@ export function classifyRun(input: ClassificationInput): RunClassification {
   if (codeSuccessCount > 0 && codeFailCount > 0) {
     const hasAnswerArtifact = artifactCount > 0 && codeSuccessWithOutputCount > 0;
     if (mode === "task" && hasAnswerArtifact && addressesObjective) {
-      return {
+      return applyStagnationDowngrade({
         kind: "task-complete",
         confidence: 0.7,
         notes: [`Recovered after ${codeFailCount} failed code execution${codeFailCount === 1 ? "" : "s"}`],
-      };
+      }, consecutiveUnchanged);
     }
     if (mode === "task" && hasAnswerArtifact && !addressesObjective) {
       return {
@@ -312,6 +349,23 @@ export function classifyRun(input: ClassificationInput): RunClassification {
 
   // Default to ambiguous
   return { kind: "ambiguous", confidence: 0.3, notes: ["Insufficient evidence for classification"] };
+}
+
+function applyStagnationDowngrade(
+  classification: RunClassification,
+  consecutiveUnchanged?: number,
+): RunClassification {
+  if (classification.kind !== "task-complete") return classification;
+  if (!consecutiveUnchanged || consecutiveUnchanged < 2) return classification;
+
+  return {
+    kind: "partial-success",
+    confidence: Math.min(classification.confidence, 0.5),
+    notes: [
+      ...(classification.notes ?? []),
+      `Stagnation: ${consecutiveUnchanged} consecutive unchanged observations before completion`,
+    ],
+  };
 }
 
 // ---------------------------------------------------------------------------

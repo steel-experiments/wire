@@ -87,6 +87,71 @@ export function isRecoverableStepError(message: string): boolean {
     .test(message);
 }
 
+// ---------------------------------------------------------------------------
+// Observation diffing — detect stalled progress
+// ---------------------------------------------------------------------------
+
+export interface ObservationDiff {
+  urlChanged: boolean;
+  titleChanged: boolean;
+  visibleTextChanged: boolean;
+  unchanged: boolean;
+  summary: string;
+}
+
+export function computeObservationDiff(
+  oldObs: TraceEvent | undefined,
+  newObs: TraceEvent,
+): ObservationDiff {
+  if (!oldObs) {
+    return { urlChanged: false, titleChanged: false, visibleTextChanged: false, unchanged: false, summary: "First observation" };
+  }
+
+  const urlChanged = String(oldObs.payload.url ?? "") !== String(newObs.payload.url ?? "");
+  const titleChanged = String(oldObs.payload.title ?? "") !== String(newObs.payload.title ?? "");
+
+  const oldTexts = ((oldObs.payload.pageSummary as Record<string, unknown>)?.visibleTexts) as string[] | undefined;
+  const newTexts = ((newObs.payload.pageSummary as Record<string, unknown>)?.visibleTexts) as string[] | undefined;
+  const visibleTextChanged = (oldTexts?.join("") ?? "") !== (newTexts?.join("") ?? "");
+
+  const unchanged = !urlChanged && !titleChanged && !visibleTextChanged;
+
+  const parts: string[] = [];
+  if (urlChanged) parts.push(`URL changed to ${newObs.payload.url}`);
+  if (titleChanged) parts.push(`Title changed to ${newObs.payload.title}`);
+
+  // Detect numeric changes (e.g. scores) in visible text
+  if (visibleTextChanged && oldTexts && newTexts) {
+    const oldNums = (oldTexts.join(" ").match(/\d+/g) ?? []).join(",");
+    const newNums = (newTexts.join(" ").match(/\d+/g) ?? []).join(",");
+    if (oldNums !== newNums) {
+      parts.push(`Numeric values changed`);
+    }
+  }
+
+  const summary = parts.length > 0 ? parts.join("; ") : "Page unchanged";
+
+  return { urlChanged, titleChanged, visibleTextChanged, unchanged, summary };
+}
+
+export function countConsecutiveUnchanged(events: TraceEvent[]): number {
+  const observations = events.filter((e) => e.kind === "observation");
+  if (observations.length < 2) return 0;
+
+  let count = 0;
+  for (let i = observations.length - 1; i >= 1; i--) {
+    const prev = observations[i - 1]!;
+    const curr = observations[i]!;
+    const diff = computeObservationDiff(prev, curr);
+    if (diff.unchanged) {
+      count++;
+    } else {
+      break;
+    }
+  }
+  return count;
+}
+
 export function buildGenericExtractionAction(): ProposedAction {
   return {
     kind: "exec",

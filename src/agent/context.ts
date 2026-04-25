@@ -36,6 +36,11 @@ export interface BudgetSummary {
   unit: string;
 }
 
+export interface StateDiffSummary {
+  summary: string;
+  consecutiveUnchanged: number;
+}
+
 export interface ContextBundle {
   task: TaskObjective;
   skills: SkillSummary[];
@@ -44,6 +49,7 @@ export interface ContextBundle {
   policyNotes: string[];
   budget?: BudgetSummary;
   plan?: string;
+  stateDiff?: StateDiffSummary;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +173,16 @@ export function assembleUserPrompt(context: ContextBundle): string {
       (t) => `[${t.kind}] ${redactSecrets(t.summary)}`,
     );
     sections.push("Recent activity:\n" + traceLines.join("\n"));
+  }
+
+  // State diff
+  if (context.stateDiff) {
+    const diff = context.stateDiff;
+    const diffParts = [`Last state change: ${diff.summary}`, `Consecutive unchanged observations: ${diff.consecutiveUnchanged}`];
+    if (diff.consecutiveUnchanged >= 2) {
+      diffParts.push("WARNING: Your last 2+ actions had no effect. Try a different approach: raw CDP input (Input.dispatchKeyEvent for trusted keypresses), click a specific element, or inspect the DOM more carefully.");
+    }
+    sections.push(diffParts.join("\n"));
   }
 
   if (sections.length === 0) {

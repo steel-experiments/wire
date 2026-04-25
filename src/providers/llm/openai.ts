@@ -2,9 +2,13 @@
 // LLM provider contract
 // ---------------------------------------------------------------------------
 
+export type ContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: string | ContentPart[];
 }
 
 export interface ChatOptions {
@@ -124,10 +128,24 @@ export class OpenAIProvider implements LLMProvider {
 
     // Separate system messages for the `instructions` field
     const systemParts: string[] = [];
-    const input: Array<{ role: string; content: string }> = [];
+    const input: Array<Record<string, unknown>> = [];
     for (const m of messages) {
       if (m.role === "system") {
-        systemParts.push(m.content);
+        const text = typeof m.content === "string"
+          ? m.content
+          : m.content.filter((p): p is { type: "text"; text: string } => p.type === "text").map((p) => p.text).join("");
+        systemParts.push(text);
+      } else if (Array.isArray(m.content)) {
+        // Multimodal content: map to OpenAI Responses API input format
+        const contentItems: Array<Record<string, unknown>> = [];
+        for (const part of m.content) {
+          if (part.type === "text" && part.text !== undefined) {
+            contentItems.push({ type: "input_text", text: part.text });
+          } else if (part.type === "image_url" && part.image_url !== undefined) {
+            contentItems.push({ type: "input_image", image_url: part.image_url.url });
+          }
+        }
+        input.push({ role: m.role, content: contentItems });
       } else {
         input.push({ role: m.role, content: m.content });
       }

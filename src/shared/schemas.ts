@@ -252,6 +252,7 @@ export const browserObservationSchema = z
     title: z.string(),
     tabs: z.array(browserTabSummarySchema),
     screenshotArtifactId: artifactIdSchema.optional(),
+    screenshotBase64: z.string().min(1).optional(),
     htmlArtifactId: artifactIdSchema.optional(),
     markdownArtifactId: artifactIdSchema.optional(),
     focusedElement: z
