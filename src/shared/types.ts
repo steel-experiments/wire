@@ -105,6 +105,7 @@ export interface BrowserSession {
   provider: ProviderKind;
   profileId?: ProfileId;
   liveUrl?: string;
+  debugUrl?: string;
   wsUrl?: string;
   createdAt: string;
   status: SessionStatus;

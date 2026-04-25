@@ -724,7 +724,7 @@ async function executeWithState(
   initialState?: LoopState,
   approvedPendingAction?: ProposedAction,
 ): Promise<LoopResult> {
-  const state = initialState ?? createLoopState(task, session!.id);
+  const state = initialState ?? createLoopState(task, session!.id, session?.debugUrl ?? session?.liveUrl);
 
   const signals = await initializeState(state, config, initialState, approvedPendingAction);
 

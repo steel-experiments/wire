@@ -12,7 +12,7 @@ That's the core loop. Everything else — classification, skills, policy, benchm
 
 ```bash
 pnpm install
-pnpm test          # 432 tests across 17 files
+pnpm test          # 449 tests across 19 files
 
 # Set up API keys
 export STEEL_API_KEY=...     # browser infrastructure
@@ -30,6 +30,7 @@ wire review  --run-id run_abc123                  # inspect a completed run
 wire result  --run-id run_abc123                  # print the final result
 wire list                                         # list tasks and runs
 wire approve --run-id run_abc123                  # approve a pending action
+wire replay  --run-id run_abc123                  # replay a run and show timeline
 wire bench                                        # run the benchmark suite
 ```
 
@@ -129,6 +130,7 @@ src/
   profiles/     Profile selection, auth wall detection
   cli/          Argument parsing, task runner, main entry
   eval/         Evaluation metrics, benchmark runner with persistence
+  ui/           Terminal output formatting, review display
 ```
 
 ## Development
@@ -138,7 +140,7 @@ src/
 | `pnpm install` | Install dependencies |
 | `pnpm dev` | Run via tsx |
 | `pnpm build` | Compile to dist/ |
-| `pnpm test` | Run all tests (432 across 17 files) |
+| `pnpm test` | Run all tests (449 across 19 files) |
 | `pnpm typecheck` | Type-check without emitting |
 | `pnpm check` | typecheck + test |
 

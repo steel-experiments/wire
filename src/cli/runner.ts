@@ -43,6 +43,7 @@ export interface RunResult {
   confidence?: number | undefined;
   result?: string | undefined;
   summary?: string | undefined;
+  debugUrl?: string | undefined;
   approval?: { id: string; runId: RunId } | undefined;
   branches?: number | undefined;
   experimentId?: string | undefined;
@@ -376,6 +377,9 @@ export async function runTask(options: RunOptions): Promise<RunResult> {
       console.log(
         `Classification: ${last.run.classification?.kind ?? "unknown"} (${(((last.run.classification?.confidence) ?? 0) * 100).toFixed(0)}%)`,
       );
+      if (last.sessionLiveUrl) {
+        console.log(`Debug URL:    ${last.sessionLiveUrl}`);
+      }
       if (last.run.result) {
         console.log(`Result:       ${last.run.result}`);
       }
@@ -398,6 +402,7 @@ export async function runTask(options: RunOptions): Promise<RunResult> {
       confidence: last.run.classification?.confidence ?? 0,
       result: last.run.result,
       summary: last.run.outcomeSummary,
+      debugUrl: last.sessionLiveUrl,
       branches: runResults.length,
       experimentId: bundle.id,
     };
@@ -409,6 +414,9 @@ export async function runTask(options: RunOptions): Promise<RunResult> {
     console.log(
       `Classification: ${result.run.classification?.kind ?? "unknown"} (${(((result.run.classification?.confidence) ?? 0) * 100).toFixed(0)}%)`,
     );
+    if (result.sessionLiveUrl) {
+      console.log(`Debug URL:    ${result.sessionLiveUrl}`);
+    }
     if (result.run.result) {
       console.log(`Result:       ${result.run.result}`);
     }
@@ -428,6 +436,7 @@ export async function runTask(options: RunOptions): Promise<RunResult> {
     confidence: result.run.classification?.confidence ?? 0,
     result: result.run.result,
     summary: result.run.outcomeSummary,
+    debugUrl: result.sessionLiveUrl,
     approval: result.pendingApproval
       ? { id: result.pendingApproval.id, runId: result.run.id }
       : undefined,

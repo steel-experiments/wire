@@ -34,6 +34,7 @@ import { redactJsonObject } from "../shared/redact.js";
 interface TaskContext {
   task: Task;
   sessionId: SessionId;
+  sessionLiveUrl?: string;
   loadedSkills: LoadedSkill[];
 }
 
@@ -62,6 +63,7 @@ export interface LoopResult {
   classification: ReturnType<typeof classifyRun>;
   outcomeSummary: string;
   sessionId: SessionId;
+  sessionLiveUrl?: string;
   stepCount: number;
   startedAt: string;
   pendingApproval?: ApprovalRequest;
@@ -87,7 +89,7 @@ export type AgentTurnFn = (
 // Create loop state
 // ---------------------------------------------------------------------------
 
-export function createLoopState(task: Task, sessionId: SessionId): LoopState {
+export function createLoopState(task: Task, sessionId: SessionId, sessionLiveUrl?: string): LoopState {
   const run: Run = {
     id: createId("run"),
     taskId: task.id,
@@ -95,7 +97,7 @@ export function createLoopState(task: Task, sessionId: SessionId): LoopState {
     startedAt: nowIsoUtc(),
   };
 
-  return {
+  const state: LoopState = {
     task,
     run,
     sessionId,
@@ -104,6 +106,12 @@ export function createLoopState(task: Task, sessionId: SessionId): LoopState {
     stepCount: 0,
     startedAt: nowIsoUtc(),
   };
+
+  if (sessionLiveUrl !== undefined) {
+    state.sessionLiveUrl = sessionLiveUrl;
+  }
+
+  return state;
 }
 
 // ---------------------------------------------------------------------------
@@ -496,6 +504,10 @@ export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): Lo
     stepCount: state.stepCount,
     startedAt: state.startedAt,
   };
+
+  if (state.sessionLiveUrl !== undefined) {
+    result.sessionLiveUrl = state.sessionLiveUrl;
+  }
 
   if (options.pendingApproval) {
     result.pendingApproval = options.pendingApproval;

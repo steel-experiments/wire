@@ -26,6 +26,7 @@ interface SteelSessionResponse {
   status: string;
   websocketUrl: string;
   sessionViewerUrl: string;
+  debugUrl?: string;
   createdAt: string;
   expiresAt?: string;
   profileId?: string;
@@ -80,6 +81,10 @@ function toBrowserSession(steel: SteelSessionResponse, region?: string): Browser
     createdAt: steel.createdAt ?? nowIsoUtc(),
     status: mapStatus(steel.status),
   };
+
+  if (steel.debugUrl) {
+    session.debugUrl = steel.debugUrl;
+  }
 
   if (steel.profileId) {
     session.profileId = `profile_${steel.profileId}` as never;
