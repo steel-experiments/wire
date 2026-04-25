@@ -1,0 +1,5 @@
+Context
+- Hardened Steel CDP transport: invalid frame handling, command timeouts, and pending-request cleanup.
+- Improved browser code safety checks with token-aware detection to block obfuscated unsafe calls while avoiding string-literal false positives.
+- Moved --task-file parsing into run error handling and classified invalid task JSON as INVALID_TASK_FILE.
+- Added regression tests covering malformed CDP frames, CDP timeout, validator edge cases, and invalid task-file behavior.
