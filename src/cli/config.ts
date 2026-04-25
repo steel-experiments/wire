@@ -64,11 +64,21 @@ function normalizeConfig(raw: unknown): WireConfig {
   return config;
 }
 
-async function readConfigFile(path: string): Promise<WireConfig> {
+async function readConfigFile(path: string, strict?: boolean): Promise<WireConfig> {
   try {
     const raw = await readFile(path, "utf-8");
-    return normalizeConfig(JSON.parse(raw) as unknown);
-  } catch {
+    try {
+      return normalizeConfig(JSON.parse(raw) as unknown);
+    } catch {
+      if (strict) {
+        throw new Error(`Invalid JSON in config file: ${path}`);
+      }
+      return {};
+    }
+  } catch (err) {
+    if (strict && (err as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw err;
+    }
     return {};
   }
 }
@@ -78,10 +88,18 @@ async function readConfigFile(path: string): Promise<WireConfig> {
 // Project config overrides user-level defaults.
 // ---------------------------------------------------------------------------
 
-export async function loadConfig(dir?: string, userDir?: string): Promise<WireConfig> {
+export async function loadConfig(dir?: string, userDir?: string, strict?: boolean): Promise<WireConfig> {
   const userHome = userDir ?? homedir();
-  const user = await readConfigFile(resolve(userHome, ".wire", "config.json"));
-  const project = await readConfigFile(resolve(dir ?? process.cwd(), "wire.json"));
+  const user = await readConfigFile(resolve(userHome, ".wire", "config.json"), strict);
+  const project = await readConfigFile(resolve(dir ?? process.cwd(), "wire.json"), strict);
+
+  if (strict) {
+    const userEmpty = Object.keys(user).length === 0;
+    const projectEmpty = Object.keys(project).length === 0;
+    if (userEmpty && projectEmpty) {
+      throw new Error("No Wire configuration found. Create wire.json or ~/.wire/config.json.");
+    }
+  }
   const merged: WireConfig = {
     ...user,
     ...project,

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 export * from "./shared/ids.js";
 export * from "./shared/schemas.js";
 export * from "./shared/types.js";
@@ -48,6 +49,8 @@ export * from "./profiles/auth.js";
 export * from "./cli/args.js";
 export * from "./cli/runner.js";
 export * from "./cli/main.js";
+export * from "./cli/output.js";
+export * from "./cli/errors.js";
 export * from "./ui/review.js";
 export * from "./eval/metrics.js";
 export * from "./eval/harness.js";

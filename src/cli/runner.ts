@@ -1,4 +1,4 @@
-import type { ComparisonDimension, ExperimentBundle, Run, RunClassification, RunId, Task, TaskId } from "../shared/types.js";
+import type { ComparisonDimension, ExperimentBundle, Run, RunClassification, RunId, Task, TaskId, ActionId, PolicyDecision } from "../shared/types.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
 import { saveTask, loadTask } from "../storage/tasks.js";
 import { saveExperimentBundle, saveHypothesis, saveRun } from "../storage/runs.js";
@@ -16,7 +16,8 @@ import {
   saveRunCheckpoint,
 } from "../storage/checkpoints.js";
 import { resolveApproval } from "../policy/approvals.js";
-import { createPolicyEngine } from "../policy/engine.js";
+import { createPolicyEngine, type PolicyEngine } from "../policy/engine.js";
+import type { PolicyAction } from "../policy/rules.js";
 import { createSteelProvider } from "../providers/browser/steel.js";
 import type { LLMProvider } from "../providers/llm/openai.js";
 import { createOpenAIProvider } from "../providers/llm/openai.js";
@@ -30,6 +31,35 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Artifact, TraceEvent } from "../shared/types.js";
 
+// ---------------------------------------------------------------------------
+// Result types
+// ---------------------------------------------------------------------------
+
+export interface RunResult {
+  taskId: TaskId;
+  runId: RunId;
+  status: string;
+  classification?: string | undefined;
+  confidence?: number | undefined;
+  result?: string | undefined;
+  summary?: string | undefined;
+  approval?: { id: string; runId: RunId } | undefined;
+  branches?: number | undefined;
+  experimentId?: string | undefined;
+}
+
+export interface ApproveResult {
+  approved: boolean;
+  approvalId: string;
+  runId: RunId;
+  status: string;
+  result?: string | undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Run options
+// ---------------------------------------------------------------------------
+
 export interface RunOptions {
   objective: string;
   mode?: "task" | "investigate" | "experiment";
@@ -39,7 +69,25 @@ export interface RunOptions {
   maxSteps?: number;
   skillDir?: string;
   json?: boolean;
+  yes?: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Auto-approving policy decorator (--yes mode)
+// ---------------------------------------------------------------------------
+
+function autoApprovingEngine(inner: PolicyEngine): PolicyEngine {
+  return {
+    check(actionId: ActionId, action: PolicyAction): PolicyDecision {
+      const d = inner.check(actionId, action);
+      return d.result === "require-approval" ? { ...d, result: "allow" as const } : d;
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function defaultStorageRoot(): string {
   return process.env["WIRE_ROOT"] ?? ".wire";
@@ -107,11 +155,16 @@ function createLlmProvider(provider?: LlmProvider, model?: string): LLMProvider 
 }
 
 function createRuntimeConfig(
-  options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "provider" | "model">,
+  options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "provider" | "model" | "yes">,
 ): RuntimeConfig {
+  let policyEngine: PolicyEngine = createPolicyEngine();
+  if (options.yes) {
+    policyEngine = autoApprovingEngine(policyEngine);
+  }
+
   const config: RuntimeConfig = {
     provider: createSteelProvider(),
-    policyEngine: createPolicyEngine(),
+    policyEngine,
     maxSteps: options.maxSteps ?? 10,
     async onSessionCreated(session) {
       await saveSession(defaultStorageRoot(), session);
@@ -164,6 +217,10 @@ export function createExperimentBundleFromRuns(
 
   return bundle;
 }
+
+// ---------------------------------------------------------------------------
+// Artifact persistence
+// ---------------------------------------------------------------------------
 
 async function persistExecutionArtifacts(
   root: string,
@@ -240,7 +297,11 @@ async function persistTraceArtifacts(root: string, events: TraceEvent[]): Promis
   }
 }
 
-export async function runTask(options: RunOptions): Promise<{ taskId: TaskId; runId: RunId }> {
+// ---------------------------------------------------------------------------
+// runTask — returns RunResult
+// ---------------------------------------------------------------------------
+
+export async function runTask(options: RunOptions): Promise<RunResult> {
   const root = defaultStorageRoot();
   const mode = options.mode ?? "task";
 
@@ -254,12 +315,14 @@ export async function runTask(options: RunOptions): Promise<{ taskId: TaskId; ru
     createdAt: nowIsoUtc(),
   };
 
-  console.log(`Task created: ${task.id}`);
-  console.log(`Objective:    ${options.objective}`);
-  console.log(`Mode:         ${mode}`);
-  console.log("");
-
   const isJson = options.json === true;
+
+  if (!isJson) {
+    console.log(`Task created: ${task.id}`);
+    console.log(`Objective:    ${options.objective}`);
+    console.log(`Mode:         ${mode}`);
+    console.log("");
+  }
 
   const config = createRuntimeConfig(options);
   const result = await executeTask(task, config);
@@ -306,19 +369,8 @@ export async function runTask(options: RunOptions): Promise<{ taskId: TaskId; ru
     await saveExperimentBundle(root, bundle);
 
     const last = runResults[runResults.length - 1]!;
-    if (isJson) {
-      console.log(JSON.stringify({
-        taskId: task.id,
-        runId: last.run.id,
-        status: last.run.status,
-        classification: last.run.classification?.kind ?? "unknown",
-        confidence: last.run.classification?.confidence ?? 0,
-        result: last.run.result,
-        summary: last.run.outcomeSummary,
-        branches: runResults.length,
-        experimentId: bundle.id,
-      }));
-    } else {
+
+    if (!isJson) {
       console.log(`Run finished: ${last.run.id}`);
       console.log(`Status:       ${last.run.status}`);
       console.log(
@@ -337,23 +389,21 @@ export async function runTask(options: RunOptions): Promise<{ taskId: TaskId; ru
         console.log(formatExperimentSummary(bundle.summary));
       }
     }
-    return { taskId: task.id, runId: last.run.id };
+
+    return {
+      taskId: task.id,
+      runId: last.run.id,
+      status: last.run.status,
+      classification: last.run.classification?.kind ?? "unknown",
+      confidence: last.run.classification?.confidence ?? 0,
+      result: last.run.result,
+      summary: last.run.outcomeSummary,
+      branches: runResults.length,
+      experimentId: bundle.id,
+    };
   }
 
-  if (isJson) {
-    console.log(JSON.stringify({
-      taskId: task.id,
-      runId: result.run.id,
-      status: result.run.status,
-      classification: result.run.classification?.kind ?? "unknown",
-      confidence: result.run.classification?.confidence ?? 0,
-      result: result.run.result,
-      summary: result.run.outcomeSummary,
-      approval: result.pendingApproval
-        ? { id: result.pendingApproval.id, runId: result.run.id }
-        : undefined,
-    }));
-  } else {
+  if (!isJson) {
     console.log(`Run finished: ${result.run.id}`);
     console.log(`Status:       ${result.run.status}`);
     console.log(
@@ -370,24 +420,43 @@ export async function runTask(options: RunOptions): Promise<{ taskId: TaskId; ru
     }
   }
 
-  return { taskId: task.id, runId: result.run.id };
+  return {
+    taskId: task.id,
+    runId: result.run.id,
+    status: result.run.status,
+    classification: result.run.classification?.kind ?? "unknown",
+    confidence: result.run.classification?.confidence ?? 0,
+    result: result.run.result,
+    summary: result.run.outcomeSummary,
+    approval: result.pendingApproval
+      ? { id: result.pendingApproval.id, runId: result.run.id }
+      : undefined,
+  };
 }
 
-export async function approveRun(runId: RunId, jsonOutput?: boolean): Promise<void> {
+// ---------------------------------------------------------------------------
+// approveRun — returns ApproveResult
+// ---------------------------------------------------------------------------
+
+export async function approveRun(runId: RunId, jsonOutput?: boolean): Promise<ApproveResult> {
   const root = defaultStorageRoot();
   const pending = (await listApprovalRequests(root, runId)).filter((request) => request.status === "pending");
 
   if (pending.length === 0) {
-    console.log(`No pending approvals found for ${runId}.`);
-    return;
+    if (!jsonOutput) {
+      console.log(`No pending approvals found for ${runId}.`);
+    }
+    return { approved: false, approvalId: "", runId, status: "no-pending" };
   }
 
   // Check if any approval has expired
   for (const request of pending) {
     if (request.expiresAt && new Date(request.expiresAt) < new Date()) {
-      console.error(`Approval ${request.id} has expired.`);
+      if (!jsonOutput) {
+        console.error(`Approval ${request.id} has expired.`);
+      }
       process.exitCode = 1;
-      return;
+      return { approved: false, approvalId: request.id, runId, status: "expired" };
     }
   }
 
@@ -399,18 +468,22 @@ export async function approveRun(runId: RunId, jsonOutput?: boolean): Promise<vo
 
   // Validate the checkpoint still exists and is for the correct run
   if (checkpoint.runId !== runId) {
-    console.error(`Checkpoint run ID mismatch: expected ${runId}, got ${checkpoint.runId}.`);
+    if (!jsonOutput) {
+      console.error(`Checkpoint run ID mismatch: expected ${runId}, got ${checkpoint.runId}.`);
+    }
     process.exitCode = 1;
-    return;
+    return { approved: false, approvalId: "", runId, status: "checkpoint-mismatch" };
   }
 
   const task = await loadTask(root, checkpoint.task.id);
   const approvedRequest = await loadApprovalRequest(root, checkpoint.approvalRequestId);
 
   if (approvedRequest.status === "expired") {
-    console.error(`Approval ${approvedRequest.id} has expired.`);
+    if (!jsonOutput) {
+      console.error(`Approval ${approvedRequest.id} has expired.`);
+    }
     process.exitCode = 1;
-    return;
+    return { approved: false, approvalId: approvedRequest.id, runId, status: "expired" };
   }
 
   const resumed = await resumeTask(
@@ -421,15 +494,7 @@ export async function approveRun(runId: RunId, jsonOutput?: boolean): Promise<vo
 
   await persistExecutionArtifacts(root, task, resumed);
 
-  if (jsonOutput) {
-    console.log(JSON.stringify({
-      approved: true,
-      approvalId: approvedRequest.id,
-      runId,
-      status: resumed.run.status,
-      result: resumed.run.result,
-    }));
-  } else {
+  if (!jsonOutput) {
     console.log(`Approved:     ${approvedRequest.id}`);
     console.log(`Run resumed:  ${runId}`);
     console.log(`Task:         ${task.title}`);
@@ -439,4 +504,12 @@ export async function approveRun(runId: RunId, jsonOutput?: boolean): Promise<vo
     }
     console.log(`Summary:      ${resumed.run.outcomeSummary ?? ""}`);
   }
+
+  return {
+    approved: true,
+    approvalId: approvedRequest.id,
+    runId,
+    status: resumed.run.status,
+    result: resumed.run.result,
+  };
 }

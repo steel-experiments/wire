@@ -30,6 +30,7 @@ function makeReport(overrides: Partial<BenchReport> = {}): BenchReport {
     avgJudge: 0,
     avgSteps: 0,
     avgDurationMs: 0,
+    avgAutoRecoveryRate: 1,
     ...overrides,
   };
 }
@@ -46,6 +47,7 @@ function makeResult(overrides: Partial<BenchResult> = {}): BenchResult {
     stepEfficiency: 1,
     durationMs: 1000,
     errorCount: 0,
+    autoRecoveryRate: 1,
     judgeScore: null,
     result: "ok",
     notes: [],
@@ -231,6 +233,7 @@ test("saveBenchReport persists all BenchResult fields", async () => {
     stepEfficiency: 0.43,
     durationMs: 12345,
     errorCount: 2,
+    autoRecoveryRate: 0.5,
     judgeScore: 0.3,
     result: "partial output",
     notes: ["Expected task-complete, got partial-success", "Missing answer keywords (50% relevance)"],

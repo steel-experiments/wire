@@ -41,6 +41,7 @@ export interface BenchResult {
   stepEfficiency: number;
   durationMs: number;
   errorCount: number;
+  autoRecoveryRate: number;
   judgeScore: number | null;
   result: string;
   notes: string[];
@@ -55,6 +56,7 @@ export interface BenchReport {
   avgJudge: number;
   avgSteps: number;
   avgDurationMs: number;
+  avgAutoRecoveryRate: number;
 }
 
 export interface BenchOptions {
@@ -105,6 +107,10 @@ export async function bench(options: BenchOptions): Promise<BenchReport> {
       results.length > 0
         ? results.reduce((a, b) => a + b.durationMs, 0) / results.length
         : 0,
+    avgAutoRecoveryRate:
+      results.length > 0
+        ? results.reduce((a, b) => a + b.autoRecoveryRate, 0) / results.length
+        : 1,
   };
 
   const root = defaultStorageRoot();
@@ -140,7 +146,8 @@ async function runBenchmark(
   console.log = () => {};
   let runId: RunId;
   try {
-    ({ runId } = await runTask(runOpts));
+    const runResult = await runTask(runOpts);
+    runId = runResult.runId;
   } finally {
     console.log = origLog;
   }
@@ -195,6 +202,7 @@ async function runBenchmark(
     stepEfficiency,
     durationMs: metrics.durationMs,
     errorCount: metrics.errors,
+    autoRecoveryRate: metrics.autoRecoveryRate,
     judgeScore,
     result: extractedResult ?? "",
     notes,
@@ -362,7 +370,10 @@ export function formatBenchReport(report: BenchReport): string {
   const judgeInfo = report.avgJudge > 0 ? `  Avg judge: ${report.avgJudge.toFixed(2)}` : "";
   const stepInfo = `  Avg steps: ${report.avgSteps.toFixed(1)}`;
   const timeInfo = `  Avg time: ${(report.avgDurationMs / 1000).toFixed(1)}s`;
-  lines.push(`${passInfo}${judgeInfo}${stepInfo}${timeInfo}`);
+  const recoveryInfo = report.avgAutoRecoveryRate < 1
+    ? `  Avg auto-recovery: ${(report.avgAutoRecoveryRate * 100).toFixed(0)}%`
+    : "";
+  lines.push(`${passInfo}${judgeInfo}${stepInfo}${timeInfo}${recoveryInfo}`);
 
   return lines.join("\n");
 }

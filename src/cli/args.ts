@@ -2,7 +2,7 @@ import type { TaskMode } from "../shared/types.js";
 import type { LlmProvider } from "./config.js";
 
 export interface CliArgs {
-  command: "run" | "review" | "result" | "list" | "approve" | "bench";
+  command: "run" | "review" | "result" | "list" | "approve" | "bench" | "replay";
   taskFile?: string;
   objective?: string;
   mode?: TaskMode;
@@ -15,10 +15,12 @@ export interface CliArgs {
   skillDir?: string;
   benchmarksFile?: string;
   json?: boolean;
+  yes?: boolean;
+  strict?: boolean;
   help?: boolean;
 }
 
-const VALID_COMMANDS = new Set(["run", "review", "result", "list", "approve", "bench"]);
+const VALID_COMMANDS = new Set(["run", "review", "result", "list", "approve", "bench", "replay"]);
 
 export function parseArgs(argv: string[]): CliArgs {
   const args = argv.slice(2); // drop node and script path
@@ -153,6 +155,18 @@ export function parseArgs(argv: string[]): CliArgs {
       continue;
     }
 
+    if (arg === "--yes" || arg === "--non-interactive") {
+      result.yes = true;
+      i++;
+      continue;
+    }
+
+    if (arg === "--strict") {
+      result.strict = true;
+      i++;
+      continue;
+    }
+
     // Positional: the command
     if (arg !== undefined && VALID_COMMANDS.has(arg)) {
       result.command = arg as CliArgs["command"];
@@ -180,6 +194,7 @@ export function formatHelp(): string {
     "  result    Print the final result for a run",
     "  list      List tasks or runs",
     "  approve   Approve pending actions",
+    "  replay    Replay a run and show timeline",
     "  bench     Run benchmark suite",
     "",
     "Run options:",
@@ -199,6 +214,9 @@ export function formatHelp(): string {
     "Result options:",
     "  --run-id <id>            Run whose final result should be printed",
     "",
+    "Replay options:",
+    "  --run-id <id>            Run to replay",
+    "",
     "List options:",
     "  --mode <mode>            Filter by task mode",
     "",
@@ -212,6 +230,8 @@ export function formatHelp(): string {
     "",
     "General:",
     "  --json                   Output machine-readable JSON",
+    "  --yes, --non-interactive Auto-approve policy actions",
+    "  --strict                 Fail on missing config or schema violations",
     "  --help, -h               Show this help message",
   ].join("\n");
 }

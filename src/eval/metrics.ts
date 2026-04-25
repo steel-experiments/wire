@@ -4,6 +4,7 @@ import type {
   RunClassificationKind,
   TraceEvent,
 } from "../shared/types.js";
+import { isRecoverableStepError } from "../agent/state-helpers.js";
 
 // ---------------------------------------------------------------------------
 // Evaluation metrics
@@ -24,6 +25,7 @@ export interface TaskMetrics {
   policyChecks: number;
   approvalRequests: number;
   skillsLoaded: number;
+  autoRecoveryRate: number;
 }
 
 export function computeTaskMetrics(
@@ -48,6 +50,7 @@ export function computeTaskMetrics(
     policyChecks: events.filter((e) => e.kind === "policy-check").length,
     approvalRequests: events.filter((e) => e.kind === "approval-request").length,
     skillsLoaded: events.filter((e) => e.kind === "skill-load").length,
+    autoRecoveryRate: computeAutoRecoveryRate(events),
   };
 }
 
@@ -138,4 +141,30 @@ function computeDuration(events: TraceEvent[]): number {
   if (events.length < 2) return 0;
   const sorted = [...events].sort((a, b) => a.ts.localeCompare(b.ts));
   return Date.parse(sorted[sorted.length - 1]!.ts) - Date.parse(sorted[0]!.ts);
+}
+
+function computeAutoRecoveryRate(events: TraceEvent[]): number {
+  const recoverableErrors: number[] = [];
+  const sorted = [...events].sort((a, b) => a.ts.localeCompare(b.ts));
+
+  for (let i = 0; i < sorted.length; i++) {
+    const event = sorted[i]!;
+    if (event.kind === "error" && typeof event.payload.message === "string") {
+      if (isRecoverableStepError(event.payload.message)) {
+        recoverableErrors.push(i);
+      }
+    }
+  }
+
+  if (recoverableErrors.length === 0) return 1;
+
+  let recovered = 0;
+  for (const errorIdx of recoverableErrors) {
+    const next = sorted.slice(errorIdx + 1).find((e) => e.kind !== "error");
+    if (next !== undefined) {
+      recovered++;
+    }
+  }
+
+  return recovered / recoverableErrors.length;
 }
