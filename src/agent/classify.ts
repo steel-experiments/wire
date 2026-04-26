@@ -1,4 +1,5 @@
 import type { RunClassification, RunClassificationKind, TaskMode, TraceEvent } from "../shared/types.js";
+import { isNavigationOnlyResult } from "./state-helpers.js";
 
 // ---------------------------------------------------------------------------
 // Objective relevance check
@@ -265,6 +266,7 @@ export function classifyRun(input: ClassificationInput): RunClassification {
       typeof terminalEvent.payload.stdout === "string" ||
       terminalEvent.payload.returnValue !== undefined
     );
+  const terminalIsNavOnly = terminalEvent?.kind === "code-result" && isNavigationOnlyResult(terminalEvent);
 
   // In task mode, check whether the extracted result addresses the objective.
   // This prevents classifying runs as "task-complete" when the agent extracted
@@ -275,7 +277,7 @@ export function classifyRun(input: ClassificationInput): RunClassification {
   const addressesObjective = !objectiveRelevant || resultAddressesObjective(finalResultText, objective!);
 
   if (codeSuccessCount > 0 && codeFailCount === 0) {
-    const hasAnswerArtifact = artifactCount > 0 || terminalEventHasExtractedAnswer;
+    const hasAnswerArtifact = artifactCount > 0 || (terminalEventHasExtractedAnswer && !terminalIsNavOnly);
     const taskModeHasCompletionEvidence = mode === "task"
       ? hasAnswerArtifact && codeSuccessWithOutputCount > 0
       : hasEvidence && (terminalEventIsEvidence || terminalEventHasExtractedAnswer);

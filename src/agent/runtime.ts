@@ -8,6 +8,7 @@ import type {
   ProposedAction,
   RunCheckpoint,
   SessionConfig,
+  SessionId,
   Task,
   TraceEvent,
 } from "../shared/types.js";
@@ -67,6 +68,9 @@ export interface RuntimeConfig {
   skillDir?: string;
   sessionInput?: CreateSessionInput;
   onSessionCreated?: (session: BrowserSession) => Promise<void> | void;
+  onSessionReconfigured?: (
+    details: { oldSessionId: SessionId; newSession: BrowserSession; summary: string },
+  ) => Promise<void> | void;
   traceSink?: TraceSink;
   actionHandlers?: ActionHandler[];
 }
@@ -466,8 +470,15 @@ async function initializeState(
   };
 
   if (approvedPendingAction) {
-    const resumeOpts: { skipPolicyCheck: boolean; actionRegistry?: ActionRegistry } = { skipPolicyCheck: false };
+    const resumeOpts: {
+      skipPolicyCheck: boolean;
+      actionRegistry?: ActionRegistry;
+      actionContext?: { onSessionReconfigured: NonNullable<RuntimeConfig["onSessionReconfigured"]> };
+    } = { skipPolicyCheck: false };
     if (actionRegistry) resumeOpts.actionRegistry = actionRegistry;
+    if (config.onSessionReconfigured) {
+      resumeOpts.actionContext = { onSessionReconfigured: config.onSessionReconfigured };
+    }
     const resumedStep = await executeStep(
       state,
       approvedPendingAction,
@@ -535,6 +546,7 @@ async function runMainLoop(
   actionRegistry?: ActionRegistry,
 ): Promise<void> {
   let consecutiveRecoverableErrors = 0;
+  let totalCodeFailures = 0;
 
   while (true) {
     // Check stopping conditions
@@ -576,7 +588,16 @@ async function runMainLoop(
 
     // If the agent wants to finish, record and break
     if (action.kind === "finish") {
+      // Prevent finish when step count is too low for real progress
       if (
+        state.stepCount < 3 &&
+        state.task.mode === "task" &&
+        !hasRecordedTaskArtifact(state) &&
+        !hasExtractedTaskResult(state) &&
+        state.stepCount < config.maxSteps
+      ) {
+        action = buildVerificationAction();
+      } else if (
         state.task.mode === "task" &&
         !hasExtractedTaskResult(state) &&
         !hasRecordedTaskArtifact(state) &&
@@ -623,8 +644,14 @@ async function runMainLoop(
 
     // Execute the step
     try {
-      const stepOpts: { actionRegistry?: ActionRegistry } = {};
+      const stepOpts: {
+        actionRegistry?: ActionRegistry;
+        actionContext?: { onSessionReconfigured: NonNullable<RuntimeConfig["onSessionReconfigured"]> };
+      } = {};
       if (actionRegistry) stepOpts.actionRegistry = actionRegistry;
+      if (config.onSessionReconfigured) {
+        stepOpts.actionContext = { onSessionReconfigured: config.onSessionReconfigured };
+      }
       const stepResult = await executeStep(state, action, config.provider, config.policyEngine, stepOpts);
       Object.assign(state, stepResult.state);
       signals.policyDenied = stepResult.policyDenied;
@@ -660,8 +687,14 @@ async function runMainLoop(
         kind: "error",
         payload: { message, code },
       });
-      state.stepCount++;
       await flushTraceSink(state, config, signals);
+
+      totalCodeFailures++;
+      if (!isRecoverableStepError(message)) {
+        state.stepCount++;
+      }
+
+      if (totalCodeFailures >= 10) break;
 
       if (isRecoverableStepError(message)) {
         consecutiveRecoverableErrors++;
