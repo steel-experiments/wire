@@ -18,7 +18,7 @@ import {
 import { resolveApproval } from "../policy/approvals.js";
 import { createPolicyEngine, type PolicyEngine } from "../policy/engine.js";
 import type { PolicyAction } from "../policy/rules.js";
-import { createSteelProvider } from "../providers/browser/steel.js";
+import { createSteelProvider, createSteelActionHandlers } from "../providers/browser/steel.js";
 import type { LLMProvider } from "../providers/llm/openai.js";
 import { createOpenAIProvider } from "../providers/llm/openai.js";
 import { createAnthropicProvider } from "../providers/llm/anthropic.js";
@@ -175,6 +175,7 @@ function createRuntimeConfig(
 
   const config: RuntimeConfig = {
     provider: createSteelProvider(),
+    actionHandlers: createSteelActionHandlers(),
     policyEngine,
     maxSteps: options.maxSteps ?? defaultMaxSteps(options.mode ?? "task"),
     async onSessionCreated(session) {

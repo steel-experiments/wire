@@ -50,6 +50,8 @@ export interface ContextBundle {
   budget?: BudgetSummary;
   plan?: string;
   stateDiff?: StateDiffSummary;
+  sessionCapabilities?: Record<string, unknown>;
+  providerActions?: Array<{ kind: string; description: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,9 +187,65 @@ export function assembleUserPrompt(context: ContextBundle): string {
     sections.push(diffParts.join("\n"));
   }
 
+  // Session capabilities (generic rendering)
+  if (context.sessionCapabilities) {
+    const entries = Object.entries(context.sessionCapabilities).filter(
+      ([, v]) => v !== undefined,
+    );
+    if (entries.length > 0) {
+      const parts = entries.map(([k, v]) => `- ${k}: ${JSON.stringify(v)}`);
+      sections.push("Current session capabilities:\n" + parts.join("\n"));
+    }
+  }
+
   if (sections.length === 0) {
     return "No context available yet. Proceed with the task objective.";
   }
 
   return sections.join("\n\n");
+}
+
+// ---------------------------------------------------------------------------
+// Action guidance — LLM-facing instructions for available actions
+// ---------------------------------------------------------------------------
+
+const BASE_ACTION_GUIDANCE = [
+  "Return exactly one next action as JSON.",
+  'For "observe", omit payload unless you need {"targetId":"..."}',
+  'For "exec", set payload.code to JavaScript that runs in the browser. Code is auto-wrapped as (async () => { YOUR_CODE })(). Do NOT wrap your code in another IIFE; use top-level `return` to output results.',
+  'For "raw", set payload.method to a CDP method and payload.params to its parameters. Use raw only when exec cannot reach the needed browser behavior.',
+  '"exec" code can return {wireActions: [{method, params}, ...]} to send CDP commands after the code runs.',
+  "Prefer direct URL patterns before brittle DOM hunting when the destination is obvious.",
+  "For web search tasks, use DuckDuckGo (duckduckgo.com) or Bing (bing.com). Google blocks headless browsers with captchas.",
+  "Wire auto-observes after navigation code. Do NOT emit a separate observe after navigating.",
+  "Navigation alone is not task completion. After reaching the target page, run exec code that extracts or verifies the answer.",
+  "Only use finish after evidence exists in a successful exec result or artifact.",
+  "Use reusable routes, selectors, waits, and traps from loaded skills when they apply.",
+  "Do not wrap the JSON in prose.",
+];
+
+export function buildActionGuidance(context: ContextBundle): string {
+  const coreKinds = ["observe", "exec", "raw", "finish"];
+  const providerKinds = (context.providerActions ?? []).map((a) => a.kind);
+  const allKinds = [...coreKinds, ...providerKinds].join("|");
+
+  const lines = [
+    `Use this shape: {"kind":"${allKinds}","summary":"short text","payload":{...}}.`,
+    ...BASE_ACTION_GUIDANCE,
+  ];
+
+  // Add provider action descriptions
+  for (const action of context.providerActions ?? []) {
+    lines.push(action.description);
+  }
+
+  if (context.skills.length > 0) {
+    lines.push("When loaded skills provide workflow steps, follow the applicable durable guidance before inventing new selectors.");
+  }
+
+  if (context.stateDiff && context.stateDiff.consecutiveUnchanged >= 2) {
+    lines.push("Your last actions did not change observable state. Try a materially different executable approach.");
+  }
+
+  return lines.join("\n");
 }

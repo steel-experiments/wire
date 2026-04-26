@@ -7,6 +7,8 @@ import type {
   Run,
   RunId,
   SessionId,
+  SessionConfig,
+  ProfileId,
   Task,
   TaskMode,
   TraceEvent,
@@ -36,6 +38,8 @@ interface TaskContext {
   task: Task;
   sessionId: SessionId;
   sessionLiveUrl?: string;
+  sessionConfig?: SessionConfig;
+  profileId?: ProfileId;
   loadedSkills: LoadedSkill[];
 }
 
@@ -93,7 +97,12 @@ export type AgentTurnFn = (
 // Create loop state
 // ---------------------------------------------------------------------------
 
-export function createLoopState(task: Task, sessionId: SessionId, sessionLiveUrl?: string): LoopState {
+export function createLoopState(
+  task: Task,
+  sessionId: SessionId,
+  sessionLiveUrl?: string,
+  options?: { sessionConfig?: SessionConfig; profileId?: ProfileId },
+): LoopState {
   const run: Run = {
     id: createId("run"),
     taskId: task.id,
@@ -113,6 +122,14 @@ export function createLoopState(task: Task, sessionId: SessionId, sessionLiveUrl
 
   if (sessionLiveUrl !== undefined) {
     state.sessionLiveUrl = sessionLiveUrl;
+  }
+
+  if (options?.sessionConfig) {
+    state.sessionConfig = options.sessionConfig;
+  }
+
+  if (options?.profileId) {
+    state.profileId = options.profileId;
   }
 
   return state;
@@ -166,7 +183,7 @@ export async function executeStep(
   action: ProposedAction,
   provider: BrowserProvider,
   policyEngine: PolicyEngine,
-  options: { skipPolicyCheck?: boolean } = {},
+  options: { skipPolicyCheck?: boolean; actionRegistry?: import("./actions.js").ActionRegistry } = {},
 ): Promise<{
   state: LoopState;
   policyDenied: boolean;
@@ -181,9 +198,12 @@ export async function executeStep(
 
   // Policy check for non-trivial actions (everything except observe/finish)
   if (action.kind !== "observe" && action.kind !== "finish" && !options.skipPolicyCheck) {
+    const execRisk = action.kind === "exec" && typeof action.payload?.code === "string"
+      ? (await import("../policy/rules.js")).classifyExecRisk(action.payload.code)
+      : undefined;
     const policyKind = typeof action.payload?.policyKind === "string"
       ? action.payload.policyKind
-      : action.kind;
+      : execRisk?.kind ?? action.kind;
     const policyAction: PolicyAction = {
       kind: policyKind,
       summary: action.summary,
@@ -194,7 +214,13 @@ export async function executeStep(
     const decision = policyEngine.check(actionId, policyAction);
 
     // Record policy check event
-    const policyPayload: JsonObject = { actionKind: action.kind, result: decision.result };
+    const policyPayload: JsonObject = { actionKind: action.kind, policyKind, result: decision.result };
+    if (execRisk) {
+      policyPayload.execRisk = {
+        kind: execRisk.kind,
+        reasons: execRisk.reasons,
+      };
+    }
     if (decision.reason) {
       policyPayload.reason = decision.reason;
     }
@@ -484,7 +510,13 @@ export async function executeStep(
     }
 
     default: {
-      // Record thought summary or other actions
+      const handler = options.actionRegistry?.get(action.kind);
+      if (handler) {
+        const result = await handler.execute(state, action, provider);
+        if (result.authWallHit) authWallHit = true;
+        break;
+      }
+      // Unknown action: record thought-summary
       state.events.push({
         id: createId("event"),
         runId: state.run.id,

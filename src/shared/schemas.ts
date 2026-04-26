@@ -78,6 +78,7 @@ export const runClassificationKindSchema = z.enum([
   "ambiguous",
 ]);
 export const hypothesisStatusSchema = z.enum(["active", "supported", "rejected", "ambiguous"]);
+export const skillStatusSchema = z.enum(["proposed", "active", "superseded", "rejected"]);
 export const skillScopeSchema = z.enum(["domain", "workflow", "interaction"]);
 export const skillSourceSchema = z.enum(["builtin", "team", "generated"]);
 export const traceEventKindSchema = z.enum([
@@ -116,16 +117,7 @@ export const comparisonDimensionSchema = z.enum([
   "outcome",
 ]);
 
-export const actionKindSchema = z.enum([
-  "observe",
-  "exec",
-  "raw",
-  "request-approval",
-  "branch-experiment",
-  "load-skill",
-  "propose-skill",
-  "finish",
-]);
+export const actionKindSchema = z.string().min(1);
 
 export const taskBudgetSchema = z
   .object({
@@ -212,10 +204,14 @@ export const skillMetadataSchema = z
   .object({
     id: skillIdSchema,
     scope: skillScopeSchema,
+    status: skillStatusSchema.optional(),
     hostnamePatterns: z.array(z.string().min(1)).optional(),
     tags: z.array(z.string().min(1)),
     updatedAt: z.iso.date(),
     source: skillSourceSchema,
+    confidence: z.number().min(0).max(1).optional(),
+    sourceRunIds: z.array(runIdSchema).optional(),
+    supersedes: z.array(skillIdSchema).optional(),
   })
   .strict();
 

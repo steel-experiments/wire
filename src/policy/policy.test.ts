@@ -10,6 +10,7 @@ import type { PolicyEngine } from "./engine.js";
 import {
   BASELINE_RULES,
   evaluateRules,
+  classifyExecRisk,
 } from "./rules.js";
 import type { PolicyAction, PolicyRule } from "./rules.js";
 
@@ -209,12 +210,22 @@ test("evaluateRules uses custom rules when provided", () => {
   assert.deepEqual(denied.matchedRules, ["custom-deny"]);
 });
 
+test("classifyExecRisk allows read-only fetch but flags network mutations", () => {
+  assert.equal(classifyExecRisk("return await fetch('/api/items').then(r => r.json())").kind, "read");
+  assert.equal(classifyExecRisk("return fetch('/api/items', { method: 'POST', body: '{}' })").kind, "unknown-mutation");
+});
+
+test("classifyExecRisk flags submit and delete browser code", () => {
+  assert.equal(classifyExecRisk("document.querySelector('form')!.requestSubmit()").kind, "submit");
+  assert.equal(classifyExecRisk("await fetch('/items/1', { method: 'DELETE' })").kind, "delete");
+});
+
 // ---------------------------------------------------------------------------
 // rules.ts — BASELINE_RULES
 // ---------------------------------------------------------------------------
 
-test("BASELINE_RULES has seven rules", () => {
-  assert.equal(BASELINE_RULES.length, 7);
+test("BASELINE_RULES has nine rules", () => {
+  assert.equal(BASELINE_RULES.length, 9);
 });
 
 test("BASELINE_RULES every rule has an id and description", () => {
@@ -456,4 +467,52 @@ test("resolveApproval does not mutate the original", () => {
 
   assert.equal(original.status, "pending");
   assert.equal(resolved.status, "approved");
+});
+
+// ---------------------------------------------------------------------------
+// rules.ts — reconfigure policy
+// ---------------------------------------------------------------------------
+
+test("evaluateRules auto-allows reconfigure with boolean useProxy", () => {
+  const action = makeAction({
+    kind: "reconfigure",
+    summary: "Enable proxy to bypass IP block.",
+    payload: { useProxy: true },
+  });
+
+  const { result } = evaluateRules(action);
+  assert.equal(result, "allow");
+});
+
+test("evaluateRules auto-allows reconfigure with solveCaptcha", () => {
+  const action = makeAction({
+    kind: "reconfigure",
+    summary: "Enable captcha solver.",
+    payload: { solveCaptcha: true },
+  });
+
+  const { result } = evaluateRules(action);
+  assert.equal(result, "allow");
+});
+
+test("evaluateRules requires approval for reconfigure with custom proxy server", () => {
+  const action = makeAction({
+    kind: "reconfigure",
+    summary: "Use custom proxy server.",
+    payload: { useProxy: { server: "http://custom-proxy.example.com:8080" } },
+  });
+
+  const { result, matchedRules } = evaluateRules(action);
+  assert.equal(result, "require-approval");
+  assert.ok(matchedRules.includes("baseline-reconfigure-custom-proxy"));
+});
+
+test("evaluateRules auto-allows reconfigure with no payload", () => {
+  const action = makeAction({
+    kind: "reconfigure",
+    summary: "Reconfigure session defaults.",
+  });
+
+  const { result } = evaluateRules(action);
+  assert.equal(result, "allow");
 });

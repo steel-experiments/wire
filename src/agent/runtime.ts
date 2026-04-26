@@ -4,8 +4,10 @@ import type {
   CreateSessionInput,
   JsonObject,
   LoadedSkill,
+  ProfileId,
   ProposedAction,
   RunCheckpoint,
+  SessionConfig,
   Task,
   TraceEvent,
 } from "../shared/types.js";
@@ -27,13 +29,13 @@ import {
   type LoopResult,
   type AgentTurnFn,
 } from "./loop.js";
-import { assembleSystemPrompt, assembleUserPrompt, type ContextBundle } from "./context.js";
+import { assembleSystemPrompt, assembleUserPrompt, buildActionGuidance, type ContextBundle } from "./context.js";
 import { createPlan, planToContext, advancePlanBy, type TaskPlan } from "./planning.js";
 import { observeBrowser, toObservationPayload } from "../browser/observe.js";
 import { detectAuthWall } from "../profiles/auth.js";
-import { llmProposeSkill, generateSkillProposal, promoteSkill } from "../skills/promote.js";
+import { llmProposeSkill, generateSkillProposal, manageSkillPromotion } from "../skills/promote.js";
 import { findMatchingSkillDocs } from "../skills/loader.js";
-import { parseActionFromLlm } from "./llm-parse.js";
+import { parseActionFromLlm, registerActionKind } from "./llm-parse.js";
 import {
   latestObservation,
   latestError,
@@ -44,10 +46,14 @@ import {
   hasMeaningfulProgress,
   buildFailureSummary,
   isRecoverableStepError,
-  buildGenericExtractionAction,
   computeObservationDiff,
   countConsecutiveUnchanged,
+  hasPostNavigationExtraction,
+  appendExtractedResultArtifact,
+  appendTaskNoteArtifact,
+  buildVerificationAction,
 } from "./state-helpers.js";
+import { ActionRegistry, type ActionHandler } from "./actions.js";
 
 // ---------------------------------------------------------------------------
 // RuntimeConfig — what the runtime needs to run
@@ -61,6 +67,13 @@ export interface RuntimeConfig {
   skillDir?: string;
   sessionInput?: CreateSessionInput;
   onSessionCreated?: (session: BrowserSession) => Promise<void> | void;
+  traceSink?: TraceSink;
+  actionHandlers?: ActionHandler[];
+}
+
+export interface TraceSink {
+  onEvent?: (event: TraceEvent) => Promise<void> | void;
+  onArtifactEvent?: (event: TraceEvent) => Promise<void> | void;
 }
 
 function hostnameFromState(state: LoopState): string | undefined {
@@ -161,7 +174,7 @@ function planForState(state: LoopState): TaskPlan {
 // defaultAgentTurn — uses LLM if available, falls back to observe+finish
 // ---------------------------------------------------------------------------
 
-export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number): AgentTurnFn {
+export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number, actionRegistry?: ActionRegistry): AgentTurnFn {
   return async (state: LoopState, provider: BrowserProvider): Promise<ProposedAction> => {
     const taskPlan = planForState(state);
 
@@ -229,6 +242,14 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number): 
       plan: planToContext(taskPlan),
     };
 
+    if (state.sessionConfig) {
+      context.sessionCapabilities = { ...state.sessionConfig };
+    }
+
+    if (actionRegistry) {
+      context.providerActions = actionRegistry.descriptions();
+    }
+
     // Compute state diff for progress detection
     const allObservations = state.events.filter((e) => e.kind === "observation");
     if (allObservations.length >= 1) {
@@ -246,24 +267,7 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number): 
 
     // If an LLM provider is available, use it to decide the next action
     if (llmProvider) {
-      const actionInstructions = [
-        "Return exactly one next action as JSON.",
-        'Use this shape: {"kind":"observe|exec|raw|finish","summary":"short text","payload":{...}}.',
-        'For "observe", omit payload unless you need {"targetId":"..."}',
-        'For "exec", set payload.code to JavaScript that runs in the browser. Code is auto-wrapped as (async () => { YOUR_CODE })(). Do NOT wrap your code in another IIFE — use top-level `return` to output results. Example: `const tiles = document.querySelectorAll(".tile"); return JSON.stringify({count: tiles.length});`',
-        'For "raw", set payload.method to a CDP method and payload.params to its parameters. Example: {"kind":"raw","summary":"Press arrow key","payload":{"method":"Input.dispatchKeyEvent","params":{"type":"keyDown","key":"ArrowUp","windowsVirtualKeyCode":38}}} sends a trusted keypress that pages cannot ignore. Always pair keyDown + keyUp. For batch input (e.g. games), use payload.commands: [{"method":"Input.dispatchKeyEvent","params":{...}},{"method":"Input.dispatchKeyEvent","params":{...}},...] to send many CDP commands in a single step.',
-        '"exec" code can return {wireActions: [{method, params}, ...]} to send CDP commands after the code runs. Example: read game state from DOM, compute optimal move, return wireActions with Input.dispatchKeyEvent pairs. This combines reading + acting in one step.',
-        "For interactive apps and games: prefer exec to access the app's internal JavaScript API directly. Most games expose state and methods on global objects or via DOM element references (e.g., a game manager instance). One exec call can trigger many moves — far more efficient than one raw keypress per step. Use raw only when exec truly cannot reach the target API.",
-        "Prefer direct URL patterns before brittle DOM hunting when the destination is obvious, such as /pricing or /docs.",
-        "Wire auto-observes after navigation code (location.href etc). Do NOT emit a separate observe after navigating.",
-        "CRITICAL: navigation alone is NOT task completion. After reaching the target page, you MUST emit a final exec that EXTRACTS the answer as a JSON object or plain text string.",
-        "Example: after navigating to a pricing page, emit exec with code like `return JSON.stringify({plans: [...extracted data...]})` or use `document.querySelectorAll` to collect the data and return it.",
-        "Use reusable routes, selectors, waits, and traps you discover in executable code; Wire will propose durable skill files after the run from trace evidence.",
-        "Only use 'finish' after a successful exec has produced output containing the answer to the objective. Never finish after only navigation and observation.",
-        "When skills provide a Workflow with numbered steps, follow those steps in order. Do not skip steps or substitute your own detection logic for the selectors and checks specified in the skill.",
-        "For game-winning objectives: never detect a win by searching for the game name or target number in body text (e.g. /2048/.test(body.innerText)). Always use the specific game-state selector the skill provides (e.g. .game-message.game-won). A score of 0 means no moves were made.",
-        "Do not wrap the JSON in prose.",
-      ].join("\n");
+      const actionInstructions = buildActionGuidance(context);
 
       const systemPrompt = assembleSystemPrompt(context);
       const userPrompt = `${assembleUserPrompt(context)}\n\n${actionInstructions}`;
@@ -309,90 +313,6 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number): 
   };
 }
 
-function appendExtractedResultArtifact(state: LoopState): void {
-  const result = latestCodeResult(state);
-  if (!result || result.payload.ok !== true) {
-    return;
-  }
-
-  const artifactId = createId("artifact") as ArtifactId;
-  let kind: "json-output" | "note" = "note";
-  let mimeType = "text/plain";
-  let extension = "txt";
-  let content: string | undefined;
-
-  if (result.payload.returnValue !== undefined) {
-    kind = "json-output";
-    mimeType = "application/json";
-    extension = "json";
-    content = JSON.stringify(result.payload.returnValue, null, 2);
-  } else if (typeof result.payload.stdout === "string" && result.payload.stdout.trim().length > 0) {
-    const stdout = result.payload.stdout.trim();
-    try {
-      const parsed = JSON.parse(stdout) as unknown;
-      if (parsed !== null && typeof parsed === "object") {
-        kind = "json-output";
-        mimeType = "application/json";
-        extension = "json";
-        content = JSON.stringify(parsed, null, 2);
-      } else {
-        content = stdout;
-      }
-    } catch {
-      content = stdout;
-    }
-  }
-
-  if (!content) {
-    return;
-  }
-
-  state.events.push({
-    id: createId("event"),
-    runId: state.run.id,
-    ts: nowIsoUtc(),
-    kind: "artifact",
-    payload: {
-      artifactId,
-      kind,
-      mimeType,
-      path: `artifacts/${artifactId}.${extension}`,
-      content,
-    },
-  });
-}
-
-function appendTaskNoteArtifact(state: LoopState, summary: string): void {
-  const artifactId = createId("artifact") as ArtifactId;
-  const observation = latestObservation(state);
-  const lines = [summary.trim()];
-
-  if (observation) {
-    const title = typeof observation.payload.title === "string" ? observation.payload.title : undefined;
-    const url = typeof observation.payload.url === "string" ? observation.payload.url : undefined;
-    if (title) {
-      lines.push(`Title: ${title}`);
-    }
-    if (url) {
-      lines.push(`URL: ${url}`);
-    }
-  }
-
-  state.events.push({
-    id: createId("event"),
-    runId: state.run.id,
-    ts: nowIsoUtc(),
-    kind: "artifact",
-    payload: {
-      artifactId,
-      kind: "note",
-      mimeType: "text/plain",
-      path: `artifacts/${artifactId}.txt`,
-      content: lines.join("\n"),
-    },
-  });
-}
-
 async function appendSkillProposalEvents(
   state: LoopState,
   skillDir?: string,
@@ -426,13 +346,12 @@ async function appendSkillProposalEvents(
 
   if (skillDir) {
     try {
-      const written = await promoteSkill(candidate, skillDir);
-      if (written) {
-        payload.path = written;
-      } else {
-        payload.skipped = true;
-        payload.skipReason = "Existing skill with equal or higher confidence";
-      }
+      const result = await manageSkillPromotion(candidate, skillDir);
+      if (result.proposalPath) payload.proposalPath = result.proposalPath;
+      if (result.activePath) payload.path = result.activePath;
+      if (!result.activePath && result.proposalPath) payload.path = result.proposalPath;
+      payload.promoted = result.promoted;
+      payload.promotionReason = result.reason;
     } catch (err) {
       payload.writeError = err instanceof Error ? err.message : String(err);
     }
@@ -456,13 +375,14 @@ export async function executeTask(
   config: RuntimeConfig,
   agentTurn?: AgentTurnFn,
 ): Promise<LoopResult> {
-  const turn = agentTurn ?? defaultAgentTurn(config.llmProvider, config.maxSteps);
+  const registry = buildActionRegistry(config);
+  const turn = agentTurn ?? defaultAgentTurn(config.llmProvider, config.maxSteps, registry);
 
   // Create a browser session for this task
   const session = await createBrowserSession(config.provider, config.sessionInput);
   await config.onSessionCreated?.(session);
 
-  return executeWithState(task, config, turn, session);
+  return executeWithState(task, config, turn, session, undefined, undefined, registry);
 }
 
 export async function resumeTask(
@@ -470,7 +390,8 @@ export async function resumeTask(
   config: RuntimeConfig,
   agentTurn?: AgentTurnFn,
 ): Promise<LoopResult> {
-  const turn = agentTurn ?? defaultAgentTurn(config.llmProvider, config.maxSteps);
+  const registry = buildActionRegistry(config);
+  const turn = agentTurn ?? defaultAgentTurn(config.llmProvider, config.maxSteps, registry);
   const state: LoopState = {
     task: checkpoint.task,
     run: checkpoint.run,
@@ -481,7 +402,18 @@ export async function resumeTask(
     startedAt: checkpoint.startedAt,
   };
 
-  return executeWithState(checkpoint.task, config, turn, undefined, state, checkpoint.pendingAction);
+  return executeWithState(checkpoint.task, config, turn, undefined, state, checkpoint.pendingAction, registry);
+}
+
+function buildActionRegistry(config: RuntimeConfig): ActionRegistry {
+  const registry = new ActionRegistry();
+  if (config.actionHandlers) {
+    for (const handler of config.actionHandlers) {
+      registry.register(handler);
+      registerActionKind(handler.kind);
+    }
+  }
+  return registry;
 }
 
 // ---------------------------------------------------------------------------
@@ -494,6 +426,27 @@ interface LoopSignals {
   awaitingApproval: boolean;
   pendingApproval: LoopResult["pendingApproval"];
   pendingAction: LoopResult["pendingAction"];
+  flushedEvents: number;
+}
+
+async function flushTraceSink(
+  state: LoopState,
+  config: RuntimeConfig,
+  signals: LoopSignals,
+): Promise<void> {
+  if (!config.traceSink?.onEvent && !config.traceSink?.onArtifactEvent) {
+    signals.flushedEvents = state.events.length;
+    return;
+  }
+
+  while (signals.flushedEvents < state.events.length) {
+    const event = state.events[signals.flushedEvents]!;
+    await config.traceSink.onEvent?.(event);
+    if (event.kind === "artifact") {
+      await config.traceSink.onArtifactEvent?.(event);
+    }
+    signals.flushedEvents++;
+  }
 }
 
 async function initializeState(
@@ -501,6 +454,7 @@ async function initializeState(
   config: RuntimeConfig,
   initialState: LoopState | undefined,
   approvedPendingAction: ProposedAction | undefined,
+  actionRegistry?: ActionRegistry,
 ): Promise<LoopSignals> {
   const signals: LoopSignals = {
     policyDenied: false,
@@ -508,15 +462,18 @@ async function initializeState(
     awaitingApproval: false,
     pendingApproval: undefined,
     pendingAction: undefined,
+    flushedEvents: 0,
   };
 
   if (approvedPendingAction) {
+    const resumeOpts: { skipPolicyCheck: boolean; actionRegistry?: ActionRegistry } = { skipPolicyCheck: false };
+    if (actionRegistry) resumeOpts.actionRegistry = actionRegistry;
     const resumedStep = await executeStep(
       state,
       approvedPendingAction,
       config.provider,
       config.policyEngine,
-      { skipPolicyCheck: false },
+      resumeOpts,
     );
     Object.assign(state, resumedStep.state);
     signals.policyDenied = resumedStep.policyDenied;
@@ -562,6 +519,7 @@ async function initializeState(
     await syncMatchedSkills(state, config.skillDir);
   }
 
+  await flushTraceSink(state, config, signals);
   return signals;
 }
 
@@ -574,6 +532,7 @@ async function runMainLoop(
   config: RuntimeConfig,
   turn: AgentTurnFn,
   signals: LoopSignals,
+  actionRegistry?: ActionRegistry,
 ): Promise<void> {
   let consecutiveRecoverableErrors = 0;
 
@@ -596,6 +555,7 @@ async function runMainLoop(
         kind: "thought-summary",
         payload: { reason: stopResult.reason ?? "Unknown stop condition" },
       });
+      await flushTraceSink(state, config, signals);
       break;
     }
 
@@ -610,6 +570,7 @@ async function runMainLoop(
         kind: "error",
         payload: { message: (err as Error).message, code: "EAGENT" },
       });
+      await flushTraceSink(state, config, signals);
       break;
     }
 
@@ -622,7 +583,16 @@ async function runMainLoop(
         !hasAttemptedExtraction(state) &&
         state.stepCount < config.maxSteps
       ) {
-        action = buildGenericExtractionAction();
+        action = buildVerificationAction();
+      } else if (
+        state.task.mode === "task" &&
+        hasExtractedTaskResult(state) &&
+        !hasPostNavigationExtraction(state) &&
+        !hasRecordedTaskArtifact(state) &&
+        state.stepCount < config.maxSteps
+      ) {
+        // Agent extracted a navigation-only result but no real content — force extraction
+        action = buildVerificationAction();
       } else if (state.task.mode === "task") {
         if (hasExtractedTaskResult(state) && !hasRecordedTaskArtifact(state)) {
           appendExtractedResultArtifact(state);
@@ -636,6 +606,7 @@ async function runMainLoop(
           kind: "thought-summary",
           payload: { summary: action.summary, kind: "finish" },
         });
+        await flushTraceSink(state, config, signals);
         break;
       } else {
         state.events.push({
@@ -645,13 +616,16 @@ async function runMainLoop(
           kind: "thought-summary",
           payload: { summary: action.summary, kind: "finish" },
         });
+        await flushTraceSink(state, config, signals);
         break;
       }
     }
 
     // Execute the step
     try {
-      const stepResult = await executeStep(state, action, config.provider, config.policyEngine);
+      const stepOpts: { actionRegistry?: ActionRegistry } = {};
+      if (actionRegistry) stepOpts.actionRegistry = actionRegistry;
+      const stepResult = await executeStep(state, action, config.provider, config.policyEngine, stepOpts);
       Object.assign(state, stepResult.state);
       signals.policyDenied = stepResult.policyDenied;
       signals.authWallHit = stepResult.authWallHit;
@@ -666,6 +640,7 @@ async function runMainLoop(
       ) {
         appendExtractedResultArtifact(state);
       }
+      await flushTraceSink(state, config, signals);
 
       if (stepResult.pendingApproval) {
         signals.awaitingApproval = true;
@@ -686,6 +661,7 @@ async function runMainLoop(
         payload: { message, code },
       });
       state.stepCount++;
+      await flushTraceSink(state, config, signals);
 
       if (isRecoverableStepError(message)) {
         consecutiveRecoverableErrors++;
@@ -745,6 +721,7 @@ async function finalizeExecution(
   }
 
   await appendSkillProposalEvents(state, config.skillDir, config.llmProvider);
+  await flushTraceSink(state, config, signals);
 
   return finalizeRun(state, finalizeOptions);
 }
@@ -760,13 +737,29 @@ async function executeWithState(
   session?: BrowserSession,
   initialState?: LoopState,
   approvedPendingAction?: ProposedAction,
+  actionRegistry?: ActionRegistry,
 ): Promise<LoopResult> {
-  const state = initialState ?? createLoopState(task, session!.id, session?.debugUrl ?? session?.liveUrl);
+  const loopOptions: { sessionConfig?: SessionConfig; profileId?: ProfileId } = {};
+  if (config.sessionInput?.sessionConfig) {
+    loopOptions.sessionConfig = config.sessionInput.sessionConfig;
+  }
+  if (session?.profileId) {
+    loopOptions.profileId = session.profileId;
+  } else if (config.sessionInput?.profileId) {
+    loopOptions.profileId = config.sessionInput.profileId;
+  }
 
-  const signals = await initializeState(state, config, initialState, approvedPendingAction);
+  const state = initialState ?? createLoopState(
+    task,
+    session!.id,
+    session?.debugUrl ?? session?.liveUrl,
+    loopOptions,
+  );
+
+  const signals = await initializeState(state, config, initialState, approvedPendingAction, actionRegistry);
 
   try {
-    await runMainLoop(state, config, turn, signals);
+    await runMainLoop(state, config, turn, signals, actionRegistry);
   } finally {
     // Always clean up the browser session
     if (!signals.awaitingApproval) {

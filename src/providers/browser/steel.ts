@@ -5,17 +5,29 @@ import type {
   BrowserRawRequest,
   BrowserSession,
   CreateSessionInput,
+  JsonObject,
   SessionId,
   SessionStatus,
 } from "../../shared/types.js";
-import { nowIsoUtc } from "../../shared/ids.js";
+import { createId, nowIsoUtc } from "../../shared/ids.js";
 import type { BrowserObserveInput, BrowserProvider } from "../../browser/bridge.js";
+import type { ActionHandler } from "../../agent/actions.js";
 
 export interface SteelProviderConfig {
   apiKey: string;
   baseUrl?: string;
   webSocketFactory?: (url: string) => WebSocketLike;
   cdpCommandTimeoutMs?: number;
+  onRetry?: (event: SteelRetryEvent) => void | Promise<void>;
+}
+
+export interface SteelRetryEvent {
+  operation: "createSession";
+  attempt: number;
+  maxRetries: number;
+  delayMs: number;
+  status: number;
+  message: string;
 }
 
 const DEFAULT_BASE_URL = "https://api.steel.dev/v1";
@@ -151,6 +163,7 @@ interface SteelCreateSessionBody {
   region?: string;
   useProxy?: boolean | Record<string, unknown>;
   solveCaptcha?: boolean;
+  userAgent?: string;
   timeout?: number;
   [key: string]: unknown;
 }
@@ -167,7 +180,25 @@ function buildCreateSessionBody(input: CreateSessionInput): SteelCreateSessionBo
     body.region = input.region;
   }
 
-  if (input.proxyCountryCode) {
+  // sessionConfig takes precedence over legacy proxyCountryCode
+  if (input.sessionConfig) {
+    const cfg = input.sessionConfig;
+    if (cfg.useProxy === true) {
+      body.useProxy = true;
+    } else if (cfg.useProxy === false) {
+      // Explicitly disable proxy
+      body.useProxy = false;
+    }
+    if (cfg.solveCaptcha === true) {
+      body.solveCaptcha = true;
+    }
+    if (typeof cfg.userAgent === "string") {
+      body.userAgent = cfg.userAgent;
+    }
+    if (typeof cfg.region === "string") {
+      body.region = cfg.region;
+    }
+  } else if (input.proxyCountryCode) {
     body.useProxy = {
       geolocation: { country: input.proxyCountryCode },
     };
@@ -193,12 +224,14 @@ export class SteelProvider implements BrowserProvider {
   private readonly baseUrl: string;
   private readonly webSocketFactory: (url: string) => WebSocketLike;
   private readonly cdpCommandTimeoutMs: number;
+  private readonly onRetry: ((event: SteelRetryEvent) => void | Promise<void>) | undefined;
 
   constructor(config: SteelProviderConfig) {
     this.apiKey = config.apiKey;
     this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
     this.webSocketFactory = config.webSocketFactory ?? ((url) => new WebSocket(url) as unknown as WebSocketLike);
     this.cdpCommandTimeoutMs = config.cdpCommandTimeoutMs ?? DEFAULT_CDP_COMMAND_TIMEOUT_MS;
+    this.onRetry = config.onRetry;
   }
 
   async createSession(input: CreateSessionInput = {}): Promise<BrowserSession> {
@@ -224,6 +257,14 @@ export class SteelProvider implements BrowserProvider {
         }
         if (attempt < maxRetries) {
           const delay = 500 * Math.pow(2, attempt);
+          await this.onRetry?.({
+            operation: "createSession",
+            attempt: attempt + 1,
+            maxRetries,
+            delayMs: delay,
+            status,
+            message: err instanceof Error ? err.message : String(err),
+          });
           await new Promise((resolve) => setTimeout(resolve, delay));
         }
       }
@@ -402,10 +443,19 @@ export class SteelProvider implements BrowserProvider {
 }
 
 const OBSERVE_SCRIPT = `(() => {
-  const visibleTexts = Array.from(document.querySelectorAll("body *"))
-    .map((node) => node.textContent?.trim() ?? "")
-    .filter((text) => text.length > 0)
-    .slice(0, 20);
+  const SKIP_TAGS = new Set(["SCRIPT","STYLE","NOSCRIPT","SVG","PATH","BR","HR"]);
+  const visibleTexts = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, {
+    acceptNode(node) {
+      return SKIP_TAGS.has(node.tagName) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  while (visibleTexts.length < 30 && walker.nextNode()) {
+    const el = walker.currentNode;
+    if (el.childElementCount > 0) continue;
+    const text = (el.textContent ?? "").trim();
+    if (text.length > 0 && text.length < 500) visibleTexts.push(text);
+  }
   const active = document.activeElement;
   return {
     url: window.location.href,
@@ -442,17 +492,14 @@ type CodeToken =
 const BLOCKED_GLOBAL_IDENTIFIERS = new Set([
   "eval",
   "Function",
-  "fetch",
-  "XMLHttpRequest",
-  "WebSocket",
   "importScripts",
 ]);
 
 const BLOCKED_MEMBER_PROPERTIES = new Map([
   ["navigator", new Set(["sendBeacon"])],
   ["document", new Set(["cookie"])],
-  ["window", new Set(["eval", "Function", "fetch", "XMLHttpRequest", "WebSocket", "importScripts"])],
-  ["globalThis", new Set(["eval", "Function", "fetch", "XMLHttpRequest", "WebSocket", "importScripts"])],
+  ["window", new Set(["eval", "Function", "importScripts"])],
+  ["globalThis", new Set(["eval", "Function", "importScripts"])],
 ]);
 
 function tokenizeCode(code: string): CodeToken[] {
@@ -816,6 +863,91 @@ export function createSteelProvider(
   if (config?.cdpCommandTimeoutMs) {
     providerConfig.cdpCommandTimeoutMs = config.cdpCommandTimeoutMs;
   }
+  if (config?.onRetry) {
+    providerConfig.onRetry = config.onRetry;
+  }
 
   return new SteelProvider(providerConfig);
+}
+
+// ---------------------------------------------------------------------------
+// Steel action handlers — provider-specific actions for the action registry
+// ---------------------------------------------------------------------------
+
+export function createSteelActionHandlers(): ActionHandler[] {
+  return [{
+    kind: "reconfigure",
+    description: 'For "reconfigure", set payload fields: useProxy (bool), solveCaptcha (bool), userAgent (string), region (string). Creates a new browser session with updated settings. Use when blocked by captcha (solveCaptcha: true), IP block (useProxy: true), or anti-bot detection.',
+    async execute(state, action, provider) {
+      const requested = action.payload as JsonObject | undefined;
+      const merged: Record<string, unknown> = { ...state.sessionConfig };
+
+      if (requested?.useProxy !== undefined) {
+        merged.useProxy = Boolean(requested.useProxy);
+      }
+      if (requested?.solveCaptcha !== undefined) {
+        merged.solveCaptcha = Boolean(requested.solveCaptcha);
+      }
+      if (typeof requested?.userAgent === "string") {
+        merged.userAgent = requested.userAgent;
+      }
+      if (typeof requested?.region === "string") {
+        merged.region = requested.region;
+      }
+
+      const oldSessionId = state.sessionId;
+
+      const sessionInput: CreateSessionInput = { sessionConfig: merged };
+      if (state.profileId) {
+        sessionInput.profileId = state.profileId;
+      }
+
+      const newSession = await provider.createSession(sessionInput);
+
+      try {
+        await provider.stopSession(oldSessionId);
+      } catch { /* best-effort */ }
+
+      state.sessionId = newSession.id;
+      state.sessionConfig = merged;
+      const liveUrl = newSession.liveUrl ?? newSession.debugUrl;
+      if (liveUrl) {
+        state.sessionLiveUrl = liveUrl;
+      }
+      if (newSession.profileId) {
+        state.profileId = newSession.profileId;
+      }
+
+      state.events.push({
+        id: createId("event"),
+        runId: state.run.id,
+        ts: nowIsoUtc(),
+        kind: "thought-summary",
+        payload: {
+          summary: action.summary,
+          kind: "reconfigure",
+          oldSessionId,
+          newSessionId: newSession.id,
+          config: merged as JsonObject,
+        },
+      });
+
+      // Auto-observe new session so agent sees about:blank
+      const observation = await provider.observe({ sessionId: state.sessionId });
+      const { toObservationPayload } = await import("../../browser/observe.js");
+      const { redactJsonObject } = await import("../../shared/redact.js");
+      state.events.push({
+        id: createId("event"),
+        runId: state.run.id,
+        ts: nowIsoUtc(),
+        kind: "observation",
+        payload: redactJsonObject(toObservationPayload(observation)),
+      });
+      if (observation.screenshotBase64) {
+        state.latestScreenshotBase64 = observation.screenshotBase64;
+      }
+
+      return {};
+    },
+  }];
 }

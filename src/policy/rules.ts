@@ -52,6 +52,11 @@ const SUBMIT_KINDS = new Set([
   "checkout",
 ]);
 
+const EXEC_RISK_APPROVAL_KINDS = new Set([
+  "unknown-mutation",
+  "download",
+]);
+
 const ACCOUNT_KINDS = new Set([
   "change-account",
   "change-billing",
@@ -120,6 +125,12 @@ export const BASELINE_RULES: PolicyRule[] = [
     (a) => SUBMIT_KINDS.has(a.kind),
   ),
   makeRule(
+    "baseline-exec-risk-mutation",
+    "Exec code with unknown mutation or download risk requires human approval.",
+    "require-approval",
+    (a) => EXEC_RISK_APPROVAL_KINDS.has(a.kind),
+  ),
+  makeRule(
     "baseline-account-billing-permission",
     "Account, billing, and permission changes require human approval.",
     "require-approval",
@@ -155,6 +166,17 @@ export const BASELINE_RULES: PolicyRule[] = [
     "require-approval",
     (a) => a.kind === "raw" && !isSafeCdpMethod(a.payload?.method as string | undefined),
   ),
+  makeRule(
+    "baseline-reconfigure-custom-proxy",
+    "Reconfigure with a custom proxy server requires human approval.",
+    "require-approval",
+    (a) => {
+      if (a.kind !== "reconfigure") return false;
+      const proxy = a.payload?.useProxy;
+      // Boolean useProxy is auto-allowed (recovery action); object with server URL requires approval
+      return typeof proxy === "object" && proxy !== null;
+    },
+  ),
 ];
 
 // ---------------------------------------------------------------------------
@@ -184,4 +206,104 @@ export function evaluateRules(
   }
 
   return { result: "allow", matchedRules };
+}
+
+// ---------------------------------------------------------------------------
+// Exec risk classification — pattern-based code risk detection
+// ---------------------------------------------------------------------------
+
+export type ExecRiskKind =
+  | "read"
+  | "navigate"
+  | "input"
+  | "submit"
+  | "download"
+  | "account-change"
+  | "delete"
+  | "unknown-mutation";
+
+export interface ExecRisk {
+  kind: ExecRiskKind;
+  reasons: string[];
+}
+
+const DELETE_PATTERNS = [
+  /\b(delete|remove|destroy|purge)\b/iu,
+  /\bmethod\s*:\s*["']DELETE["']/iu,
+];
+
+const ACCOUNT_PATTERNS = [
+  /\b(billing|permission|role|account|password|email)\b/iu,
+  /\b(change|update|grant|revoke|invite)\b/iu,
+];
+
+const SUBMIT_PATTERNS = [
+  /\.submit\s*\(/u,
+  /\brequestSubmit\s*\(/u,
+  /\bclick\s*\(\s*\)/u,
+  /\bmethod\s*:\s*["'](POST|PUT|PATCH)["']/iu,
+  /\b(purchase|checkout|pay|send)\b/iu,
+];
+
+const INPUT_PATTERNS = [
+  /\.value\s*=/u,
+  /\.checked\s*=/u,
+  /\bdispatchEvent\s*\(/u,
+  /\bInput\./u,
+];
+
+const DOWNLOAD_PATTERNS = [
+  /\bdownload\b/iu,
+  /URL\.createObjectURL/u,
+  /\.click\s*\(\s*\)/u,
+];
+
+const NAVIGATION_PATTERNS = [
+  /\bwindow\s*\.\s*location\b/u,
+  /\blocation\s*\.\s*(href|assign|replace|reload)\b/u,
+  /\blocation\s*=/u,
+  /\bdocument\s*\.\s*location\b/u,
+  /\bhistory\s*\.\s*(pushState|replaceState)\b/u,
+];
+
+const NETWORK_MUTATION_PATTERNS = [
+  /\bfetch\s*\([^)]*\bmethod\s*:\s*["'](POST|PUT|PATCH|DELETE)["']/isu,
+  /\bXMLHttpRequest\b[\s\S]*\b(open|send)\s*\(/iu,
+  /\bnavigator\s*\.\s*sendBeacon\s*\(/iu,
+  /\bWebSocket\s*\(/iu,
+];
+
+export function classifyExecRisk(code: string): ExecRisk {
+  const reasons: string[] = [];
+
+  if (DELETE_PATTERNS.some((pattern) => pattern.test(code))) {
+    return { kind: "delete", reasons: ["delete-like code pattern"] };
+  }
+
+  if (ACCOUNT_PATTERNS.every((pattern) => pattern.test(code))) {
+    return { kind: "account-change", reasons: ["account or billing mutation terms"] };
+  }
+
+  if (NETWORK_MUTATION_PATTERNS.some((pattern) => pattern.test(code))) {
+    return { kind: "unknown-mutation", reasons: ["network mutation or outbound channel"] };
+  }
+
+  if (SUBMIT_PATTERNS.some((pattern) => pattern.test(code))) {
+    return { kind: "submit", reasons: ["submit/click/payment/send pattern"] };
+  }
+
+  if (DOWNLOAD_PATTERNS.some((pattern) => pattern.test(code))) {
+    reasons.push("download-like pattern");
+    return { kind: "download", reasons };
+  }
+
+  if (INPUT_PATTERNS.some((pattern) => pattern.test(code))) {
+    return { kind: "input", reasons: ["input mutation pattern"] };
+  }
+
+  if (NAVIGATION_PATTERNS.some((pattern) => pattern.test(code))) {
+    return { kind: "navigate", reasons: ["navigation pattern"] };
+  }
+
+  return { kind: "read", reasons: ["no mutation pattern detected"] };
 }

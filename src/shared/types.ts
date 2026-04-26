@@ -19,6 +19,7 @@ export type RunClassificationKind =
   | "counterexample"
   | "ambiguous";
 export type HypothesisStatus = "active" | "supported" | "rejected" | "ambiguous";
+export type SkillStatus = "proposed" | "active" | "superseded" | "rejected";
 export type SkillScope = "domain" | "workflow" | "interaction";
 export type SkillSource = "builtin" | "team" | "generated";
 export type TraceEventKind =
@@ -57,7 +58,8 @@ export type ActionKind =
   | "branch-experiment"
   | "load-skill"
   | "propose-skill"
-  | "finish";
+  | "finish"
+  | (string & {});
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
@@ -164,10 +166,14 @@ export interface Hypothesis {
 export interface SkillMetadata {
   id: SkillId;
   scope: SkillScope;
+  status?: SkillStatus;
   hostnamePatterns?: string[];
   tags: string[];
   updatedAt: string;
   source: SkillSource;
+  confidence?: number;
+  sourceRunIds?: RunId[];
+  supersedes?: SkillId[];
 }
 
 export interface SkillFrontmatter extends SkillMetadata {
@@ -247,12 +253,15 @@ export interface BrowserRawRequest {
   params?: JsonObject;
 }
 
+export type SessionConfig = Record<string, unknown>;
+
 export interface CreateSessionInput {
   profileId?: ProfileId;
   region?: string;
   proxyCountryCode?: string | null;
   timeoutMinutes?: number;
   metadata?: JsonObject;
+  sessionConfig?: SessionConfig;
 }
 
 export interface PolicyDecision {

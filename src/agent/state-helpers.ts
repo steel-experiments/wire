@@ -1,4 +1,5 @@
-import type { ProposedAction, TraceEvent } from "../shared/types.js";
+import type { ArtifactId, JsonObject, ProposedAction, TraceEvent } from "../shared/types.js";
+import { createId, nowIsoUtc } from "../shared/ids.js";
 import type { LoopState } from "./loop.js";
 
 // ---------------------------------------------------------------------------
@@ -36,10 +37,51 @@ export function hasExtractedTaskResult(state: LoopState): boolean {
     return false;
   }
 
+  // Navigation-only results (e.g. {navigatedTo}, {navigated}) don't count
+  if (isNavigationOnlyResult(result)) {
+    return false;
+  }
+
   return (
     (typeof result.payload.stdout === "string" && result.payload.stdout.trim().length > 0) ||
     result.payload.returnValue !== undefined
   );
+}
+
+/** Detect code-results that only confirm navigation without extracting meaningful content. */
+export function isNavigationOnlyResult(event: TraceEvent): boolean {
+  const rv = event.payload.returnValue;
+  if (rv === undefined || rv === null || typeof rv === "string") return false;
+  if (typeof rv !== "object") return false;
+  const keys = Object.keys(rv as Record<string, unknown>);
+  if (keys.length === 0) return false;
+  const navKeys = new Set(["navigated", "navigatedTo", "url", "redirected", "loaded"]);
+  return keys.every((k) => navKeys.has(k));
+}
+
+/** True when a post-navigation extraction step has occurred (code-exec after navigation that produced real output).
+ *  Returns true if no navigation happened (nothing to guard against). */
+export function hasPostNavigationExtraction(state: LoopState): boolean {
+  const events = state.events;
+  let sawNavigation = false;
+  for (const e of events) {
+    if (e.kind === "code-exec" && typeof e.payload.code === "string" && isLikelyNavCode(e.payload.code)) {
+      sawNavigation = true;
+      continue;
+    }
+    if (sawNavigation && e.kind === "code-result" && e.payload.ok === true) {
+      // If this result has meaningful content beyond navigation confirmation, extraction happened
+      if (!isNavigationOnlyResult(e) && (e.payload.returnValue !== undefined || (typeof e.payload.stdout === "string" && e.payload.stdout.trim().length > 0))) {
+        return true;
+      }
+    }
+  }
+  // No navigation happened — nothing to guard against
+  return !sawNavigation;
+}
+
+function isLikelyNavCode(code: string): boolean {
+  return /\blocation\s*[.=]/u.test(code) || /\bwindow\.location\b/u.test(code);
 }
 
 export function hasAttemptedExtraction(state: LoopState): boolean {
@@ -159,5 +201,103 @@ export function buildGenericExtractionAction(): ProposedAction {
     payload: {
       code: "/* wire:extract */ return { title: document.title, url: location.href, text: document.body?.innerText?.slice(0, 5000) ?? '' }",
     },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Task completion helpers — artifact extraction and verification
+// ---------------------------------------------------------------------------
+
+export function appendExtractedResultArtifact(state: LoopState): void {
+  const result = latestCodeResult(state);
+  if (!result || result.payload.ok !== true) {
+    return;
+  }
+
+  const artifactId = createId("artifact") as ArtifactId;
+  let kind: "json-output" | "note" = "note";
+  let mimeType = "text/plain";
+  let extension = "txt";
+  let content: string | undefined;
+
+  if (result.payload.returnValue !== undefined) {
+    kind = "json-output";
+    mimeType = "application/json";
+    extension = "json";
+    content = JSON.stringify(result.payload.returnValue, null, 2);
+  } else if (typeof result.payload.stdout === "string" && result.payload.stdout.trim().length > 0) {
+    const stdout = result.payload.stdout.trim();
+    try {
+      const parsed = JSON.parse(stdout) as unknown;
+      if (parsed !== null && typeof parsed === "object") {
+        kind = "json-output";
+        mimeType = "application/json";
+        extension = "json";
+        content = JSON.stringify(parsed, null, 2);
+      } else {
+        content = stdout;
+      }
+    } catch {
+      content = stdout;
+    }
+  }
+
+  if (!content) {
+    return;
+  }
+
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: nowIsoUtc(),
+    kind: "artifact",
+    payload: {
+      artifactId,
+      kind,
+      mimeType,
+      path: `artifacts/${artifactId}.${extension}`,
+      content,
+    },
+  });
+}
+
+export function appendTaskNoteArtifact(state: LoopState, summary: string): void {
+  const artifactId = createId("artifact") as ArtifactId;
+  const observation = latestObservation(state);
+  const lines = [summary.trim()];
+
+  if (observation) {
+    const title = typeof observation.payload.title === "string" ? observation.payload.title : undefined;
+    const url = typeof observation.payload.url === "string" ? observation.payload.url : undefined;
+    if (title) {
+      lines.push(`Title: ${title}`);
+    }
+    if (url) {
+      lines.push(`URL: ${url}`);
+    }
+  }
+
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: nowIsoUtc(),
+    kind: "artifact",
+    payload: {
+      artifactId,
+      kind: "note",
+      mimeType: "text/plain",
+      path: `artifacts/${artifactId}.txt`,
+      content: lines.join("\n"),
+    },
+  });
+}
+
+export function buildVerificationAction(): ProposedAction {
+  return {
+    kind: "exec",
+    summary: "Verify current task result",
+    payload: {
+      code: "/* wire:extract wire:verify */ return { ok: true, evidence: { title: document.title, url: location.href, text: document.body?.innerText?.slice(0, 5000) ?? '' }, reason: 'Captured current page state for task verification' }",
+    } satisfies JsonObject,
   };
 }

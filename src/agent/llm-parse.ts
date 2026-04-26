@@ -6,7 +6,7 @@ import type { LoopState } from "./loop.js";
 // Action kinds the LLM is allowed to produce
 // ---------------------------------------------------------------------------
 
-export const ACTION_KINDS = new Set<ProposedAction["kind"]>([
+const ACTION_KINDS: Set<string> = new Set([
   "observe",
   "exec",
   "raw",
@@ -16,6 +16,12 @@ export const ACTION_KINDS = new Set<ProposedAction["kind"]>([
   "propose-skill",
   "finish",
 ]);
+
+export function registerActionKind(kind: string): void {
+  ACTION_KINDS.add(kind);
+}
+
+export { ACTION_KINDS };
 
 // ---------------------------------------------------------------------------
 // parseActionFromLlm — extract a ProposedAction from LLM text output

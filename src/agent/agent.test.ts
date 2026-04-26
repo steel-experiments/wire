@@ -9,6 +9,7 @@ import type {
   BrowserExecRequest,
   BrowserExecResult,
   BrowserObservation,
+  BrowserSession,
   SessionId,
   Task,
   TraceEvent,
@@ -26,6 +27,11 @@ import {
   shouldStop,
 } from "./loop.js";
 import type { LoopState, StopConditions } from "./loop.js";
+import { ActionRegistry } from "./actions.js";
+import {
+  isNavigationOnlyResult,
+  hasPostNavigationExtraction,
+} from "./state-helpers.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -911,6 +917,42 @@ test("executeTask forces a generic extraction pass before finishing task mode", 
   assert.match(String(artifactEvent.payload.content ?? ""), /"Hotel One"/u);
 });
 
+test("executeTask streams trace events to an optional sink", async () => {
+  const task = makeTask({ objective: "Observe and finish" });
+  const sessionId = makeSessionId();
+  const streamed: TraceEvent[] = [];
+  const provider = createMockProvider({
+    async createSession() {
+      return {
+        id: sessionId,
+        provider: "custom",
+        createdAt: new Date().toISOString(),
+        status: "ready",
+      };
+    },
+    async stopSession() {},
+  });
+
+  const result = await executeTask(
+    task,
+    {
+      provider,
+      policyEngine: createMockPolicyEngine(),
+      maxSteps: 2,
+      traceSink: {
+        onEvent(event) {
+          streamed.push(event);
+        },
+      },
+    },
+    async () => ({ kind: "finish", summary: "Done" }),
+  );
+
+  assert.ok(streamed.length > 0);
+  assert.equal(streamed.length, result.events.length);
+  assert.equal(streamed[0]!.kind, "observation");
+});
+
 test("executeTask retries after a recoverable step error when budget remains", async () => {
   const task = makeTask({ objective: "Recover from transient browser error" });
   const sessionId = makeSessionId();
@@ -1770,4 +1812,291 @@ test("executeStep falls back to sequential execRaw when rawBatch unavailable", a
   assert.equal(codeResults.length, 2);
   assert.equal(codeResults[1]!.payload.source, "wireActions");
   assert.equal(codeResults[1]!.payload.commandsExecuted, 2);
+});
+
+// ---------------------------------------------------------------------------
+// isNavigationOnlyResult
+// ---------------------------------------------------------------------------
+
+test("isNavigationOnlyResult identifies navigation-only return values", () => {
+  const makeEvent = (returnValue: unknown) => ({
+    id: createId("event"),
+    runId: "run_test" as never,
+    ts: new Date().toISOString(),
+    kind: "code-result" as const,
+    payload: { ok: true, returnValue, durationMs: 10 },
+  });
+
+  assert.equal(isNavigationOnlyResult(makeEvent({ navigatedTo: "https://weather.com" })), true);
+  assert.equal(isNavigationOnlyResult(makeEvent({ navigated: true })), true);
+  assert.equal(isNavigationOnlyResult(makeEvent({ url: "https://example.com", redirected: "https://other.com" })), true);
+  assert.equal(isNavigationOnlyResult(makeEvent({ temperature: "43°F" })), false);
+  assert.equal(isNavigationOnlyResult(makeEvent({ navigatedTo: "https://weather.com", temperature: "43°F" })), false);
+  assert.equal(isNavigationOnlyResult(makeEvent("just a string")), false);
+  assert.equal(isNavigationOnlyResult(makeEvent(null)), false);
+});
+
+// ---------------------------------------------------------------------------
+// hasPostNavigationExtraction
+// ---------------------------------------------------------------------------
+
+test("hasPostNavigationExtraction returns true when no navigation occurred", () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  state.events.push(
+    { id: createId("event"), runId: state.run.id, ts: new Date().toISOString(), kind: "code-exec", payload: { code: "return document.title" } },
+    { id: createId("event"), runId: state.run.id, ts: new Date().toISOString(), kind: "code-result", payload: { ok: true, stdout: "My Page", durationMs: 10 } },
+  );
+  assert.equal(hasPostNavigationExtraction(state), true);
+});
+
+test("hasPostNavigationExtraction returns false after navigation with no extraction", () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  state.events.push(
+    { id: createId("event"), runId: state.run.id, ts: new Date().toISOString(), kind: "code-exec", payload: { code: "window.location.href='https://weather.com'; return {navigatedTo:'https://weather.com'}" } },
+    { id: createId("event"), runId: state.run.id, ts: new Date().toISOString(), kind: "code-result", payload: { ok: true, returnValue: { navigatedTo: "https://weather.com" }, durationMs: 10 } },
+  );
+  assert.equal(hasPostNavigationExtraction(state), false);
+});
+
+test("hasPostNavigationExtraction returns true after navigation + real extraction", () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  state.events.push(
+    { id: createId("event"), runId: state.run.id, ts: new Date().toISOString(), kind: "code-exec", payload: { code: "window.location.href='https://weather.com'" } },
+    { id: createId("event"), runId: state.run.id, ts: new Date().toISOString(), kind: "code-result", payload: { ok: true, returnValue: { navigated: true }, durationMs: 10 } },
+    { id: createId("event"), runId: state.run.id, ts: new Date().toISOString(), kind: "code-exec", payload: { code: "return { temp: document.querySelector('.temp').textContent }" } },
+    { id: createId("event"), runId: state.run.id, ts: new Date().toISOString(), kind: "code-result", payload: { ok: true, returnValue: { temp: "43°F" }, durationMs: 10 } },
+  );
+  assert.equal(hasPostNavigationExtraction(state), true);
+});
+
+// ---------------------------------------------------------------------------
+// Extraction guard in executeTask
+// ---------------------------------------------------------------------------
+
+test("executeTask forces verification when agent finishes after navigation-only code", async () => {
+  const task = makeTask({ objective: "Get NYC temperature" });
+  const sessionId = makeSessionId();
+  let execCount = 0;
+  const provider = createMockProvider({
+    async createSession() {
+      return { id: sessionId, provider: "custom", createdAt: new Date().toISOString(), status: "ready" };
+    },
+    async exec(): Promise<BrowserExecResult> {
+      execCount++;
+      return { ok: true, returnValue: { navigatedTo: "https://weather.com" }, durationMs: 10 };
+    },
+    async stopSession() {},
+  });
+
+  const result = await executeTask(
+    task,
+    { provider, policyEngine: createMockPolicyEngine(), maxSteps: 5 },
+    async (state) => {
+      if (state.stepCount === 0) {
+        return { kind: "exec", summary: "Navigate", payload: { code: "window.location.href='https://weather.com'; return {navigatedTo:'https://weather.com'}" } };
+      }
+      return { kind: "finish", summary: "Temperature found" };
+    },
+  );
+
+  // Agent should have been forced to run verification, not allowed to finish immediately
+  assert.ok(execCount >= 2, `expected execCount >= 2, got ${execCount}`);
+  const codeExecs = result.events.filter((e) => e.kind === "code-exec");
+  assert.ok(codeExecs.length >= 2, "should have at least 2 code-exec events (navigate + verify)");
+});
+
+// ---------------------------------------------------------------------------
+// executeStep — reconfigure action
+// ---------------------------------------------------------------------------
+
+test("executeStep reconfigure creates new session, stops old, updates state", async () => {
+  const task = makeTask();
+  const oldSessionId = makeSessionId();
+  const newSessionId = makeSessionId();
+  const state = createLoopState(task, oldSessionId);
+
+  let createdSessionInput: import("../shared/types.js").CreateSessionInput | undefined;
+  let stoppedSessionId: SessionId | undefined;
+
+  const provider = createMockProvider({
+    async createSession(input) {
+      createdSessionInput = input;
+      return {
+        id: newSessionId,
+        provider: "steel",
+        createdAt: new Date().toISOString(),
+        status: "ready",
+        liveUrl: "https://viewer.steel.dev/new-session",
+        profileId: "profile_test" as never,
+      } satisfies BrowserSession;
+    },
+    async stopSession(id) {
+      stoppedSessionId = id;
+    },
+  });
+  const policy = createMockPolicyEngine();
+
+  // Register reconfigure handler in the action registry
+  const registry = new ActionRegistry();
+  registry.register({
+    kind: "reconfigure",
+    description: "test reconfigure",
+    async execute(s, action, prov) {
+      const requested = action.payload as import("../shared/types.js").JsonObject | undefined;
+      const merged: Record<string, unknown> = { ...s.sessionConfig };
+      if (requested?.useProxy !== undefined) merged.useProxy = Boolean(requested.useProxy);
+      if (requested?.solveCaptcha !== undefined) merged.solveCaptcha = Boolean(requested.solveCaptcha);
+      if (typeof requested?.userAgent === "string") merged.userAgent = requested.userAgent;
+      if (typeof requested?.region === "string") merged.region = requested.region;
+
+      const oldSid = s.sessionId;
+      const input: import("../shared/types.js").CreateSessionInput = { sessionConfig: merged };
+      if (s.profileId) input.profileId = s.profileId;
+      const newSession = await prov.createSession(input);
+      try { await prov.stopSession(oldSid); } catch { /* best-effort */ }
+
+      s.sessionId = newSession.id;
+      s.sessionConfig = merged;
+      if (newSession.liveUrl) s.sessionLiveUrl = newSession.liveUrl;
+      if (newSession.profileId) s.profileId = newSession.profileId;
+
+      s.events.push({
+        id: createId("event"),
+        runId: s.run.id,
+        ts: new Date().toISOString(),
+        kind: "thought-summary",
+        payload: { summary: action.summary, kind: "reconfigure", oldSessionId: oldSid, newSessionId: newSession.id, config: merged as import("../shared/types.js").JsonObject },
+      });
+
+      const observation = await prov.observe({ sessionId: s.sessionId });
+      s.events.push({
+        id: createId("event"),
+        runId: s.run.id,
+        ts: new Date().toISOString(),
+        kind: "observation",
+        payload: { url: observation.url, title: observation.title },
+      });
+      return {};
+    },
+  });
+
+  const result = await executeStep(
+    state,
+    {
+      kind: "reconfigure",
+      summary: "Enable proxy and captcha solver",
+      payload: { useProxy: true, solveCaptcha: true },
+    },
+    provider,
+    policy,
+    { actionRegistry: registry },
+  );
+
+  assert.equal(result.policyDenied, false);
+  assert.equal(result.state.sessionId, newSessionId, "sessionId should be updated");
+  assert.equal(result.state.sessionLiveUrl, "https://viewer.steel.dev/new-session");
+  assert.equal(result.state.sessionConfig?.useProxy, true);
+  assert.equal(result.state.sessionConfig?.solveCaptcha, true);
+  assert.equal(stoppedSessionId, oldSessionId, "old session should be stopped");
+
+  // Check session config was passed to createSession
+  assert.ok(createdSessionInput);
+  assert.equal(createdSessionInput!.sessionConfig?.useProxy, true);
+  assert.equal(createdSessionInput!.sessionConfig?.solveCaptcha, true);
+
+  // Trace events: thought-summary (reconfigure), observation (auto-observe)
+  const events = result.state.events;
+  const reconfigureEvent = events.find((e) => e.kind === "thought-summary" && e.payload.kind === "reconfigure");
+  assert.ok(reconfigureEvent, "should have a reconfigure trace event");
+  assert.equal(reconfigureEvent!.payload.oldSessionId, oldSessionId);
+  assert.equal(reconfigureEvent!.payload.newSessionId, newSessionId);
+
+  // Auto-observation
+  const observations = events.filter((e) => e.kind === "observation");
+  assert.ok(observations.length >= 1, "should auto-observe new session");
+
+  assert.equal(result.state.stepCount, 1);
+});
+
+test("executeStep reconfigure merges with existing sessionConfig", async () => {
+  const task = makeTask();
+  const oldSessionId = makeSessionId();
+  const newSessionId = makeSessionId();
+  const state = createLoopState(task, oldSessionId, undefined, {
+    sessionConfig: { useProxy: true, region: "us-east-1" },
+  });
+
+  let createdSessionInput: import("../shared/types.js").CreateSessionInput | undefined;
+  const provider = createMockProvider({
+    async createSession(input) {
+      createdSessionInput = input;
+      return {
+        id: newSessionId,
+        provider: "steel",
+        createdAt: new Date().toISOString(),
+        status: "ready",
+      } satisfies BrowserSession;
+    },
+    async stopSession() {},
+  });
+  const policy = createMockPolicyEngine();
+
+  // Register reconfigure handler in the action registry
+  const registry = new ActionRegistry();
+  registry.register({
+    kind: "reconfigure",
+    description: "test reconfigure",
+    async execute(s, action, prov) {
+      const requested = action.payload as import("../shared/types.js").JsonObject | undefined;
+      const merged: Record<string, unknown> = { ...s.sessionConfig };
+      if (requested?.useProxy !== undefined) merged.useProxy = Boolean(requested.useProxy);
+      if (requested?.solveCaptcha !== undefined) merged.solveCaptcha = Boolean(requested.solveCaptcha);
+      if (typeof requested?.userAgent === "string") merged.userAgent = requested.userAgent;
+      if (typeof requested?.region === "string") merged.region = requested.region;
+
+      const oldSid = s.sessionId;
+      const input: import("../shared/types.js").CreateSessionInput = { sessionConfig: merged };
+      if (s.profileId) input.profileId = s.profileId;
+      const newSession = await prov.createSession(input);
+      try { await prov.stopSession(oldSid); } catch { /* best-effort */ }
+
+      s.sessionId = newSession.id;
+      s.sessionConfig = merged;
+      if (newSession.liveUrl) s.sessionLiveUrl = newSession.liveUrl;
+
+      s.events.push({
+        id: createId("event"),
+        runId: s.run.id,
+        ts: new Date().toISOString(),
+        kind: "thought-summary",
+        payload: { summary: action.summary, kind: "reconfigure", config: merged as import("../shared/types.js").JsonObject },
+      });
+      return {};
+    },
+  });
+
+  const result = await executeStep(
+    state,
+    {
+      kind: "reconfigure",
+      summary: "Enable captcha solver",
+      payload: { solveCaptcha: true },
+    },
+    provider,
+    policy,
+    { actionRegistry: registry },
+  );
+
+  // Should merge: useProxy from initial + solveCaptcha from reconfigure
+  assert.equal(result.state.sessionConfig?.useProxy, true, "useProxy should persist from initial config");
+  assert.equal(result.state.sessionConfig?.solveCaptcha, true, "solveCaptcha should be added from reconfigure");
+  assert.equal(result.state.sessionConfig?.region, "us-east-1", "region should persist from initial config");
+
+  // Verify merged config was sent to createSession
+  assert.equal(createdSessionInput!.sessionConfig?.useProxy, true);
+  assert.equal(createdSessionInput!.sessionConfig?.solveCaptcha, true);
+  assert.equal(createdSessionInput!.sessionConfig?.region, "us-east-1");
 });
