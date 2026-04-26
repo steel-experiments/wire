@@ -10,6 +10,7 @@ import type {
   BrowserExecResult,
   BrowserObservation,
   BrowserSession,
+  JsonValue,
   SessionId,
   Task,
   TraceEvent,
@@ -854,7 +855,7 @@ test("executeTask persists a task note artifact when finishing without extracted
   assert.equal(result.classification.kind, "partial-success");
   const noteArtifact = result.events.find((event) =>
     event.kind === "artifact" &&
-    event.payload.kind === "note" &&
+    event.payload.kind === "task-summary" &&
     typeof event.payload.content === "string"
   );
   assert.ok(noteArtifact);
@@ -1055,7 +1056,7 @@ test("executeTask persists failure note artifact for task runs that stop on erro
   assert.match(result.run.result ?? "", /Run stopped with error: Target not found: page/u);
   const noteArtifact = result.events.find((event) =>
     event.kind === "artifact" &&
-    event.payload.kind === "note" &&
+    event.payload.kind === "task-summary" &&
     typeof event.payload.content === "string"
   );
   assert.ok(noteArtifact);
@@ -1819,7 +1820,7 @@ test("executeStep falls back to sequential execRaw when rawBatch unavailable", a
 // ---------------------------------------------------------------------------
 
 test("isNavigationOnlyResult identifies navigation-only return values", () => {
-  const makeEvent = (returnValue: unknown) => ({
+  const makeEvent = (returnValue: JsonValue): TraceEvent => ({
     id: createId("event"),
     runId: "run_test" as never,
     ts: new Date().toISOString(),

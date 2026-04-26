@@ -227,6 +227,10 @@ export function classifyRun(input: ClassificationInput): RunClassification {
   }
 
   const artifactCount = events.filter((e) => e.kind === "artifact").length;
+  // Only count substantive artifacts (extracted data), not synthetic task summaries
+  const answerArtifactCount = events.filter(
+    (e) => e.kind === "artifact" && e.payload.kind !== "task-summary",
+  ).length;
   const observationCount = events.filter((e) => e.kind === "observation").length;
 
   const codeSuccessCount = events.filter(
@@ -277,7 +281,7 @@ export function classifyRun(input: ClassificationInput): RunClassification {
   const addressesObjective = !objectiveRelevant || resultAddressesObjective(finalResultText, objective!);
 
   if (codeSuccessCount > 0 && codeFailCount === 0) {
-    const hasAnswerArtifact = artifactCount > 0 || (terminalEventHasExtractedAnswer && !terminalIsNavOnly);
+    const hasAnswerArtifact = answerArtifactCount > 0 || (terminalEventHasExtractedAnswer && !terminalIsNavOnly);
     const taskModeHasCompletionEvidence = mode === "task"
       ? hasAnswerArtifact && codeSuccessWithOutputCount > 0
       : hasEvidence && (terminalEventIsEvidence || terminalEventHasExtractedAnswer);
@@ -314,7 +318,7 @@ export function classifyRun(input: ClassificationInput): RunClassification {
 
   // Partial success — but if the run recovered and has a real answer artifact, count it complete
   if (codeSuccessCount > 0 && codeFailCount > 0) {
-    const hasAnswerArtifact = artifactCount > 0 && codeSuccessWithOutputCount > 0;
+    const hasAnswerArtifact = answerArtifactCount > 0 && codeSuccessWithOutputCount > 0;
     if (mode === "task" && hasAnswerArtifact && addressesObjective) {
       return applyStagnationDowngrade({
         kind: "task-complete",

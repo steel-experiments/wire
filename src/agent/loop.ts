@@ -28,6 +28,7 @@ import { classifyRun, generateOutcomeSummary } from "./classify.js";
 import { detectAuthWall } from "../profiles/auth.js";
 import { redactJsonObject } from "../shared/redact.js";
 import { countConsecutiveUnchanged } from "./state-helpers.js";
+import type { ActionExecutionContext } from "./actions.js";
 
 // ---------------------------------------------------------------------------
 // Loop state — decomposed by time scale
@@ -183,7 +184,11 @@ export async function executeStep(
   action: ProposedAction,
   provider: BrowserProvider,
   policyEngine: PolicyEngine,
-  options: { skipPolicyCheck?: boolean; actionRegistry?: import("./actions.js").ActionRegistry } = {},
+  options: {
+    skipPolicyCheck?: boolean;
+    actionRegistry?: import("./actions.js").ActionRegistry;
+    actionContext?: ActionExecutionContext;
+  } = {},
 ): Promise<{
   state: LoopState;
   policyDenied: boolean;
@@ -512,7 +517,7 @@ export async function executeStep(
     default: {
       const handler = options.actionRegistry?.get(action.kind);
       if (handler) {
-        const result = await handler.execute(state, action, provider);
+        const result = await handler.execute(state, action, provider, options.actionContext);
         if (result.authWallHit) authWallHit = true;
         break;
       }
@@ -572,7 +577,7 @@ export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | 
   if (mode === "task") {
     const latestNoteArtifact = [...events].reverse().find((event) =>
       event.kind === "artifact" &&
-      event.payload.kind === "note" &&
+      (event.payload.kind === "note" || event.payload.kind === "task-summary") &&
       typeof event.payload.content === "string" &&
       event.payload.content.trim().length > 0
     );

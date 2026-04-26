@@ -284,7 +284,7 @@ export function appendTaskNoteArtifact(state: LoopState, summary: string): void 
     kind: "artifact",
     payload: {
       artifactId,
-      kind: "note",
+      kind: "task-summary",
       mimeType: "text/plain",
       path: `artifacts/${artifactId}.txt`,
       content: lines.join("\n"),
