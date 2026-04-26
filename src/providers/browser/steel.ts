@@ -6,6 +6,7 @@ import type {
   BrowserSession,
   CreateSessionInput,
   JsonObject,
+  SessionConfig,
   SessionId,
   SessionStatus,
 } from "../../shared/types.js";
@@ -163,7 +164,11 @@ interface SteelCreateSessionBody {
   region?: string;
   useProxy?: boolean | Record<string, unknown>;
   solveCaptcha?: boolean;
+  stealth?: boolean;
   userAgent?: string;
+  locale?: string;
+  timezone?: string;
+  viewport?: { width: number; height: number };
   timeout?: number;
   [key: string]: unknown;
 }
@@ -183,20 +188,32 @@ function buildCreateSessionBody(input: CreateSessionInput): SteelCreateSessionBo
   // sessionConfig takes precedence over legacy proxyCountryCode
   if (input.sessionConfig) {
     const cfg = input.sessionConfig;
-    if (cfg.useProxy === true) {
-      body.useProxy = true;
-    } else if (cfg.useProxy === false) {
-      // Explicitly disable proxy
-      body.useProxy = false;
+    if (cfg.useProxy !== undefined) {
+      body.useProxy = cfg.useProxy as boolean | Record<string, unknown>;
     }
-    if (cfg.solveCaptcha === true) {
-      body.solveCaptcha = true;
+    if (cfg.solveCaptcha !== undefined) {
+      body.solveCaptcha = cfg.solveCaptcha;
+    }
+    if (cfg.stealth !== undefined) {
+      body.stealth = cfg.stealth;
     }
     if (typeof cfg.userAgent === "string") {
       body.userAgent = cfg.userAgent;
     }
     if (typeof cfg.region === "string") {
       body.region = cfg.region;
+    }
+    if (typeof cfg.locale === "string") {
+      body.locale = cfg.locale;
+    }
+    if (typeof cfg.timezone === "string") {
+      body.timezone = cfg.timezone;
+    }
+    if (cfg.viewport) {
+      body.viewport = cfg.viewport;
+    }
+    if (cfg.providerOptions) {
+      Object.assign(body, cfg.providerOptions);
     }
   } else if (input.proxyCountryCode) {
     body.useProxy = {
@@ -874,25 +891,56 @@ export function createSteelProvider(
 // Steel action handlers — provider-specific actions for the action registry
 // ---------------------------------------------------------------------------
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readProxyConfig(value: unknown): SessionConfig["useProxy"] | undefined {
+  if (typeof value === "boolean") return value;
+  if (!isRecord(value)) return undefined;
+
+  const proxy: Exclude<SessionConfig["useProxy"], boolean | undefined> = {};
+  if (isRecord(value["geolocation"]) && typeof value["geolocation"]["country"] === "string") {
+    proxy.geolocation = { country: value["geolocation"]["country"] };
+  }
+  if (typeof value["server"] === "string") {
+    proxy.server = value["server"];
+  }
+  return proxy.geolocation || proxy.server ? proxy : undefined;
+}
+
 export function createSteelActionHandlers(): ActionHandler[] {
   return [{
     kind: "reconfigure",
-    description: 'For "reconfigure", set payload fields: useProxy (bool), solveCaptcha (bool), userAgent (string), region (string). Creates a new browser session with updated settings. Use when blocked by captcha (solveCaptcha: true), IP block (useProxy: true), or anti-bot detection.',
-    async execute(state, action, provider) {
+    description: 'For "reconfigure", set payload fields: useProxy (bool or approved proxy object), solveCaptcha (bool), stealth (bool), userAgent (string), region (string), locale (string), timezone (string), viewport ({width,height}). Creates a new browser session with updated settings. Use when blocked by captcha, IP block, or anti-bot detection.',
+    async execute(state, action, provider, context) {
       const requested = action.payload as JsonObject | undefined;
-      const merged: Record<string, unknown> = { ...state.sessionConfig };
+      const merged: SessionConfig = { ...state.sessionConfig };
 
       if (requested?.useProxy !== undefined) {
-        merged.useProxy = Boolean(requested.useProxy);
+        const useProxy = readProxyConfig(requested.useProxy);
+        if (useProxy !== undefined) merged.useProxy = useProxy;
       }
       if (requested?.solveCaptcha !== undefined) {
         merged.solveCaptcha = Boolean(requested.solveCaptcha);
+      }
+      if (requested?.stealth !== undefined) {
+        merged.stealth = Boolean(requested.stealth);
       }
       if (typeof requested?.userAgent === "string") {
         merged.userAgent = requested.userAgent;
       }
       if (typeof requested?.region === "string") {
         merged.region = requested.region;
+      }
+      if (typeof requested?.locale === "string") {
+        merged.locale = requested.locale;
+      }
+      if (typeof requested?.timezone === "string") {
+        merged.timezone = requested.timezone;
+      }
+      if (isRecord(requested?.viewport) && typeof requested.viewport["width"] === "number" && typeof requested.viewport["height"] === "number") {
+        merged.viewport = { width: requested.viewport["width"], height: requested.viewport["height"] };
       }
 
       const oldSessionId = state.sessionId;
@@ -903,6 +951,11 @@ export function createSteelActionHandlers(): ActionHandler[] {
       }
 
       const newSession = await provider.createSession(sessionInput);
+      await context?.onSessionReconfigured?.({
+        oldSessionId,
+        newSession,
+        summary: action.summary,
+      });
 
       try {
         await provider.stopSession(oldSessionId);

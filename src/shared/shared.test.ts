@@ -120,6 +120,12 @@ test("provider input and output schemas validate browser boundaries", () => {
       proxyCountryCode: "US",
       timeoutMinutes: 30,
       metadata: { experiment: "warm-profile" },
+      sessionConfig: {
+        useProxy: { geolocation: { country: "US" } },
+        solveCaptcha: true,
+        stealth: true,
+        viewport: { width: 1280, height: 720 },
+      },
     },
     "create-session-input",
   );
@@ -171,6 +177,7 @@ test("provider input and output schemas validate browser boundaries", () => {
   );
 
   assert.equal(sessionInput.proxyCountryCode, "US");
+  assert.equal(sessionInput.sessionConfig?.solveCaptcha, true);
   assert.deepEqual(execRequest.target, { tabId: "tab-1" });
   assert.equal(execResult.ok, true);
   assert.equal(observation.tabs.length, 1);

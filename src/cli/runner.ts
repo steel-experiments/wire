@@ -27,6 +27,7 @@ import { shouldBranch } from "../agent/branching.js";
 import { createHypothesis } from "../experiments/hypotheses.js";
 import { buildExperimentSummary, formatExperimentSummary } from "../experiments/summaries.js";
 import type { LlmProvider } from "./config.js";
+import type { SessionConfig } from "../shared/types.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Artifact, TraceEvent } from "../shared/types.js";
@@ -69,6 +70,7 @@ export interface RunOptions {
   model?: string;
   maxSteps?: number;
   skillDir?: string;
+  sessionConfig?: SessionConfig;
   json?: boolean;
   yes?: boolean;
 }
@@ -164,7 +166,7 @@ function defaultMaxSteps(mode: "task" | "investigate" | "experiment"): number {
 }
 
 function createRuntimeConfig(
-  options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "provider" | "model" | "yes" | "json" | "mode">,
+  options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "sessionConfig" | "provider" | "model" | "yes" | "json" | "mode">,
 ): RuntimeConfig {
   let policyEngine: PolicyEngine = createPolicyEngine();
   if (options.yes) {
@@ -186,6 +188,19 @@ function createRuntimeConfig(
       }
       await saveSession(defaultStorageRoot(), session);
     },
+    async onSessionReconfigured({ oldSessionId, newSession, summary }) {
+      const url = newSession.debugUrl ?? newSession.liveUrl;
+      if (!isJson) {
+        console.log(`Session reconfigured: ${summary}`);
+        console.log(`Old session: ${oldSessionId}`);
+        console.log(`New session: ${newSession.id}`);
+        if (url) {
+          console.log(`Debug URL:    ${url}`);
+        }
+        console.log("");
+      }
+      await saveSession(defaultStorageRoot(), newSession);
+    },
   };
 
   const llmProvider = createLlmProvider(options.provider, options.model);
@@ -193,8 +208,10 @@ function createRuntimeConfig(
     config.llmProvider = llmProvider;
   }
   config.skillDir = options.skillDir ?? "./skills";
-  if (options.profileId) {
-    config.sessionInput = { profileId: options.profileId as never };
+  if (options.profileId || options.sessionConfig) {
+    config.sessionInput = {};
+    if (options.profileId) config.sessionInput.profileId = options.profileId as never;
+    if (options.sessionConfig) config.sessionInput.sessionConfig = options.sessionConfig;
   }
 
   return config;

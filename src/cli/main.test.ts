@@ -331,6 +331,91 @@ test("main run reports invalid task-file JSON as structured JSON failure", async
 // parseArgs — --json flag
 // ---------------------------------------------------------------------------
 
+test("main with no args prints help instead of error", async () => {
+  const lines: string[] = [];
+  const errors: string[] = [];
+  const originalLog = console.log;
+  const originalError = console.error;
+  console.log = (value?: unknown) => {
+    lines.push(String(value ?? ""));
+  };
+  console.error = (value?: unknown) => {
+    errors.push(String(value ?? ""));
+  };
+
+  try {
+    await main(["node", "wire"]);
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+  }
+
+  assert.equal(errors.length, 0);
+  assert.ok(lines.some((line) => line.includes("wire - zero-weight browser agent")));
+  assert.ok(lines.some((line) => line.includes("Commands:")));
+  assert.ok(lines.some((line) => line.includes("--objective")));
+});
+
+test("parseArgs treats positional arg as objective", () => {
+  const args = parseArgs(["node", "wire", "get", "the", "title", "of", "steel.dev"]);
+
+  assert.equal(args.command, "run");
+  assert.equal(args.objective, "get the title of steel.dev");
+});
+
+test("parseArgs preserves quoted positional objective", () => {
+  const args = parseArgs(["node", "wire", "get the title of steel.dev"]);
+
+  assert.equal(args.command, "run");
+  assert.equal(args.objective, "get the title of steel.dev");
+});
+
+test("parseArgs treats words after run command as objective", () => {
+  const args = parseArgs(["node", "wire", "run", "get", "the", "title"]);
+
+  assert.equal(args.command, "run");
+  assert.equal(args.objective, "get the title");
+});
+
+test("parseArgs does not override --objective with positional", () => {
+  const args = parseArgs(["node", "wire", "--objective", "explicit", "ignored", "words"]);
+
+  assert.equal(args.objective, "explicit");
+});
+
+test("parseArgs parses browser session option flags", () => {
+  const args = parseArgs([
+    "node",
+    "wire",
+    "--use-proxy",
+    "--solve-captcha",
+    "--stealth",
+    "--region",
+    "us-east-1",
+    "--user-agent",
+    "Mozilla/5.0",
+    "get",
+    "title",
+  ]);
+
+  assert.equal(args.objective, "get title");
+  assert.equal(args.useProxy, true);
+  assert.equal(args.solveCaptcha, true);
+  assert.equal(args.stealth, true);
+  assert.equal(args.region, "us-east-1");
+  assert.equal(args.userAgent, "Mozilla/5.0");
+});
+
+test("parseArgs positional is not confused by flags or commands", () => {
+  const a = parseArgs(["node", "wire", "list"]);
+  assert.equal(a.command, "list");
+  assert.equal(a.objective, undefined);
+
+  const b = parseArgs(["node", "wire", "--json"]);
+  assert.equal(b.command, "run");
+  assert.equal(b.objective, undefined);
+});
+
 test("parseArgs parses --json flag as true", () => {
   const args = parseArgs(["node", "wire", "review", "--run-id", "run_test123", "--json"]);
 

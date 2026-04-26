@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
+import type { JsonObject, SessionConfig } from "../shared/types.js";
 
 // ---------------------------------------------------------------------------
 // Config types
@@ -15,6 +16,7 @@ export interface LlmConfig {
 
 export interface WireConfig {
   llm?: LlmConfig;
+  browser?: { session?: SessionConfig };
   provider?: LlmProvider;
   model?: string;
 }
@@ -29,6 +31,34 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function normalizeProvider(value: unknown): LlmProvider | undefined {
   return value === "openai" || value === "anthropic" ? value : undefined;
+}
+
+function normalizeSessionConfig(raw: unknown): SessionConfig | undefined {
+  if (!isRecord(raw)) return undefined;
+
+  const session: SessionConfig = {};
+  if (typeof raw["useProxy"] === "boolean") session.useProxy = raw["useProxy"];
+  if (isRecord(raw["useProxy"])) {
+    const proxy: NonNullable<Exclude<SessionConfig["useProxy"], boolean>> = {};
+    if (isRecord(raw["useProxy"]["geolocation"]) && typeof raw["useProxy"]["geolocation"]["country"] === "string") {
+      proxy.geolocation = { country: raw["useProxy"]["geolocation"]["country"] };
+    }
+    if (typeof raw["useProxy"]["server"] === "string") proxy.server = raw["useProxy"]["server"];
+    if (proxy.geolocation || proxy.server) session.useProxy = proxy;
+  }
+  if (typeof raw["solveCaptcha"] === "boolean") session.solveCaptcha = raw["solveCaptcha"];
+  if (typeof raw["stealth"] === "boolean") session.stealth = raw["stealth"];
+  if (typeof raw["userAgent"] === "string") session.userAgent = raw["userAgent"];
+  if (typeof raw["region"] === "string") session.region = raw["region"];
+  if (typeof raw["locale"] === "string") session.locale = raw["locale"];
+  if (typeof raw["timezone"] === "string") session.timezone = raw["timezone"];
+  if (isRecord(raw["viewport"]) && typeof raw["viewport"]["width"] === "number" && typeof raw["viewport"]["height"] === "number") {
+    session.viewport = { width: raw["viewport"]["width"], height: raw["viewport"]["height"] };
+  }
+  if (isRecord(raw["providerOptions"])) {
+    session.providerOptions = raw["providerOptions"] as JsonObject;
+  }
+  return Object.keys(session).length > 0 ? session : undefined;
 }
 
 function normalizeConfig(raw: unknown): WireConfig {
@@ -59,6 +89,11 @@ function normalizeConfig(raw: unknown): WireConfig {
     if (llm.provider || llm.model) {
       config.llm = llm;
     }
+  }
+
+  if (isRecord(raw["browser"])) {
+    const session = normalizeSessionConfig(raw["browser"]["session"]);
+    if (session) config.browser = { session };
   }
 
   return config;
@@ -112,6 +147,14 @@ export async function loadConfig(dir?: string, userDir?: string, strict?: boolea
 
   if (llm.provider || llm.model) {
     merged.llm = llm;
+  }
+
+  const session = {
+    ...(user.browser?.session ?? {}),
+    ...(project.browser?.session ?? {}),
+  };
+  if (Object.keys(session).length > 0) {
+    merged.browser = { session };
   }
 
   return merged;

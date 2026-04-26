@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { LoadedSkill, SkillMetadata } from "../shared/types.js";
 import { ensureDir } from "../storage/atomic.js";
 
-import { matchSkillsByHostname, matchSkillsByTags, sortByRelevance } from "./matcher.js";
+import { scoreSkills, sortByRelevance } from "./matcher.js";
 import { extractSections, parseSkillFile } from "./parser.js";
 import { sanitizeSkillContent } from "../agent/context.js";
 
@@ -20,16 +20,7 @@ import { sanitizeSkillContent } from "../agent/context.js";
  */
 export async function loadSkillsFromDir(dir: string): Promise<SkillMetadata[]> {
   const loaded = await loadSkillDocsFromDir(dir);
-  return loaded.map((skill) => ({
-    id: skill.id,
-    scope: skill.scope,
-    tags: skill.tags,
-    updatedAt: skill.updatedAt,
-    source: skill.source,
-    ...(skill.hostnamePatterns
-      ? { hostnamePatterns: skill.hostnamePatterns }
-      : {}),
-  }));
+  return loaded.map(toSkillMetadata);
 }
 
 export async function loadSkillDocsFromDir(dir: string): Promise<LoadedSkill[]> {
@@ -62,9 +53,13 @@ export async function loadSkillDocsFromDir(dir: string): Promise<LoadedSkill[]> 
       const loadedSkill: LoadedSkill = {
         id: frontmatter.id,
         scope: frontmatter.scope,
+        ...(frontmatter.status ? { status: frontmatter.status } : {}),
         tags: frontmatter.tags,
         updatedAt: frontmatter.updatedAt,
         source: frontmatter.source,
+        ...(frontmatter.confidence !== undefined ? { confidence: frontmatter.confidence } : {}),
+        ...(frontmatter.sourceRunIds ? { sourceRunIds: frontmatter.sourceRunIds } : {}),
+        ...(frontmatter.supersedes ? { supersedes: frontmatter.supersedes } : {}),
         path: filePath,
         body: sanitizeSkillContent(raw),
         sections,
@@ -89,7 +84,7 @@ export async function loadSkillDocsFromDir(dir: string): Promise<LoadedSkill[]> 
 /**
  * Load all skill files from `skillsDir` and filter by hostname and/or tags.
  * If both filters are provided, a skill must match at least one of them.
- * Results are sorted by `updatedAt` descending.
+ * Inactive skills are excluded. Results are sorted by match score.
  */
 export async function findMatchingSkills(
   skillsDir: string,
@@ -97,16 +92,7 @@ export async function findMatchingSkills(
   tags?: string[],
 ): Promise<SkillMetadata[]> {
   const matched = await findMatchingSkillDocs(skillsDir, hostname, tags);
-  return matched.map((skill) => ({
-    id: skill.id,
-    scope: skill.scope,
-    tags: skill.tags,
-    updatedAt: skill.updatedAt,
-    source: skill.source,
-    ...(skill.hostnamePatterns
-      ? { hostnamePatterns: skill.hostnamePatterns }
-      : {}),
-  }));
+  return matched.map(toSkillMetadata);
 }
 
 export async function findMatchingSkillDocs(
@@ -126,24 +112,36 @@ function filterMatchingSkillDocs(
 
   const hasHostname = hostname !== undefined && hostname.length > 0;
   const hasTags = tags !== undefined && tags.length > 0;
+  const active = all.filter((skill) =>
+    skill.status !== "proposed" &&
+    skill.status !== "rejected" &&
+    skill.status !== "superseded"
+  );
 
   if (!hasHostname && !hasTags) {
-    return sortByRelevance(all);
+    return sortByRelevance(active);
   }
 
-  const matched = new Set<LoadedSkill>();
+  const minScore = hasHostname ? 6 : 6;
+  const scoreOptions: { hostname?: string; tags?: string[]; minScore: number } = { minScore };
+  if (hostname) scoreOptions.hostname = hostname;
+  if (tags) scoreOptions.tags = tags;
+  return scoreSkills(active, scoreOptions).map((entry) => entry.skill);
+}
 
-  if (hasHostname) {
-    for (const skill of matchSkillsByHostname(all, hostname!)) {
-      matched.add(skill);
-    }
-  }
-
-  if (hasTags) {
-    for (const skill of matchSkillsByTags(all, tags!)) {
-      matched.add(skill);
-    }
-  }
-
-  return sortByRelevance([...matched]);
+function toSkillMetadata(skill: LoadedSkill): SkillMetadata {
+  return {
+    id: skill.id,
+    scope: skill.scope,
+    ...(skill.status ? { status: skill.status } : {}),
+    tags: skill.tags,
+    updatedAt: skill.updatedAt,
+    source: skill.source,
+    ...(skill.confidence !== undefined ? { confidence: skill.confidence } : {}),
+    ...(skill.sourceRunIds ? { sourceRunIds: skill.sourceRunIds } : {}),
+    ...(skill.supersedes ? { supersedes: skill.supersedes } : {}),
+    ...(skill.hostnamePatterns
+      ? { hostnamePatterns: skill.hostnamePatterns }
+      : {}),
+  };
 }

@@ -88,10 +88,17 @@ test("loadConfig returns {} when both files are missing", async () => {
 test("loadConfig reads project wire.json", async () => {
   const dir = await makeIsolatedDir();
   try {
-    await writeFile(join(dir, "wire.json"), JSON.stringify({ llm: { provider: "openai", model: "gpt-5.4-mini" } }));
+    await writeFile(join(dir, "wire.json"), JSON.stringify({
+      llm: { provider: "openai", model: "gpt-5.4-mini" },
+      browser: { session: { useProxy: true, solveCaptcha: true, stealth: true, region: "us-east-1" } },
+    }));
     const config = await loadConfig(dir, dir);
     assert.equal(config.llm?.provider, "openai");
     assert.equal(config.llm?.model, "gpt-5.4-mini");
+    assert.equal(config.browser?.session?.useProxy, true);
+    assert.equal(config.browser?.session?.solveCaptcha, true);
+    assert.equal(config.browser?.session?.stealth, true);
+    assert.equal(config.browser?.session?.region, "us-east-1");
   } finally {
     await rm(dir, { recursive: true });
   }
@@ -148,15 +155,18 @@ test("loadConfig merges user defaults with project overrides", async () => {
     await mkdir(join(userDir, ".wire"), { recursive: true });
     await writeFile(
       join(userDir, ".wire", "config.json"),
-      JSON.stringify({ llm: { provider: "openai", model: "user-default" } }),
+      JSON.stringify({ llm: { provider: "openai", model: "user-default" }, browser: { session: { useProxy: true, region: "us-west-1" } } }),
     );
     await writeFile(
       join(projectDir, "wire.json"),
-      JSON.stringify({ llm: { model: "project-override" } }),
+      JSON.stringify({ llm: { model: "project-override" }, browser: { session: { solveCaptcha: true, region: "eu-west-1" } } }),
     );
     const config = await loadConfig(projectDir, userDir);
     assert.equal(config.llm?.provider, "openai");
     assert.equal(config.llm?.model, "project-override");
+    assert.equal(config.browser?.session?.useProxy, true);
+    assert.equal(config.browser?.session?.solveCaptcha, true);
+    assert.equal(config.browser?.session?.region, "eu-west-1");
   } finally {
     await rm(userDir, { recursive: true });
     await rm(projectDir, { recursive: true });

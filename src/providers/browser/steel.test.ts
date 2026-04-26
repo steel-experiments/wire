@@ -2,10 +2,15 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
+  createSteelActionHandlers,
   SteelProvider,
   createSteelProvider,
   validateBrowserCode,
 } from "../../providers/browser/steel.js";
+import { createLoopState } from "../../agent/loop.js";
+import type { BrowserProvider } from "../../browser/bridge.js";
+import { createId } from "../../shared/ids.js";
+import type { BrowserObservation, BrowserSession, Task } from "../../shared/types.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -20,6 +25,18 @@ function fakeSteelSession(overrides: Record<string, unknown> = {}) {
     sessionViewerUrl: "https://api.steel.dev/v1/sessions/aaa-bbb-ccc/player",
     createdAt: "2026-04-24T10:00:00.000Z",
     ...overrides,
+  };
+}
+
+function makeTask(): Task {
+  return {
+    id: createId("task"),
+    title: "test",
+    mode: "task",
+    objective: "test",
+    constraints: [],
+    successCriteria: ["done"],
+    createdAt: new Date().toISOString(),
   };
 }
 
@@ -504,15 +521,48 @@ test("SteelProvider.createSession maps sessionConfig fields to Steel body", asyn
       sessionConfig: {
         useProxy: true,
         solveCaptcha: true,
+        stealth: true,
         userAgent: "Mozilla/5.0 (custom)",
         region: "eu-west-1",
+        locale: "en-US",
+        timezone: "America/New_York",
+        viewport: { width: 1280, height: 720 },
       },
     });
 
     assert.equal(capturedBody.useProxy, true);
     assert.equal(capturedBody.solveCaptcha, true);
+    assert.equal(capturedBody.stealth, true);
     assert.equal(capturedBody.userAgent, "Mozilla/5.0 (custom)");
     assert.equal(capturedBody.region, "eu-west-1");
+    assert.equal(capturedBody.locale, "en-US");
+    assert.equal(capturedBody.timezone, "America/New_York");
+    assert.deepEqual(capturedBody.viewport, { width: 1280, height: 720 });
+  } finally {
+    globalThis.fetch = originalFetch;
+    restore();
+  }
+});
+
+test("SteelProvider.createSession preserves structured proxy config", async () => {
+  const { provider, restore } = createMockedProvider();
+  let capturedBody: Record<string, unknown> = {};
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url: string | URL | Request, init?: RequestInit) => {
+    if (typeof init?.body === "string") {
+      capturedBody = JSON.parse(init.body);
+    }
+    return new Response(
+      JSON.stringify(fakeSteelSession()),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  };
+
+  try {
+    const proxy = { server: "http://proxy.example:8080", geolocation: { country: "US" } };
+    await provider.createSession({ sessionConfig: { useProxy: proxy } });
+    assert.deepEqual(capturedBody.useProxy, proxy);
   } finally {
     globalThis.fetch = originalFetch;
     restore();
@@ -549,4 +599,69 @@ test("SteelProvider.createSession sessionConfig takes precedence over proxyCount
     globalThis.fetch = originalFetch;
     restore();
   }
+});
+
+test("Steel reconfigure action notifies replacement session callback", async () => {
+  const oldSessionId = createId("session");
+  const newSession: BrowserSession = {
+    id: createId("session"),
+    provider: "steel",
+    createdAt: new Date().toISOString(),
+    status: "ready",
+    liveUrl: "https://app.steel.dev/sessions/new",
+    debugUrl: "https://api.steel.dev/v1/sessions/new/player",
+  };
+  const state = createLoopState(makeTask(), oldSessionId);
+  let stopped: string | undefined;
+  let callback:
+    | { oldSessionId: string; newSession: BrowserSession; summary: string }
+    | undefined;
+
+  const provider: BrowserProvider = {
+    async createSession() {
+      return newSession;
+    },
+    async getSession() {
+      return newSession;
+    },
+    async stopSession(id) {
+      stopped = id;
+    },
+    async observe(input): Promise<BrowserObservation> {
+      return {
+        sessionId: input.sessionId,
+        url: "about:blank",
+        title: "about:blank",
+        tabs: [],
+        pageSummary: {},
+      };
+    },
+    async exec() {
+      throw new Error("not implemented");
+    },
+  };
+
+  const handler = createSteelActionHandlers()[0]!;
+  await handler.execute(
+    state,
+    {
+      kind: "reconfigure",
+      summary: "Enable stealth session",
+      payload: { stealth: true },
+    },
+    provider,
+    {
+      onSessionReconfigured(details) {
+        callback = details;
+      },
+    },
+  );
+
+  assert.equal(stopped, oldSessionId);
+  assert.equal(callback?.oldSessionId, oldSessionId);
+  assert.equal(callback?.newSession.id, newSession.id);
+  assert.equal(callback?.newSession.debugUrl, newSession.debugUrl);
+  assert.equal(callback?.summary, "Enable stealth session");
+  assert.equal(state.sessionId, newSession.id);
+  assert.equal(state.sessionLiveUrl, newSession.liveUrl);
 });

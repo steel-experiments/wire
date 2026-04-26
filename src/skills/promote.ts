@@ -1,4 +1,4 @@
-import { readdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { createId, nowIsoUtc } from "../shared/ids.js";
@@ -25,6 +25,23 @@ export interface PromotionCandidate {
   confidence: number;
   sourceRunId: RunId;
 }
+
+export interface SkillPromotionPolicy {
+  autoPromoteMinConfidence: number;
+  requireReusableSignal: boolean;
+}
+
+export interface ManagedSkillPromotion {
+  proposalPath?: string;
+  activePath?: string;
+  promoted: boolean;
+  reason: string;
+}
+
+export const DEFAULT_SKILL_PROMOTION_POLICY: SkillPromotionPolicy = {
+  autoPromoteMinConfidence: 0.9,
+  requireReusableSignal: true,
+};
 
 // ---------------------------------------------------------------------------
 // Secret detection
@@ -232,7 +249,11 @@ export function generateSkillProposal(candidate: PromotionCandidate): string {
   lines.push("---");
   lines.push(`id: ${candidate.skillId}`);
   lines.push(`scope: domain`);
+  lines.push(`status: proposed`);
   lines.push(`source: generated`);
+  lines.push(`confidence: ${candidate.confidence}`);
+  lines.push(`sourceRunIds:`);
+  lines.push(`  - ${candidate.sourceRunId}`);
   lines.push(`tags:`);
   lines.push(`  - auto-promoted`);
   lines.push(`  - ${candidate.hostname}`);
@@ -300,6 +321,69 @@ export function generateSkillProposal(candidate: PromotionCandidate): string {
   return lines.join("\n");
 }
 
+function hasReusableSignal(candidate: PromotionCandidate): boolean {
+  return candidate.facts.length > 0 ||
+    candidate.selectors.length > 0 ||
+    candidate.routes.length > 0 ||
+    candidate.waits.length > 0 ||
+    candidate.traps.length > 0;
+}
+
+function skillFileName(candidate: PromotionCandidate): string {
+  return `${candidate.hostname.replace(/\./gu, "_")}-${candidate.skillId.slice(0, 16)}.md`;
+}
+
+export async function writeSkillProposal(
+  candidate: PromotionCandidate,
+  skillDir: string,
+): Promise<string> {
+  const content = generateSkillProposal(candidate);
+  if (containsSecrets(content)) {
+    throw new Error(
+      `Refusing to write skill proposal ${candidate.skillId}: secret patterns detected in generated content.`,
+    );
+  }
+
+  const proposalDir = join(skillDir, ".proposals");
+  await mkdir(proposalDir, { recursive: true });
+  const filePath = join(proposalDir, skillFileName(candidate));
+  await writeFile(filePath, content, "utf-8");
+  return filePath;
+}
+
+export async function manageSkillPromotion(
+  candidate: PromotionCandidate,
+  skillDir: string,
+  policy: SkillPromotionPolicy = DEFAULT_SKILL_PROMOTION_POLICY,
+): Promise<ManagedSkillPromotion> {
+  const proposalPath = await writeSkillProposal(candidate, skillDir);
+
+  if (policy.requireReusableSignal && !hasReusableSignal(candidate)) {
+    return {
+      proposalPath,
+      promoted: false,
+      reason: "proposal-only: no reusable facts, selectors, routes, waits, or traps",
+    };
+  }
+
+  if (candidate.confidence < policy.autoPromoteMinConfidence) {
+    return {
+      proposalPath,
+      promoted: false,
+      reason: `proposal-only: confidence ${candidate.confidence} below ${policy.autoPromoteMinConfidence}`,
+    };
+  }
+
+  const activePath = await promoteSkill(candidate, skillDir, { activeStatus: "active" });
+  const managed: ManagedSkillPromotion = {
+    proposalPath,
+    promoted: Boolean(activePath),
+    reason: activePath ? "auto-promoted" : "proposal-only: active skill already has equal or higher confidence",
+  };
+  if (activePath) managed.activePath = activePath;
+  return managed;
+}
+
 /**
  * Scan the skill directory for existing files matching the same hostname
  * prefix. Returns paths of files for the same hostname.
@@ -334,8 +418,10 @@ async function findExistingSkillsForHostname(
 export async function promoteSkill(
   candidate: PromotionCandidate,
   skillDir: string,
+  options: { activeStatus?: "active" | "proposed" } = {},
 ): Promise<string | undefined> {
-  const content = generateSkillProposal(candidate);
+  const status = options.activeStatus ?? "active";
+  const content = generateSkillProposal(candidate).replace(/^status: proposed$/mu, `status: ${status}`);
 
   if (containsSecrets(content)) {
     throw new Error(
@@ -360,8 +446,7 @@ export async function promoteSkill(
     }
   }
 
-  const fileName = `${candidate.hostname.replace(/\./gu, "_")}-${candidate.skillId.slice(0, 16)}.md`;
-  const filePath = join(skillDir, fileName);
+  const filePath = join(skillDir, skillFileName(candidate));
   await writeFile(filePath, content, "utf-8");
 
   return filePath;

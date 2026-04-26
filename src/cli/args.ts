@@ -13,6 +13,11 @@ export interface CliArgs {
   model?: string;
   maxSteps?: number;
   skillDir?: string;
+  useProxy?: boolean;
+  solveCaptcha?: boolean;
+  stealth?: boolean;
+  region?: string;
+  userAgent?: string;
   benchmarksFile?: string;
   json?: boolean;
   yes?: boolean;
@@ -25,6 +30,8 @@ const VALID_COMMANDS = new Set(["run", "review", "result", "list", "approve", "b
 export function parseArgs(argv: string[]): CliArgs {
   const args = argv.slice(2); // drop node and script path
   const result: CliArgs = { command: "run" };
+  const objectiveParts: string[] = [];
+  let objectiveFromFlag = false;
 
   let i = 0;
   while (i < args.length) {
@@ -51,6 +58,7 @@ export function parseArgs(argv: string[]): CliArgs {
       const val = args[i];
       if (val !== undefined) {
         result.objective = val;
+        objectiveFromFlag = true;
       }
       i++;
       continue;
@@ -139,6 +147,44 @@ export function parseArgs(argv: string[]): CliArgs {
       continue;
     }
 
+    if (arg === "--use-proxy") {
+      result.useProxy = true;
+      i++;
+      continue;
+    }
+
+    if (arg === "--solve-captcha") {
+      result.solveCaptcha = true;
+      i++;
+      continue;
+    }
+
+    if (arg === "--stealth") {
+      result.stealth = true;
+      i++;
+      continue;
+    }
+
+    if (arg === "--region") {
+      i++;
+      const val = args[i];
+      if (val !== undefined) {
+        result.region = val;
+      }
+      i++;
+      continue;
+    }
+
+    if (arg === "--user-agent") {
+      i++;
+      const val = args[i];
+      if (val !== undefined) {
+        result.userAgent = val;
+      }
+      i++;
+      continue;
+    }
+
     if (arg === "--benchmarks") {
       i++;
       const val = args[i];
@@ -174,8 +220,16 @@ export function parseArgs(argv: string[]): CliArgs {
       continue;
     }
 
-    // Skip unknown args
+    // Positional: collect objective words when no explicit --objective was set
+    if (arg !== undefined && !arg.startsWith("-") && !objectiveFromFlag) {
+      objectiveParts.push(arg);
+    }
+
     i++;
+  }
+
+  if (!objectiveFromFlag && objectiveParts.length > 0) {
+    result.objective = objectiveParts.join(" ");
   }
 
   return result;
@@ -186,7 +240,8 @@ export function formatHelp(): string {
     "wire - zero-weight browser agent",
     "",
     "Usage:",
-    "  wire <command> [options]",
+    "  wire [command] [options]",
+    "  wire <objective>",
     "",
     "Commands:",
     "  run       Execute a task (default)",
@@ -198,6 +253,7 @@ export function formatHelp(): string {
     "  bench     Run benchmark suite",
     "",
     "Run options:",
+    "  <objective>              Shorthand: first non-flag, non-command argument",
     "  --objective <text>       Task objective (required unless --task-file)",
     "  --task-file <path>       Load task from a JSON file",
     "  --mode <mode>            Task mode: task | investigate | experiment",
@@ -206,6 +262,11 @@ export function formatHelp(): string {
     "  --model <model-id>       LLM model to use (e.g. gpt-5.4-mini, claude-sonnet-4-6)",
     "  --max-steps <n>          Maximum agent steps",
     "  --skill-dir <path>       Directory of skill definitions",
+    "  --use-proxy              Start browser with provider proxy enabled",
+    "  --solve-captcha          Start browser with provider captcha support enabled",
+    "  --stealth                Request provider stealth mode when supported",
+    "  --region <region>        Provider browser region",
+    "  --user-agent <ua>        Browser user agent override",
     "",
     "Review options:",
     "  --run-id <id>            Run to review",

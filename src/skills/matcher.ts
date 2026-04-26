@@ -70,8 +70,76 @@ export function matchSkillsByTags<T extends SkillMetadata>(
  */
 export function sortByRelevance<T extends SkillMetadata>(skills: T[]): T[] {
   return [...skills].sort((a, b) => {
+    const confidenceDelta = (b.confidence ?? 0) - (a.confidence ?? 0);
+    if (confidenceDelta !== 0) return confidenceDelta;
     if (a.updatedAt > b.updatedAt) return -1;
     if (a.updatedAt < b.updatedAt) return 1;
     return 0;
   });
+}
+
+export interface SkillMatchScore<T extends SkillMetadata> {
+  skill: T;
+  score: number;
+  reasons: string[];
+}
+
+export interface ScoreSkillsOptions {
+  hostname?: string;
+  tags?: string[];
+  minScore?: number;
+  limit?: number;
+}
+
+export function scoreSkills<T extends SkillMetadata>(
+  skills: T[],
+  options: ScoreSkillsOptions = {},
+): SkillMatchScore<T>[] {
+  const hostname = options.hostname?.toLowerCase();
+  const tags = new Set((options.tags ?? []).map((tag) => tag.toLowerCase()));
+  const minScore = options.minScore ?? 1;
+
+  const scored: SkillMatchScore<T>[] = [];
+  for (const skill of skills) {
+    let score = 0;
+    const reasons: string[] = [];
+
+    if (hostname && skill.hostnamePatterns?.length) {
+      for (const pattern of skill.hostnamePatterns) {
+        if (hostnameMatches(pattern, hostname)) {
+          const exact = !pattern.startsWith("*.") && pattern.toLowerCase() === hostname;
+          score += exact ? 100 : 80;
+          reasons.push(exact ? "exact-hostname" : "wildcard-hostname");
+          break;
+        }
+      }
+    }
+
+    if (tags.size > 0) {
+      const overlap = skill.tags.filter((tag) => tags.has(tag.toLowerCase())).length;
+      if (overlap > 0) {
+        score += overlap * 6;
+        reasons.push(`tag-overlap:${overlap}`);
+      }
+    }
+
+    if (skill.scope === "domain") score += 3;
+    if (skill.scope === "workflow") score += 2;
+    if (skill.scope === "interaction") score += 1;
+    if (skill.source === "team") score += 2;
+    if (skill.source === "generated") score += Math.round((skill.confidence ?? 0.5) * 4);
+    if (skill.status === "proposed") score -= 40;
+    if (skill.status === "rejected" || skill.status === "superseded") score -= 100;
+
+    if (score >= minScore) {
+      scored.push({ skill, score, reasons });
+    }
+  }
+
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return sortByRelevance([a.skill, b.skill])[0] === a.skill ? -1 : 1;
+  });
+
+  return options.limit ? scored.slice(0, options.limit) : scored;
 }

@@ -35,6 +35,29 @@ const jsonValueSchema: z.ZodTypeAny = z.lazy(() =>
   ]),
 );
 
+const sessionConfigSchema = z
+  .object({
+    useProxy: z.union([
+      z.boolean(),
+      z.object({
+        geolocation: z.object({ country: z.string().length(2).optional() }).optional(),
+        server: z.string().min(1).optional(),
+      }).strict(),
+    ]).optional(),
+    solveCaptcha: z.boolean().optional(),
+    stealth: z.boolean().optional(),
+    userAgent: z.string().min(1).optional(),
+    region: z.string().min(1).optional(),
+    locale: z.string().min(1).optional(),
+    timezone: z.string().min(1).optional(),
+    viewport: z.object({
+      width: z.number().int().positive(),
+      height: z.number().int().positive(),
+    }).strict().optional(),
+    providerOptions: z.record(z.string(), jsonValueSchema).optional(),
+  })
+  .strict();
+
 function makeIdSchema<TPrefix extends IdPrefix>(prefix: TPrefix) {
   return z
     .string()
@@ -315,6 +338,7 @@ export const createSessionInputSchema = z
     proxyCountryCode: z.string().length(2).nullable().optional(),
     timeoutMinutes: z.number().positive().optional(),
     metadata: z.record(z.string(), jsonValueSchema).optional(),
+    sessionConfig: sessionConfigSchema.optional(),
   })
   .strict();
 

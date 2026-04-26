@@ -10,9 +10,9 @@ import { createId } from "../shared/ids.js";
 import type { SkillFrontmatter, SkillMetadata } from "../shared/types.js";
 
 import { loadSkillDocsFromDir, loadSkillsFromDir, findMatchingSkills } from "./loader.js";
-import { matchSkillsByHostname, matchSkillsByTags, sortByRelevance } from "./matcher.js";
+import { matchSkillsByHostname, matchSkillsByTags, scoreSkills, sortByRelevance } from "./matcher.js";
 import { extractSections, parseSkillFile } from "./parser.js";
-import { promoteSkill, generateSkillProposal, type PromotionCandidate } from "./promote.js";
+import { manageSkillPromotion, promoteSkill, generateSkillProposal, type PromotionCandidate } from "./promote.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -364,6 +364,26 @@ test("sortByRelevance does not mutate the input array", () => {
   assert.equal(sorted[0]!.updatedAt, "2026-04-24");
 });
 
+test("scoreSkills prefers precise hostname skills over tag-only skills", () => {
+  const precise = makeSkillMeta({
+    id: "skill_precise" as SkillMetadata["id"],
+    hostnamePatterns: ["example.com"],
+    tags: ["billing"],
+  });
+  const generic = makeSkillMeta({
+    id: "skill_generic" as SkillMetadata["id"],
+    scope: "interaction",
+    tags: ["billing"],
+  });
+
+  const scored = scoreSkills([generic, precise], {
+    hostname: "example.com",
+    tags: ["billing"],
+  });
+
+  assert.equal(scored[0]!.skill.id, "skill_precise");
+});
+
 // ---------------------------------------------------------------------------
 // loader.ts — loadSkillsFromDir
 // ---------------------------------------------------------------------------
@@ -542,6 +562,35 @@ test("findMatchingSkills with wildcard hostname", async () => {
   assert.equal(matched[0]!.id, "skill_gh-prs");
 });
 
+test("findMatchingSkills excludes inactive skills before scoring", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  await mkdir(dir, { recursive: true });
+
+  await writeFile(join(dir, "proposed.md"), STRIPE_SKILL_MD.replace("scope: domain", "scope: domain\nstatus: proposed"), "utf-8");
+  await writeFile(join(dir, "rejected.md"), GH_SKILL_MD.replace("scope: workflow", "scope: workflow\nstatus: rejected"), "utf-8");
+  await writeFile(join(dir, "active.md"), GENERIC_SKILL_MD, "utf-8");
+
+  assert.equal((await findMatchingSkills(dir, "dashboard.stripe.com")).length, 0);
+  assert.equal((await findMatchingSkills(dir, undefined, ["code-review"])).length, 0);
+  assert.equal((await findMatchingSkills(dir)).length, 1);
+});
+
+test("findMatchingSkills returns more than six valid matches", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  await mkdir(dir, { recursive: true });
+
+  for (let i = 0; i < 7; i++) {
+    await writeFile(join(dir, `skill-${i}.md`), GENERIC_SKILL_MD
+      .replace("skill_dialog-handler", `skill_dialog-${i}`)
+      .replace("updatedAt: 2026-04-23", `updatedAt: 2026-04-${String(10 + i).padStart(2, "0")}`), "utf-8");
+  }
+
+  const matched = await findMatchingSkills(dir, undefined, ["dialogs"]);
+  assert.equal(matched.length, 7);
+});
+
 // ---------------------------------------------------------------------------
 // promote.ts — skill dedup
 // ---------------------------------------------------------------------------
@@ -637,4 +686,20 @@ test("promoteSkill rejects skill containing secrets", async () => {
     () => promoteSkill(candidate, dir),
     /secret patterns detected/u,
   );
+});
+
+test("manageSkillPromotion writes proposal first and only auto-promotes high confidence", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+
+  const lowConfidence = makeCandidate({ confidence: 0.7 });
+  const low = await manageSkillPromotion(lowConfidence, dir);
+  assert.equal(low.promoted, false);
+  assert.ok(low.proposalPath?.includes(".proposals"));
+
+  const highConfidence = makeCandidate({ hostname: "high.example.com", confidence: 0.95 });
+  const high = await manageSkillPromotion(highConfidence, dir);
+  assert.equal(high.promoted, true);
+  assert.ok(high.proposalPath?.includes(".proposals"));
+  assert.ok(high.activePath?.endsWith(".md"));
 });

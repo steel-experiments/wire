@@ -19,7 +19,7 @@ function defaultStorageRoot(): string {
 export async function main(argv: string[]): Promise<void> {
   const args = parseArgs(argv);
 
-  if (args.help) {
+  if (args.help || argv.length <= 2) {
     console.log(formatHelp());
     return;
   }
@@ -133,12 +133,18 @@ async function handleRun(
     );
 
     const opts: RunOptions = { objective };
+    if (config.browser?.session) opts.sessionConfig = { ...config.browser.session };
     if (args.mode) opts.mode = args.mode;
     if (args.profileId) opts.profileId = args.profileId;
     if (llm.provider) opts.provider = llm.provider;
     if (llm.model) opts.model = llm.model;
     if (args.maxSteps) opts.maxSteps = args.maxSteps;
     if (args.skillDir) opts.skillDir = args.skillDir;
+    if (args.useProxy !== undefined) opts.sessionConfig = { ...(opts.sessionConfig ?? {}), useProxy: args.useProxy };
+    if (args.solveCaptcha !== undefined) opts.sessionConfig = { ...(opts.sessionConfig ?? {}), solveCaptcha: args.solveCaptcha };
+    if (args.stealth !== undefined) opts.sessionConfig = { ...(opts.sessionConfig ?? {}), stealth: args.stealth };
+    if (args.region) opts.sessionConfig = { ...(opts.sessionConfig ?? {}), region: args.region };
+    if (args.userAgent) opts.sessionConfig = { ...(opts.sessionConfig ?? {}), userAgent: args.userAgent };
     if (args.json) opts.json = args.json;
     if (args.yes) opts.yes = args.yes;
 

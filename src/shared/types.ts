@@ -253,7 +253,27 @@ export interface BrowserRawRequest {
   params?: JsonObject;
 }
 
-export type SessionConfig = Record<string, unknown>;
+export interface ProxyConfig {
+  geolocation?: { country?: string };
+  server?: string;
+}
+
+export interface ViewportConfig {
+  width: number;
+  height: number;
+}
+
+export interface SessionConfig {
+  useProxy?: boolean | ProxyConfig;
+  solveCaptcha?: boolean;
+  stealth?: boolean;
+  userAgent?: string;
+  region?: string;
+  locale?: string;
+  timezone?: string;
+  viewport?: ViewportConfig;
+  providerOptions?: JsonObject;
+}
 
 export interface CreateSessionInput {
   profileId?: ProfileId;

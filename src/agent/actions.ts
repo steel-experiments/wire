@@ -1,6 +1,12 @@
 import type { LoopState } from "./loop.js";
-import type { ProposedAction } from "../shared/types.js";
+import type { BrowserSession, ProposedAction, SessionId } from "../shared/types.js";
 import type { BrowserProvider } from "../browser/bridge.js";
+
+export interface ActionExecutionContext {
+  onSessionReconfigured?: (
+    details: { oldSessionId: SessionId; newSession: BrowserSession; summary: string },
+  ) => Promise<void> | void;
+}
 
 export interface ActionHandler {
   kind: string;
@@ -9,6 +15,7 @@ export interface ActionHandler {
     state: LoopState,
     action: ProposedAction,
     provider: BrowserProvider,
+    context?: ActionExecutionContext,
   ): Promise<{ authWallHit?: boolean }>;
 }
 
