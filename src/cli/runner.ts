@@ -159,7 +159,7 @@ function defaultMaxSteps(mode: "task" | "investigate" | "experiment"): number {
   switch (mode) {
     case "investigate": return 20;
     case "experiment": return 25;
-    default: return 15;
+    default: return 30;
   }
 }
 

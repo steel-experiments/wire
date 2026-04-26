@@ -314,6 +314,66 @@ export async function executeStep(
           payload: redactJsonObject(resultPayload),
         });
 
+        // Check for wireActions: exec code returning CDP commands to execute
+        if (result.ok && result.returnValue !== undefined) {
+          try {
+            const parsed = typeof result.returnValue === "string"
+              ? JSON.parse(result.returnValue)
+              : result.returnValue;
+            if (parsed && Array.isArray(parsed.wireActions)) {
+              const commands = parsed.wireActions.filter(
+                (a: unknown) => typeof (a as Record<string, unknown>)?.method === "string",
+              );
+              if (commands.length > 0) {
+                const steelProvider = provider as unknown as {
+                  rawBatch?(sessionId: SessionId, commands: Array<{ method: string; params?: Record<string, unknown> }>): Promise<unknown>;
+                };
+                let cdpOk = true;
+                let cdpResult: unknown;
+                const cdpStart = Date.now();
+                if (steelProvider.rawBatch) {
+                  try {
+                    cdpResult = await steelProvider.rawBatch(state.sessionId, commands);
+                  } catch (err) {
+                    cdpOk = false;
+                    cdpResult = err instanceof Error ? err.message : String(err);
+                  }
+                } else {
+                  for (const cmd of commands) {
+                    try {
+                      const execRawOpts: { provider: BrowserProvider; sessionId: SessionId; method: string; params?: JsonObject } = {
+                        provider,
+                        sessionId: state.sessionId,
+                        method: (cmd as { method: string }).method,
+                      };
+                      const cmdParams = (cmd as { params?: JsonObject }).params;
+                      if (cmdParams) execRawOpts.params = cmdParams;
+                      cdpResult = await execRaw(execRawOpts);
+                    } catch (err) {
+                      cdpOk = false;
+                      cdpResult = err instanceof Error ? err.message : String(err);
+                      break;
+                    }
+                  }
+                }
+                state.events.push({
+                  id: createId("event"),
+                  runId: state.run.id,
+                  ts: nowIsoUtc(),
+                  kind: "code-result",
+                  payload: {
+                    ok: cdpOk,
+                    durationMs: Date.now() - cdpStart,
+                    source: "wireActions",
+                    commandsExecuted: commands.length,
+                    returnValue: cdpResult as import("../shared/types.js").JsonValue,
+                  },
+                });
+              }
+            }
+          } catch { /* returnValue wasn't valid JSON — ignore */ }
+        }
+
         // Auto-observe after navigation: when exec code navigates the page
         // (location.href/assign/replace), the code-result has no output and
         // the agent needs an observation of the new page before its next turn.

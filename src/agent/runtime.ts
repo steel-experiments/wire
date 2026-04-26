@@ -250,8 +250,9 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number): 
         "Return exactly one next action as JSON.",
         'Use this shape: {"kind":"observe|exec|raw|finish","summary":"short text","payload":{...}}.',
         'For "observe", omit payload unless you need {"targetId":"..."}',
-        'For "exec", set payload.code to JavaScript that runs in the browser.',
+        'For "exec", set payload.code to JavaScript that runs in the browser. Code is auto-wrapped as (async () => { YOUR_CODE })(). Do NOT wrap your code in another IIFE — use top-level `return` to output results. Example: `const tiles = document.querySelectorAll(".tile"); return JSON.stringify({count: tiles.length});`',
         'For "raw", set payload.method to a CDP method and payload.params to its parameters. Example: {"kind":"raw","summary":"Press arrow key","payload":{"method":"Input.dispatchKeyEvent","params":{"type":"keyDown","key":"ArrowUp","windowsVirtualKeyCode":38}}} sends a trusted keypress that pages cannot ignore. Always pair keyDown + keyUp. For batch input (e.g. games), use payload.commands: [{"method":"Input.dispatchKeyEvent","params":{...}},{"method":"Input.dispatchKeyEvent","params":{...}},...] to send many CDP commands in a single step.',
+        '"exec" code can return {wireActions: [{method, params}, ...]} to send CDP commands after the code runs. Example: read game state from DOM, compute optimal move, return wireActions with Input.dispatchKeyEvent pairs. This combines reading + acting in one step.',
         "For interactive apps and games: prefer exec to access the app's internal JavaScript API directly. Most games expose state and methods on global objects or via DOM element references (e.g., a game manager instance). One exec call can trigger many moves — far more efficient than one raw keypress per step. Use raw only when exec truly cannot reach the target API.",
         "Prefer direct URL patterns before brittle DOM hunting when the destination is obvious, such as /pricing or /docs.",
         "Wire auto-observes after navigation code (location.href etc). Do NOT emit a separate observe after navigating.",
@@ -259,6 +260,8 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number): 
         "Example: after navigating to a pricing page, emit exec with code like `return JSON.stringify({plans: [...extracted data...]})` or use `document.querySelectorAll` to collect the data and return it.",
         "Use reusable routes, selectors, waits, and traps you discover in executable code; Wire will propose durable skill files after the run from trace evidence.",
         "Only use 'finish' after a successful exec has produced output containing the answer to the objective. Never finish after only navigation and observation.",
+        "When skills provide a Workflow with numbered steps, follow those steps in order. Do not skip steps or substitute your own detection logic for the selectors and checks specified in the skill.",
+        "For game-winning objectives: never detect a win by searching for the game name or target number in body text (e.g. /2048/.test(body.innerText)). Always use the specific game-state selector the skill provides (e.g. .game-message.game-won). A score of 0 means no moves were made.",
         "Do not wrap the JSON in prose.",
       ].join("\n");
 

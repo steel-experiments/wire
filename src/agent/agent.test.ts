@@ -1632,3 +1632,142 @@ test("defaultAgentTurn rejects array LLM payload", async () => {
 
   assert.ok(action.kind === "observe" || action.kind === "finish");
 });
+
+// ---------------------------------------------------------------------------
+// executeStep — wireActions from exec returnValue
+// ---------------------------------------------------------------------------
+
+test("executeStep executes wireActions from exec returnValue (object)", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  let rawBatchCalled = false;
+  let rawBatchCommands: Array<{ method: string; params?: Record<string, unknown> }> = [];
+  const provider = createMockProvider({
+    async exec() {
+      return {
+        ok: true,
+        durationMs: 10,
+        returnValue: {
+          wireActions: [
+            { method: "Input.dispatchKeyEvent", params: { type: "keyDown", key: "ArrowDown", windowsVirtualKeyCode: 40 } },
+            { method: "Input.dispatchKeyEvent", params: { type: "keyUp", key: "ArrowDown", windowsVirtualKeyCode: 40 } },
+          ],
+        },
+      };
+    },
+  } as Partial<BrowserProvider> & { rawBatch?: (sessionId: SessionId, commands: Array<{ method: string; params?: Record<string, unknown> }>) => Promise<unknown> });
+  // Attach rawBatch to provider
+  (provider as unknown as Record<string, unknown>).rawBatch = async (_sessionId: SessionId, commands: Array<{ method: string; params?: Record<string, unknown> }>) => {
+    rawBatchCalled = true;
+    rawBatchCommands = commands;
+    return { ok: true };
+  };
+  const policy = createMockPolicyEngine();
+
+  const result = await executeStep(
+    state,
+    {
+      kind: "exec",
+      summary: "Read board and send moves",
+      payload: { code: "return JSON.stringify({wireActions:[...]})" },
+    },
+    provider,
+    policy,
+  );
+
+  assert.equal(result.policyDenied, false);
+  assert.equal(result.state.stepCount, 1);
+  assert.ok(rawBatchCalled, "rawBatch should be called");
+  assert.equal(rawBatchCommands.length, 2);
+  assert.equal(rawBatchCommands[0]!.method, "Input.dispatchKeyEvent");
+  // Events: policy-check, code-exec, code-result (exec), code-result (wireActions)
+  const codeResults = result.state.events.filter((e) => e.kind === "code-result");
+  assert.equal(codeResults.length, 2);
+  const waEvent = codeResults[1]!;
+  assert.equal(waEvent.payload.source, "wireActions");
+  assert.equal(waEvent.payload.commandsExecuted, 2);
+  assert.equal(waEvent.payload.ok, true);
+});
+
+test("executeStep executes wireActions from exec returnValue (JSON string)", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  let rawBatchCalled = false;
+  const provider = createMockProvider({
+    async exec() {
+      return {
+        ok: true,
+        durationMs: 10,
+        returnValue: JSON.stringify({
+          wireActions: [
+            { method: "Input.dispatchKeyEvent", params: { type: "keyDown", key: "ArrowUp", windowsVirtualKeyCode: 38 } },
+          ],
+        }),
+      };
+    },
+  } as Partial<BrowserProvider>);
+  (provider as unknown as Record<string, unknown>).rawBatch = async () => {
+    rawBatchCalled = true;
+    return { ok: true };
+  };
+  const policy = createMockPolicyEngine();
+
+  const result = await executeStep(
+    state,
+    {
+      kind: "exec",
+      summary: "Parse string return and send CDP",
+      payload: { code: "return JSON.stringify({wireActions:[...]})" },
+    },
+    provider,
+    policy,
+  );
+
+  assert.ok(rawBatchCalled, "rawBatch should be called for JSON string returnValue");
+  const codeResults = result.state.events.filter((e) => e.kind === "code-result");
+  assert.equal(codeResults.length, 2);
+  assert.equal(codeResults[1]!.payload.source, "wireActions");
+});
+
+test("executeStep falls back to sequential execRaw when rawBatch unavailable", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  let rawCallCount = 0;
+  const provider = createMockProvider({
+    async exec() {
+      return {
+        ok: true,
+        durationMs: 10,
+        returnValue: {
+          wireActions: [
+            { method: "Input.dispatchKeyEvent", params: { type: "keyDown", key: "ArrowLeft" } },
+            { method: "Input.dispatchKeyEvent", params: { type: "keyUp", key: "ArrowLeft" } },
+          ],
+        },
+      };
+    },
+    async raw() {
+      rawCallCount++;
+      return { result: true };
+    },
+  } as Partial<BrowserProvider>);
+  // Deliberately do NOT attach rawBatch
+  const policy = createMockPolicyEngine();
+
+  const result = await executeStep(
+    state,
+    {
+      kind: "exec",
+      summary: "Sequential fallback",
+      payload: { code: "return {wireActions:[...]}" },
+    },
+    provider,
+    policy,
+  );
+
+  assert.equal(rawCallCount, 2, "should call raw twice sequentially");
+  const codeResults = result.state.events.filter((e) => e.kind === "code-result");
+  assert.equal(codeResults.length, 2);
+  assert.equal(codeResults[1]!.payload.source, "wireActions");
+  assert.equal(codeResults[1]!.payload.commandsExecuted, 2);
+});
