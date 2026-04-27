@@ -73,30 +73,47 @@ function titleIndicatesAuth(title: string): boolean {
  * Heuristic: if the page has exactly one form, very few buttons, and no
  * tables or dialogs, it is likely a login form rather than a full
  * application page.
+ *
+ * Key anti-pattern: a real page with a cookie consent overlay also has one
+ * form and few visible buttons. We reject the login-form hypothesis when
+ * the page has substantial content (many links, multiple headings, or a
+ * dialog element which cookie banners sometimes use).
  */
 function pageLooksLikeLoginForm(observation: BrowserObservation): boolean {
   const summary = observation.pageSummary;
   if (summary === undefined) return false;
 
-  const hasSingleForm = summary.forms === 1;
-  const hasNoTables = (summary.tables ?? 0) === 0;
-  const hasFewButtons = (summary.buttons ?? 0) <= 3;
-  const hasNoDialogs = (summary.dialogs ?? 0) === 0;
+  const forms = summary.forms ?? 0;
+  const tables = summary.tables ?? 0;
+  const buttons = summary.buttons ?? 0;
+  const dialogs = summary.dialogs ?? 0;
+  const links = summary.links ?? 0;
+  const inputs = summary.inputs ?? 0;
+  const headings = summary.headings ?? [];
 
-  if (!hasSingleForm) return false;
+  // A real login page has exactly one form
+  if (forms !== 1) return false;
 
-  // Check visible text for form-related keywords
-  const texts = summary.visibleTexts;
-  if (texts !== undefined && texts.length > 0) {
-    const combined = texts.join(" ").toLowerCase();
-    const hasFormKeywords = FORM_KEYWORDS.has("password") &&
-      combined.includes("password");
-    if (hasFormKeywords) {
-      return hasNoTables && hasFewButtons && hasNoDialogs;
-    }
+  // Dialog present → likely a cookie/consent overlay, not a login page
+  if (dialogs > 0) return false;
+
+  // Many links → this is a real page with content, not a bare login form
+  if (links > 15) return false;
+
+  // Multiple headings → page has structured content beyond a login form
+  if (headings.length > 2) return false;
+
+  const noTables = tables === 0;
+  const fewButtons = buttons <= 3;
+
+  // Check headings for password keyword — strong auth signal
+  const combined = headings.join(" ").toLowerCase();
+  if (combined.includes("password")) {
+    return noTables && fewButtons;
   }
 
-  return hasNoTables && hasFewButtons && hasNoDialogs;
+  // Without password evidence, also require few inputs (login ≈ 2-3 fields)
+  return noTables && fewButtons && inputs <= 3;
 }
 
 // ---------------------------------------------------------------------------

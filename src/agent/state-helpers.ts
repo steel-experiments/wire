@@ -42,6 +42,11 @@ export function hasExtractedTaskResult(state: LoopState): boolean {
     return false;
   }
 
+  // Error results (e.g. {"error":"profile link not found"}) don't count
+  if (isErrorResult(result)) {
+    return false;
+  }
+
   return (
     (typeof result.payload.stdout === "string" && result.payload.stdout.trim().length > 0) ||
     result.payload.returnValue !== undefined
@@ -57,6 +62,20 @@ export function isNavigationOnlyResult(event: TraceEvent): boolean {
   if (keys.length === 0) return false;
   const navKeys = new Set(["navigated", "navigatedTo", "url", "redirected", "loaded"]);
   return keys.every((k) => navKeys.has(k));
+}
+
+/** Detect code-results that only report an error (e.g. {"error":"not found"}). */
+export function isErrorResult(event: TraceEvent): boolean {
+  const rv = event.payload.returnValue;
+  if (rv === undefined || rv === null || typeof rv === "string") return false;
+  if (typeof rv !== "object") return false;
+  const obj = rv as Record<string, unknown>;
+  const keys = Object.keys(obj);
+  if (keys.length === 0) return false;
+  // Only has "error" key, or "error" plus navigation/meta keys
+  if (!("error" in obj)) return false;
+  const nonMetaKeys = keys.filter((k) => k !== "error" && k !== "hrefs" && k !== "links" && k !== "anchors" && k !== "sample");
+  return nonMetaKeys.length === 0;
 }
 
 /** True when a post-navigation extraction step has occurred (code-exec after navigation that produced real output).
@@ -81,7 +100,11 @@ export function hasPostNavigationExtraction(state: LoopState): boolean {
 }
 
 function isLikelyNavCode(code: string): boolean {
-  return /\blocation\s*[.=]/u.test(code) || /\bwindow\.location\b/u.test(code);
+  // Match navigation writes (assignment) but not reads (property access).
+  // `location = url`, `location.href = url`, `location.assign(...)`, `location.replace(...)`
+  // but NOT `location.href` in a return/expression context.
+  return /\blocation\s*(=|\.href\s*=|\.assign\s*\(|\.replace\s*\()/u.test(code) ||
+    /\bwindow\.location\s*(=|\.href\s*=|\.assign\s*\(|\.replace\s*\()/u.test(code);
 }
 
 export function hasAttemptedExtraction(state: LoopState): boolean {
@@ -136,7 +159,7 @@ export function isRecoverableStepError(message: string): boolean {
 export interface ObservationDiff {
   urlChanged: boolean;
   titleChanged: boolean;
-  visibleTextChanged: boolean;
+  contentChanged: boolean;
   unchanged: boolean;
   summary: string;
 }
@@ -146,34 +169,26 @@ export function computeObservationDiff(
   newObs: TraceEvent,
 ): ObservationDiff {
   if (!oldObs) {
-    return { urlChanged: false, titleChanged: false, visibleTextChanged: false, unchanged: false, summary: "First observation" };
+    return { urlChanged: false, titleChanged: false, contentChanged: false, unchanged: false, summary: "First observation" };
   }
 
   const urlChanged = String(oldObs.payload.url ?? "") !== String(newObs.payload.url ?? "");
   const titleChanged = String(oldObs.payload.title ?? "") !== String(newObs.payload.title ?? "");
 
-  const oldTexts = ((oldObs.payload.pageSummary as Record<string, unknown>)?.visibleTexts) as string[] | undefined;
-  const newTexts = ((newObs.payload.pageSummary as Record<string, unknown>)?.visibleTexts) as string[] | undefined;
-  const visibleTextChanged = (oldTexts?.join("") ?? "") !== (newTexts?.join("") ?? "");
+  const oldHeadings = ((oldObs.payload.pageSummary as Record<string, unknown>)?.headings) as string[] | undefined;
+  const newHeadings = ((newObs.payload.pageSummary as Record<string, unknown>)?.headings) as string[] | undefined;
+  const contentChanged = (oldHeadings?.join("") ?? "") !== (newHeadings?.join("") ?? "");
 
-  const unchanged = !urlChanged && !titleChanged && !visibleTextChanged;
+  const unchanged = !urlChanged && !titleChanged && !contentChanged;
 
   const parts: string[] = [];
   if (urlChanged) parts.push(`URL changed to ${newObs.payload.url}`);
   if (titleChanged) parts.push(`Title changed to ${newObs.payload.title}`);
-
-  // Detect numeric changes (e.g. scores) in visible text
-  if (visibleTextChanged && oldTexts && newTexts) {
-    const oldNums = (oldTexts.join(" ").match(/\d+/g) ?? []).join(",");
-    const newNums = (newTexts.join(" ").match(/\d+/g) ?? []).join(",");
-    if (oldNums !== newNums) {
-      parts.push(`Numeric values changed`);
-    }
-  }
+  if (contentChanged) parts.push(`Page headings changed`);
 
   const summary = parts.length > 0 ? parts.join("; ") : "Page unchanged";
 
-  return { urlChanged, titleChanged, visibleTextChanged, unchanged, summary };
+  return { urlChanged, titleChanged, contentChanged, unchanged, summary };
 }
 
 export function countConsecutiveUnchanged(events: TraceEvent[]): number {

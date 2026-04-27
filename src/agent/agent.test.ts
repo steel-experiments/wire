@@ -866,6 +866,7 @@ test("executeTask forces a generic extraction pass before finishing task mode", 
   const task = makeTask({ objective: "Extract booking results" });
   const sessionId = makeSessionId();
   let execCount = 0;
+  let observeCount = 0;
   const provider = createMockProvider({
     async createSession() {
       return {
@@ -873,6 +874,15 @@ test("executeTask forces a generic extraction pass before finishing task mode", 
         provider: "custom",
         createdAt: new Date().toISOString(),
         status: "ready",
+      };
+    },
+    async observe(input: BrowserObserveInput): Promise<BrowserObservation> {
+      observeCount++;
+      return {
+        sessionId: input.sessionId,
+        url: `https://example.com/obs-${observeCount}`,
+        title: `Observation ${observeCount}`,
+        tabs: [],
       };
     },
     async exec(input: BrowserExecRequest): Promise<BrowserExecResult> {
