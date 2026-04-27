@@ -188,16 +188,16 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number, a
       .slice(-3)
       .map((e) => {
         const ps = e.payload.pageSummary as Record<string, unknown> | undefined;
-        const texts = Array.isArray(ps?.visibleTexts) ? ps!.visibleTexts as string[] : undefined;
-        const obs: { url: string; title: string; forms: number; buttons: number; dialogs: number; visibleTexts?: string[] } = {
+        const headings = Array.isArray(ps?.headings) ? ps!.headings as string[] : undefined;
+        const obs: { url: string; title: string; forms: number; buttons: number; dialogs: number; headings?: string[] } = {
           url: String(e.payload.url ?? ""),
           title: String(e.payload.title ?? ""),
           forms: typeof ps?.forms === "number" ? ps.forms : 0,
           buttons: typeof ps?.buttons === "number" ? ps.buttons : 0,
           dialogs: typeof ps?.dialogs === "number" ? ps.dialogs : 0,
         };
-        if (texts) {
-          obs.visibleTexts = texts;
+        if (headings) {
+          obs.headings = headings;
         }
         return obs;
       });

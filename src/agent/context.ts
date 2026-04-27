@@ -22,7 +22,7 @@ export interface ObservationSummary {
   forms: number;
   buttons: number;
   dialogs: number;
-  visibleTexts?: string[];
+  headings?: string[];
 }
 
 export interface TraceSummary {
@@ -163,8 +163,8 @@ export function assembleUserPrompt(context: ContextBundle): string {
       obsParts.push(`Title: ${obs.title}`);
     }
     obsParts.push(`Elements: ${obs.forms} forms, ${obs.buttons} buttons, ${obs.dialogs} dialogs`);
-    if (obs.visibleTexts && obs.visibleTexts.length > 0) {
-      obsParts.push(`Visible text: ${obs.visibleTexts.slice(0, 5).join(" | ")}`);
+    if (obs.headings && obs.headings.length > 0) {
+      obsParts.push(`Headings: ${obs.headings.join(" | ")}`);
     }
     sections.push(obsParts.join("\n"));
   }
@@ -215,11 +215,12 @@ const BASE_ACTION_GUIDANCE = [
   'For "exec", set payload.code to JavaScript that runs in the browser. Code is auto-wrapped as (async () => { YOUR_CODE })(). Do NOT wrap your code in another IIFE; use top-level `return` to output results.',
   'For "raw", set payload.method to a CDP method and payload.params to its parameters. Use raw only when exec cannot reach the needed browser behavior.',
   '"exec" code can return {wireActions: [{method, params}, ...]} to send CDP commands after the code runs.',
+  "Observation gives you orientation (URL, title, headings, element counts) — NOT page content. To read page content, write exec code (e.g. return document.body.innerText or query specific selectors).",
   "Prefer direct URL patterns before brittle DOM hunting when the destination is obvious.",
   "For web search tasks, use DuckDuckGo (duckduckgo.com) or Bing (bing.com). Google blocks headless browsers with captchas.",
   "Wire auto-observes after navigation code. Do NOT emit a separate observe after navigating.",
-  "Navigation alone is not task completion. After reaching the target page, run exec code that extracts or verifies the answer.",
-  "Only use finish after evidence exists in a successful exec result or artifact.",
+  "After navigating to a target page, always exec code to extract the answer before finishing. Navigation alone is not task completion.",
+  "Only use finish after your exec code has returned the actual answer in its return value.",
   "Use reusable routes, selectors, waits, and traps from loaded skills when they apply.",
   "Do not wrap the JSON in prose.",
 ];

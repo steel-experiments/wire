@@ -460,18 +460,12 @@ export class SteelProvider implements BrowserProvider {
 }
 
 const OBSERVE_SCRIPT = `(() => {
-  const SKIP_TAGS = new Set(["SCRIPT","STYLE","NOSCRIPT","SVG","PATH","BR","HR"]);
-  const visibleTexts = [];
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, {
-    acceptNode(node) {
-      return SKIP_TAGS.has(node.tagName) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
-    }
-  });
-  while (visibleTexts.length < 30 && walker.nextNode()) {
-    const el = walker.currentNode;
-    if (el.childElementCount > 0) continue;
-    const text = (el.textContent ?? "").trim();
-    if (text.length > 0 && text.length < 500) visibleTexts.push(text);
+  // Orientation-only: where am I, what's on the page, what can I interact with.
+  // Content extraction is the agent's job via exec — not the observer's.
+  const headings = [];
+  for (const h of document.querySelectorAll("h1,h2,h3")) {
+    const t = (h.textContent ?? "").trim();
+    if (t && headings.length < 5) headings.push(t.slice(0, 120));
   }
   const active = document.activeElement;
   return {
@@ -484,11 +478,13 @@ const OBSERVE_SCRIPT = `(() => {
       selectorHint: active.id ? "#" + active.id : undefined,
     } : undefined,
     pageSummary: {
-      visibleTexts,
+      headings,
       forms: document.forms.length,
       buttons: document.querySelectorAll("button, input[type=button], input[type=submit]").length,
       dialogs: document.querySelectorAll("dialog, [role=\\"dialog\\"]").length,
       tables: document.querySelectorAll("table").length,
+      links: document.querySelectorAll("a[href]").length,
+      inputs: document.querySelectorAll("input,textarea,select").length,
     },
   };
 })()`;

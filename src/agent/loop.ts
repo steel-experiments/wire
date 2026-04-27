@@ -405,15 +405,13 @@ export async function executeStep(
           } catch { /* returnValue wasn't valid JSON — ignore */ }
         }
 
-        // Auto-observe after navigation: when exec code navigates the page
-        // (location.href/assign/replace), the code-result has no output and
+        // Auto-observe after navigation: when exec code contains navigation
+        // patterns (location.href/assign/replace), the page URL changes and
         // the agent needs an observation of the new page before its next turn.
-        const isNavigation = isLikelyNavigationCode(code);
-        const producedOutput = result.ok && (
-          (typeof result.stdout === "string" && result.stdout.length > 0) ||
-          result.returnValue !== undefined
-        );
-        if (isNavigation && !producedOutput) {
+        // Previously this only fired when navigation code produced no output,
+        // but agents commonly write `location.href=url; return {navigated:url}`
+        // which defeated the gate and left the agent blind on the new page.
+        if (isLikelyNavigationCode(code)) {
           const observation = await observeBrowser({ provider, sessionId: state.sessionId });
           const obsPayload = toObservationPayload(observation);
           state.events.push({

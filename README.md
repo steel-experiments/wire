@@ -12,7 +12,7 @@ That's the core loop. Everything else — classification, skills, policy, benchm
 
 ```bash
 pnpm install
-pnpm test          # 449 tests across 19 files
+pnpm test          # 600+ tests across 19 files
 
 # Set up API keys
 export STEEL_API_KEY=...     # browser infrastructure
@@ -61,7 +61,7 @@ diff <(jq '.' .wire/benchmarks/bench-old.json) <(jq '.' .wire/benchmarks/bench-n
 ## How it works
 
 1. **You provide an objective.** Wire creates a Task and opens a real Chrome session via Steel.
-2. **The agent loops.** Each step: observe the page, reason with an LLM, execute JavaScript in the browser. Actions are real code, not a DSL.
+2. **The agent loops.** Each step: observe the page (orientation only — URL, title, headings, element counts), reason with an LLM, execute JavaScript in the browser. The agent writes its own extraction and interaction code per task. Actions are real code, not a DSL.
 3. **Policy gates destructive ops.** Submissions, purchases, and deletions require explicit approval. Deny rules block irreversible actions outright.
 4. **Every run leaves evidence.** Trace events, artifacts, a classification, and an outcome summary — all persisted as JSON under `.wire/`.
 5. **Skills accumulate.** After a run, Wire proposes durable markdown skills from reusable patterns it discovered (routes, selectors, traps). These are loaded automatically on future visits to the same site.
@@ -140,8 +140,8 @@ src/
 | `pnpm install` | Install dependencies |
 | `pnpm dev` | Run via tsx |
 | `pnpm build` | Compile to dist/ |
-| `pnpm test` | Run all tests (449 across 19 files) |
+| `pnpm test` | Run all tests (600+ across 19 files) |
 | `pnpm typecheck` | Type-check without emitting |
 | `pnpm check` | typecheck + test |
 
-Node.js 22+, pnpm, strict TypeScript, ESM only. One dependency: `zod` (boundary validation only).
+Node.js 22+, pnpm, strict TypeScript, ESM only. One dependency: `zod` (boundary validation only). Source capped at 12,000 lines.

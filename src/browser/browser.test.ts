@@ -148,7 +148,7 @@ test("observeBrowser returns observation with artifacts", async () => {
         tabs: [],
         screenshotArtifactId: screenshotId,
         pageSummary: {
-          visibleTexts: ["Hello", "World"],
+          headings: ["Hello"],
           forms: 1,
           buttons: 3,
         },
@@ -162,7 +162,7 @@ test("observeBrowser returns observation with artifacts", async () => {
   assert.ok(result.pageSummary);
   assert.equal(result.pageSummary.forms, 1);
   assert.equal(result.pageSummary.buttons, 3);
-  assert.deepEqual(result.pageSummary.visibleTexts, ["Hello", "World"]);
+  assert.deepEqual(result.pageSummary.headings, ["Hello"]);
 });
 
 test("observeBrowser propagates provider errors", async () => {

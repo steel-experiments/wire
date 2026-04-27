@@ -285,11 +285,13 @@ export const browserObservationSchema = z
       .optional(),
     pageSummary: z
       .object({
-        visibleTexts: z.array(z.string()).optional(),
+        headings: z.array(z.string()).optional(),
         forms: z.number().int().nonnegative().optional(),
         buttons: z.number().int().nonnegative().optional(),
         dialogs: z.number().int().nonnegative().optional(),
         tables: z.number().int().nonnegative().optional(),
+        links: z.number().int().nonnegative().optional(),
+        inputs: z.number().int().nonnegative().optional(),
       })
       .strict()
       .optional(),

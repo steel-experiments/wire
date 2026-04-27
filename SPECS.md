@@ -530,6 +530,10 @@ Purpose:
 - compare-friendly snapshots,
 - planning without massive DOM dumps.
 
+Observation is **orientation-only**: URL, title, headings, and element counts.
+It answers "where am I?" and "did my action work?" — not "what does the page say?"
+Content extraction is the agent's job via `exec`.
+
 ```ts
 export interface BrowserObservation {
   sessionId: string;
@@ -547,11 +551,13 @@ export interface BrowserObservation {
     selectorHint?: string;
   };
   pageSummary?: {
-    visibleTexts?: string[];
+    headings?: string[];
     forms?: number;
     buttons?: number;
     dialogs?: number;
     tables?: number;
+    links?: number;
+    inputs?: number;
   };
 }
 ```
@@ -1049,28 +1055,38 @@ This allows Steel-like providers and future custom providers.
 6. Ask LLM for next action
 7. Policy-check action
 8. If approved, exec code or observe
-9. Persist artifacts and trace
-10. Re-evaluate progress
-11. Branch if uncertainty merits experiment
-12. Finish, summarize, and propose skill updates
+9. Auto-observe after navigation (agent stays oriented)
+10. Persist artifacts and trace
+11. Finish guards: reject finish unless code evidence exists
+12. Finish, classify, summarize, and propose skill updates
 ```
 
+The agent is free to write any code it needs in `exec`. The runtime provides orientation (observe), execution (exec), and honesty enforcement (finish guards, classification). Content extraction, DOM parsing, form filling, and all task-specific logic live in the agent's code — not in the runtime.
+
 ### 19.2 Action proposal shape
+
+The agent proposes one of four core actions per turn. Provider-specific actions (e.g. `reconfigure`) can be registered at runtime via the action registry.
 
 ```ts
 export interface ProposedAction {
   kind:
     | 'observe'
     | 'exec'
-    | 'request-approval'
-    | 'branch-experiment'
-    | 'load-skill'
-    | 'propose-skill'
+    | 'raw'
     | 'finish';
   summary: string;
   payload?: Record<string, unknown>;
 }
 ```
+
+- **observe**: request page orientation (URL, title, headings, element counts)
+- **exec**: run JavaScript in the browser. Navigation, extraction, interaction — the agent writes whatever code the task requires
+- **raw**: send CDP commands directly. Escape hatch when exec is insufficient
+- **finish**: end the run. Only accepted after code evidence exists in a successful exec result
+
+Policy checks and approvals happen automatically before execution — the agent does not request them explicitly.
+Skill loading happens automatically on navigation and task start — the agent does not request it explicitly.
+Skill proposals happen automatically after run completion — the agent does not request them explicitly.
 
 ### 19.3 Stopping conditions
 Stop when:
@@ -1314,6 +1330,8 @@ A user can give the system a web task or vague hunch, attach a profile, and rece
 - strict TypeScript
 - ESM only
 - observation before first action
+- auto-observe after navigation
+- finish guards reject finishes without code evidence
 - trace every code execution
 - approvals for irreversible actions
 - skills loaded on demand
@@ -1321,6 +1339,7 @@ A user can give the system a web task or vague hunch, attach a profile, and rece
 
 ### Agent behavior defaults
 - prefer direct routes over UI wandering
+- observation is orientation — use exec to read page content
 - prefer verification after visible actions
 - stop at auth walls
 - search skills before inventing new hacks

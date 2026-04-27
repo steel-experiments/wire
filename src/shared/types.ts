@@ -209,11 +209,13 @@ export interface BrowserFocusContext {
 }
 
 export interface BrowserPageSummary {
-  visibleTexts?: string[];
+  headings?: string[];
   forms?: number;
   buttons?: number;
   dialogs?: number;
   tables?: number;
+  links?: number;
+  inputs?: number;
 }
 
 export interface BrowserObservation {

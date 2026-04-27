@@ -270,7 +270,7 @@ test("SteelProvider.observe returns page snapshot", async () => {
       value: {
         url: "https://example.com/dashboard",
         title: "Dashboard",
-        pageSummary: { forms: 1, buttons: 2, dialogs: 0, tables: 0, visibleTexts: ["Dashboard"] },
+        pageSummary: { forms: 1, buttons: 2, dialogs: 0, tables: 0, headings: ["Dashboard"] },
       },
     },
   });
