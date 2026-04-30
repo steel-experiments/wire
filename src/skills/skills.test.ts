@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -12,7 +12,7 @@ import type { SkillFrontmatter, SkillMetadata } from "../shared/types.js";
 import { loadSkillDocsFromDir, loadSkillsFromDir, findMatchingSkills, setSkillLoadWarningSink } from "./loader.js";
 import { matchSkillsByHostname, matchSkillsByTags, scoreSkills, sortByRelevance } from "./matcher.js";
 import { extractSections, parseSkillFile } from "./parser.js";
-import { manageSkillPromotion, promoteSkill, generateSkillProposal, type PromotionCandidate } from "./promote.js";
+import { manageSkillPromotion, promoteSkill, generateSkillProposal, writeSkillProposal, type PromotionCandidate } from "./promote.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -754,6 +754,18 @@ test("promoteSkill replaces existing skill when new one has higher confidence", 
   assert.equal(skills.length, 1);
 });
 
+test("promoteSkill replaces stale incumbent when confidence is close", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+
+  await promoteSkill(makeCandidate({ confidence: 0.95, facts: ["Old fact"] }), dir);
+  const path = await promoteSkill(makeCandidate({ confidence: 0.92, facts: ["New useful trap"] }), dir);
+
+  assert.ok(typeof path === "string");
+  const raw = await readFile(path!, "utf-8");
+  assert.match(raw, /New useful trap/u);
+});
+
 test("promoteSkill writes when no existing skill for hostname", async () => {
   testRoot = makeRoot();
   const dir = join(testRoot, "skills");
@@ -796,4 +808,37 @@ test("manageSkillPromotion writes proposal first and only auto-promotes high con
   assert.equal(high.promoted, true);
   assert.ok(high.proposalPath?.includes(".proposals"));
   assert.ok(high.activePath?.endsWith(".md"));
+});
+
+test("manageSkillPromotion rejects duplicate proposals for a hostname", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+
+  await manageSkillPromotion(makeCandidate({ confidence: 0.7, facts: ["Use the retry button after game over"] }), dir);
+  const second = await manageSkillPromotion(makeCandidate({ confidence: 0.8, facts: ["Use the retry button after game over"] }), dir);
+
+  assert.equal(second.promoted, false);
+  assert.match(second.reason, /duplicate/u);
+  assert.equal((await readdir(join(dir, ".proposals"))).length, 1);
+});
+
+test("manageSkillPromotion caps proposals per hostname", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+
+  for (let i = 0; i < 7; i++) {
+    await manageSkillPromotion(makeCandidate({ confidence: 0.7, facts: [`Unique fact ${i} selector-${i}`] }), dir);
+  }
+
+  assert.equal((await readdir(join(dir, ".proposals"))).length, 5);
+});
+
+test("writeSkillProposal validates generated frontmatter before writing", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+
+  await assert.rejects(
+    () => writeSkillProposal(makeCandidate({ skillId: "bad" as PromotionCandidate["skillId"] }), dir),
+    /Expected skill_\* id/u,
+  );
 });

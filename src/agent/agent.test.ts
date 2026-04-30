@@ -263,7 +263,13 @@ test("executeStep handles observe action", async () => {
 test("executeStep handles exec action with allowed policy", async () => {
   const task = makeTask();
   const state = createLoopState(task, makeSessionId());
-  const provider = createMockProvider();
+  let execInput: BrowserExecRequest | undefined;
+  const provider = createMockProvider({
+    async exec(input: BrowserExecRequest): Promise<BrowserExecResult> {
+      execInput = input;
+      return { ok: true, stdout: "ok", durationMs: 10 };
+    },
+  });
   const policy = createMockPolicyEngine();
 
   const result = await executeStep(
@@ -284,6 +290,28 @@ test("executeStep handles exec action with allowed policy", async () => {
   assert.equal(result.state.events[0]!.kind, "policy-check");
   assert.equal(result.state.events[1]!.kind, "code-exec");
   assert.equal(result.state.events[2]!.kind, "code-result");
+  assert.equal(execInput?.timeoutMs, 12_000);
+});
+
+test("executeStep caps requested exec timeout", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  let execInput: BrowserExecRequest | undefined;
+  const provider = createMockProvider({
+    async exec(input: BrowserExecRequest): Promise<BrowserExecResult> {
+      execInput = input;
+      return { ok: true, stdout: "ok", durationMs: 10 };
+    },
+  });
+
+  await executeStep(
+    state,
+    { kind: "exec", summary: "Slow read", payload: { code: "return 1", timeoutMs: 60_000 } },
+    provider,
+    createMockPolicyEngine(),
+  );
+
+  assert.equal(execInput?.timeoutMs, 12_000);
 });
 
 test("executeStep handles exec action denied by policy", async () => {
@@ -497,6 +525,25 @@ test("defaultAgentTurn parses raw JSON without code fences", async () => {
 
   assert.equal(action.kind, "observe");
   assert.equal(action.summary, "Inspect page");
+});
+
+test("defaultAgentTurn includes metacognition warnings in prompt", async () => {
+  const state = createLoopState(makeTask(), makeSessionId());
+  let prompt = "";
+  state.events.push(
+    { id: createId("event"), runId: state.run.id, ts: new Date().toISOString(), kind: "code-exec", payload: { code: "return wait()" } },
+    { id: createId("event"), runId: state.run.id, ts: new Date().toISOString(), kind: "code-exec", payload: { code: "return wait()" } },
+    { id: createId("event"), runId: state.run.id, ts: new Date().toISOString(), kind: "error", payload: { message: "CDP command timed out after 12000ms: Runtime.evaluate" } },
+  );
+  const turn = defaultAgentTurn({ model: "test-model", async chat(messages) {
+    prompt = String(messages.find((m) => m.role === "user")?.content ?? "");
+    return { content: '{"kind":"observe","summary":"Retry differently"}', model: "test-model" };
+  } });
+
+  await turn(state, createMockProvider());
+
+  assert.match(prompt, /identical exec code was tried 2 times/u);
+  assert.match(prompt, /Reactive constraint/u);
 });
 
 // ---------------------------------------------------------------------------
@@ -1057,6 +1104,39 @@ test("executeTask forces a generic extraction pass before finishing task mode", 
   assert.match(String(artifactEvent.payload.content ?? ""), /"Hotel One"/u);
 });
 
+test("executeTask blocks finish until numeric objective evidence is present", async () => {
+  const task = makeTask({ objective: "play 2048 and refresh for new game 5 times" });
+  const sessionId = makeSessionId();
+  let execCount = 0;
+  const provider = createMockProvider({
+    async createSession() {
+      return { id: sessionId, provider: "custom", createdAt: new Date().toISOString(), status: "ready" };
+    },
+    async exec(): Promise<BrowserExecResult> {
+      execCount++;
+      return {
+        ok: true,
+        durationMs: 10,
+        returnValue: execCount === 1
+          ? { score: 68, runs: [{ run: 1, score: 68 }] }
+          : { game: "2048", runs: [1, 2, 3, 4, 5].map((run) => ({ run, score: run * 10 })) },
+      };
+    },
+    async stopSession() {},
+  });
+
+  const result = await executeTask(
+    task,
+    { provider, policyEngine: createMockPolicyEngine(), maxSteps: 4 },
+    async (state) => state.stepCount === 0
+      ? { kind: "exec", summary: "Play once", payload: { code: "return score" } }
+      : { kind: "finish", summary: "Done" },
+  );
+
+  assert.equal(execCount, 2);
+  assert.equal(result.run.status, "succeeded");
+});
+
 test("executeTask streams trace events to an optional sink", async () => {
   const task = makeTask({ objective: "Observe and finish" });
   const sessionId = makeSessionId();
@@ -1124,6 +1204,7 @@ test("executeTask retries after a recoverable step error when budget remains", a
   const task = makeTask({ objective: "Recover from transient browser error" });
   const sessionId = makeSessionId();
   let execCount = 0;
+  let observeCount = 0;
   const provider = createMockProvider({
     async createSession() {
       return {
@@ -1131,6 +1212,15 @@ test("executeTask retries after a recoverable step error when budget remains", a
         provider: "custom",
         createdAt: new Date().toISOString(),
         status: "ready",
+      };
+    },
+    async observe(input: BrowserObserveInput): Promise<BrowserObservation> {
+      observeCount++;
+      return {
+        sessionId: input.sessionId,
+        url: "https://example.com/recovered",
+        title: "Recovered",
+        tabs: [],
       };
     },
     async exec(): Promise<BrowserExecResult> {
@@ -1165,6 +1255,7 @@ test("executeTask retries after a recoverable step error when budget remains", a
   );
 
   assert.equal(execCount, 2);
+  assert.equal(observeCount, 2);
   assert.equal(result.run.status, "succeeded");
   assert.equal(result.run.result, "Recovered answer");
 });
@@ -1944,6 +2035,69 @@ test("executeStep executes wireActions from exec returnValue (JSON string)", asy
   const codeResults = result.state.events.filter((e) => e.kind === "code-result");
   assert.equal(codeResults.length, 2);
   assert.equal(codeResults[1]!.payload.source, "wireActions");
+});
+
+test("executeStep caps oversized wireActions batches", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  const requested = Array.from({ length: 100 }, () => ({ method: "Input.dispatchKeyEvent" }));
+  let received = 0;
+  const provider = createMockProvider({
+    async exec() {
+      return { ok: true, durationMs: 10, returnValue: { wireActions: requested } };
+    },
+  } as Partial<BrowserProvider>);
+  (provider as unknown as Record<string, unknown>).rawBatch = async (_sessionId: SessionId, commands: Array<{ method: string }>) => {
+    received = commands.length;
+    return { ok: true };
+  };
+
+  const result = await executeStep(
+    state,
+    { kind: "exec", summary: "Large CDP batch", payload: { code: "return {wireActions}" } },
+    provider,
+    createMockPolicyEngine(),
+  );
+
+  assert.equal(received, 80);
+  const wireResult = result.state.events.filter((event) => event.kind === "code-result").at(-1)!;
+  assert.equal(wireResult.payload.source, "wireActions");
+  assert.equal(wireResult.payload.commandsRequested, 100);
+  assert.equal(wireResult.payload.commandsExecuted, 80);
+  assert.equal(wireResult.payload.truncated, true);
+});
+
+test("executeStep drops Runtime.evaluate from wireActions", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  let methods: string[] = [];
+  const provider = createMockProvider({
+    async exec() {
+      return {
+        ok: true,
+        durationMs: 10,
+        returnValue: {
+          wireActions: [
+            { method: "Runtime.evaluate", params: { expression: "new Promise(()=>{})" } },
+            { method: "Input.dispatchKeyEvent", params: { type: "keyDown", key: "ArrowDown" } },
+          ],
+        },
+      };
+    },
+  } as Partial<BrowserProvider>);
+  (provider as unknown as Record<string, unknown>).rawBatch = async (_sessionId: SessionId, commands: Array<{ method: string }>) => {
+    methods = commands.map((command) => command.method);
+    return { ok: true };
+  };
+
+  await executeStep(
+    state,
+    { kind: "exec", summary: "Mixed wire actions", payload: { code: "return {wireActions}" } },
+    provider,
+    createMockPolicyEngine(),
+  );
+
+  assert.deepEqual(methods, ["Input.dispatchKeyEvent"]);
 });
 
 test("executeStep falls back to sequential execRaw when rawBatch unavailable", async () => {

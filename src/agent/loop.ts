@@ -30,9 +30,8 @@ import { redactJsonObject } from "../shared/redact.js";
 import { countConsecutiveUnchanged } from "./state-helpers.js";
 import type { ActionExecutionContext } from "./actions.js";
 
-// ---------------------------------------------------------------------------
-// Loop state — decomposed by time scale
-// ---------------------------------------------------------------------------
+const MAX_CDP_BATCH_COMMANDS = 80;
+const DEFAULT_EXEC_TIMEOUT_MS = 12_000;
 
 /** Static input: task identity and browser session. */
 interface TaskContext {
@@ -62,10 +61,6 @@ export interface LoopState extends TaskContext, RunTrace, StepCounter {
   latestScreenshotBase64?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Loop result
-// ---------------------------------------------------------------------------
-
 export interface LoopResult {
   run: Run;
   events: TraceEvent[];
@@ -79,24 +74,12 @@ export interface LoopResult {
   pendingAction?: ProposedAction;
 }
 
-// ---------------------------------------------------------------------------
-// Proposed action type (mirrors SPECS section 19.2)
-// ---------------------------------------------------------------------------
-
 export { type ProposedAction } from "../shared/types.js";
-
-// ---------------------------------------------------------------------------
-// Agent turn function signature
-// ---------------------------------------------------------------------------
 
 export type AgentTurnFn = (
   state: LoopState,
   provider: BrowserProvider,
 ) => Promise<ProposedAction>;
-
-// ---------------------------------------------------------------------------
-// Create loop state
-// ---------------------------------------------------------------------------
 
 export function createLoopState(
   task: Task,
@@ -136,10 +119,6 @@ export function createLoopState(
   return state;
 }
 
-// ---------------------------------------------------------------------------
-// Stopping conditions
-// ---------------------------------------------------------------------------
-
 export interface StopConditions {
   maxSteps: number;
   budgetExhausted: boolean;
@@ -174,10 +153,6 @@ export function shouldStop(
 
   return { stop: false };
 }
-
-// ---------------------------------------------------------------------------
-// Execute a single loop step
-// ---------------------------------------------------------------------------
 
 export async function executeStep(
   state: LoopState,
@@ -322,6 +297,17 @@ export async function executeStep(
           provider,
           sessionId: state.sessionId,
           code,
+          timeoutMs: Math.min(
+            DEFAULT_EXEC_TIMEOUT_MS,
+            Math.max(
+              1,
+              Math.floor(
+                typeof action.payload?.timeoutMs === "number" && Number.isFinite(action.payload.timeoutMs)
+                  ? action.payload.timeoutMs
+                  : DEFAULT_EXEC_TIMEOUT_MS,
+              ),
+            ),
+          ),
         });
 
         const resultPayload: JsonObject = {
@@ -353,9 +339,11 @@ export async function executeStep(
               : result.returnValue;
             if (parsed && Array.isArray(parsed.wireActions)) {
               const commands = parsed.wireActions.filter(
-                (a: unknown) => typeof (a as Record<string, unknown>)?.method === "string",
-              );
+                (a: unknown) => typeof (a as Record<string, unknown>)?.method === "string" &&
+                  (a as Record<string, unknown>).method !== "Runtime.evaluate",
+              ).slice(0, MAX_CDP_BATCH_COMMANDS);
               if (commands.length > 0) {
+                const commandsRequested = parsed.wireActions.length;
                 const steelProvider = provider as unknown as {
                   rawBatch?(sessionId: SessionId, commands: Array<{ method: string; params?: Record<string, unknown> }>): Promise<unknown>;
                 };
@@ -397,6 +385,8 @@ export async function executeStep(
                     durationMs: Date.now() - cdpStart,
                     source: "wireActions",
                     commandsExecuted: commands.length,
+                    commandsRequested,
+                    truncated: commandsRequested > commands.length,
                     returnValue: cdpResult as import("../shared/types.js").JsonValue,
                   },
                 });
@@ -452,12 +442,14 @@ export async function executeStep(
       }
 
       if (commands.length > 0) {
+        const commandsRequested = commands.length;
+        const commandsToRun = commands.slice(0, MAX_CDP_BATCH_COMMANDS);
         state.events.push({
           id: createId("event"),
           runId: state.run.id,
           ts: nowIsoUtc(),
           kind: "code-exec",
-          payload: redactJsonObject({ rawCommands: commands.length, methods: commands.map((c) => c.method) }),
+          payload: redactJsonObject({ rawCommands: commandsToRun.length, methods: commandsToRun.map((c) => c.method) }),
         });
 
         let lastResult: unknown;
@@ -466,15 +458,15 @@ export async function executeStep(
 
         // Use batch method if provider supports it (single connection for all commands)
         const steelProvider = provider as unknown as { rawBatch?(sessionId: SessionId, commands: Array<{ method: string; params?: Record<string, unknown> }>): Promise<unknown> };
-        if (commands.length > 1 && steelProvider.rawBatch) {
+        if (commandsToRun.length > 1 && steelProvider.rawBatch) {
           try {
-            lastResult = await steelProvider.rawBatch(state.sessionId, commands);
+            lastResult = await steelProvider.rawBatch(state.sessionId, commandsToRun);
           } catch (err) {
             ok = false;
             lastResult = err instanceof Error ? err.message : String(err);
           }
         } else {
-          for (const cmd of commands) {
+          for (const cmd of commandsToRun) {
             try {
               const rawOpts: { provider: BrowserProvider; sessionId: SessionId; method: string; params?: JsonObject } = {
                 provider,
@@ -499,7 +491,9 @@ export async function executeStep(
           payload: {
             ok,
             durationMs: Date.now() - startedAt,
-            ...(ok ? { commandsExecuted: commands.length } : {}),
+            commandsRequested,
+            truncated: commandsRequested > commandsToRun.length,
+            ...(ok ? { commandsExecuted: commandsToRun.length } : {}),
             returnValue: lastResult as unknown as import("../shared/types.js").JsonValue,
           },
         });

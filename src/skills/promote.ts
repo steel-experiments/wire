@@ -1,4 +1,4 @@
-import { mkdir, readdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { createId, nowIsoUtc } from "../shared/ids.js";
@@ -8,12 +8,8 @@ import type {
   TraceEvent,
 } from "../shared/types.js";
 import type { LLMProvider, ChatMessage } from "../providers/llm/openai.js";
+import { parseSkillFile } from "./parser.js";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-/** A reusable finding extracted from a completed run. */
 export interface PromotionCandidate {
   skillId: SkillId;
   hostname: string;
@@ -29,6 +25,7 @@ export interface PromotionCandidate {
 export interface SkillPromotionPolicy {
   autoPromoteMinConfidence: number;
   requireReusableSignal: boolean;
+  proposalCapPerHostname: number;
 }
 
 export interface ManagedSkillPromotion {
@@ -41,11 +38,8 @@ export interface ManagedSkillPromotion {
 export const DEFAULT_SKILL_PROMOTION_POLICY: SkillPromotionPolicy = {
   autoPromoteMinConfidence: 0.9,
   requireReusableSignal: true,
+  proposalCapPerHostname: 5,
 };
-
-// ---------------------------------------------------------------------------
-// Secret detection
-// ---------------------------------------------------------------------------
 
 const SECRET_PATTERNS: RegExp[] = [
   /(?:password|passwd|pwd)\s*[:=]\s*\S+/iu,
@@ -57,17 +51,9 @@ const SECRET_PATTERNS: RegExp[] = [
   /\b(?:GH[pousr])_[A-Za-z0-9_]{36,}\b/u,
 ];
 
-/**
- * Check whether `content` contains common secret patterns.
- * Returns `true` if any pattern matches.
- */
 export function containsSecrets(content: string): boolean {
   return SECRET_PATTERNS.some((re) => re.test(content));
 }
-
-// ---------------------------------------------------------------------------
-// Pattern extraction helpers
-// ---------------------------------------------------------------------------
 
 function extractHostname(url: string): string | null {
   try {
@@ -77,16 +63,8 @@ function extractHostname(url: string): string | null {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Trace serialization for LLM
-// ---------------------------------------------------------------------------
-
 const SKIP_KINDS = new Set(["skill-load", "policy-check", "skill-proposal", "approval-request"]);
 
-/**
- * Serialize trace events into a compact one-line-per-event format suitable
- * for an LLM prompt.
- */
 export function serializeTraceForLLM(events: TraceEvent[]): string {
   const lines: string[] = [];
 
@@ -136,14 +114,6 @@ export function serializeTraceForLLM(events: TraceEvent[]): string {
   return lines.join("\n");
 }
 
-// ---------------------------------------------------------------------------
-// LLM response parsing
-// ---------------------------------------------------------------------------
-
-/**
- * Parse the LLM response content into a `PromotionCandidate`, or `null` if
- * the LLM indicated no proposal or the output is unparseable.
- */
 export function parseSkillProposalResponse(
   content: string,
   runId: RunId,
@@ -186,15 +156,6 @@ export function parseSkillProposalResponse(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-/**
- * Ask the LLM to propose a reusable skill from a completed run's trace.
- * Returns a `PromotionCandidate` if the LLM identifies reusable knowledge,
- * or `null` otherwise. Never throws — errors are caught and return `null`.
- */
 export async function llmProposeSkill(
   events: TraceEvent[],
   runId: RunId,
@@ -239,10 +200,6 @@ export async function llmProposeSkill(
   }
 }
 
-/**
- * Generate a skill proposal as a markdown document with YAML frontmatter.
- * The output is suitable for writing to a skill directory for human review.
- */
 export function generateSkillProposal(candidate: PromotionCandidate): string {
   const lines: string[] = [];
 
@@ -333,9 +290,47 @@ function skillFileName(candidate: PromotionCandidate): string {
   return `${candidate.hostname.replace(/\./gu, "_")}-${candidate.skillId.slice(0, 16)}.md`;
 }
 
+function proposalSignal(candidate: PromotionCandidate): Set<string> {
+  const text = [...candidate.facts, ...candidate.selectors, ...candidate.routes, ...candidate.waits, ...candidate.traps].join(" ");
+  return new Set((text.toLowerCase().match(/[a-z0-9.#/-]{3,}/gu) ?? []).filter((w) => !["the", "and", "for", "with"].includes(w)));
+}
+
+function similarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let overlap = 0;
+  for (const word of a) if (b.has(word)) overlap++;
+  return overlap / Math.min(a.size, b.size);
+}
+
+async function findSimilarProposal(candidate: PromotionCandidate, skillDir: string): Promise<string | undefined> {
+  const dir = join(skillDir, ".proposals");
+  const prefix = candidate.hostname.replace(/\./gu, "_");
+  const signal = proposalSignal(candidate);
+  try {
+    for (const name of await readdir(dir)) {
+      if (!name.startsWith(prefix) || !name.endsWith(".md")) continue;
+      const path = join(dir, name);
+      const raw = await readFile(path, "utf-8");
+      if (similarity(signal, new Set(raw.toLowerCase().match(/[a-z0-9.#/-]{3,}/gu) ?? [])) >= 0.7) return path;
+    }
+  } catch { /* no proposal dir yet */ }
+  return undefined;
+}
+
+async function pruneProposals(skillDir: string, hostname: string, keep: number): Promise<void> {
+  const dir = join(skillDir, ".proposals");
+  const prefix = hostname.replace(/\./gu, "_");
+  try {
+    const paths = (await readdir(dir)).filter((n) => n.startsWith(prefix) && n.endsWith(".md")).map((n) => join(dir, n));
+    const dated = await Promise.all(paths.map(async (path) => ({ path, mtime: (await stat(path)).mtimeMs })));
+    for (const item of dated.sort((a, b) => b.mtime - a.mtime).slice(keep)) await unlink(item.path).catch(() => {});
+  } catch { /* best effort */ }
+}
+
 export async function writeSkillProposal(
   candidate: PromotionCandidate,
   skillDir: string,
+  proposalCap = DEFAULT_SKILL_PROMOTION_POLICY.proposalCapPerHostname,
 ): Promise<string> {
   const content = generateSkillProposal(candidate);
   if (containsSecrets(content)) {
@@ -343,11 +338,13 @@ export async function writeSkillProposal(
       `Refusing to write skill proposal ${candidate.skillId}: secret patterns detected in generated content.`,
     );
   }
+  parseSkillFile(content, skillFileName(candidate));
 
   const proposalDir = join(skillDir, ".proposals");
   await mkdir(proposalDir, { recursive: true });
   const filePath = join(proposalDir, skillFileName(candidate));
   await writeFile(filePath, content, "utf-8");
+  await pruneProposals(skillDir, candidate.hostname, proposalCap);
   return filePath;
 }
 
@@ -356,7 +353,15 @@ export async function manageSkillPromotion(
   skillDir: string,
   policy: SkillPromotionPolicy = DEFAULT_SKILL_PROMOTION_POLICY,
 ): Promise<ManagedSkillPromotion> {
-  const proposalPath = await writeSkillProposal(candidate, skillDir);
+  const duplicatePath = await findSimilarProposal(candidate, skillDir);
+  if (duplicatePath) {
+    return {
+      proposalPath: duplicatePath,
+      promoted: false,
+      reason: "rejected-duplicate: similar proposal already exists for hostname",
+    };
+  }
+  const proposalPath = await writeSkillProposal(candidate, skillDir, policy.proposalCapPerHostname);
 
   if (policy.requireReusableSignal && !hasReusableSignal(candidate)) {
     return {
@@ -378,16 +383,12 @@ export async function manageSkillPromotion(
   const managed: ManagedSkillPromotion = {
     proposalPath,
     promoted: Boolean(activePath),
-    reason: activePath ? "auto-promoted" : "proposal-only: active skill already has equal or higher confidence",
+    reason: activePath ? "auto-promoted" : "proposal-only: active skill confidence is clearly higher",
   };
   if (activePath) managed.activePath = activePath;
   return managed;
 }
 
-/**
- * Scan the skill directory for existing files matching the same hostname
- * prefix. Returns paths of files for the same hostname.
- */
 async function findExistingSkillsForHostname(
   skillDir: string,
   hostname: string,
@@ -403,18 +404,6 @@ async function findExistingSkillsForHostname(
   }
 }
 
-/**
- * Write a promoted skill file to the given skill directory.
- *
- * Before writing, the proposal content is scanned for secrets. If any are
- * found the write is aborted and an error is thrown.
- *
- * If an existing skill for the same hostname already exists and has equal or
- * higher confidence, the new skill is skipped. If the new skill has higher
- * confidence, the old file is replaced.
- *
- * Returns the absolute path of the written file, or undefined if skipped.
- */
 export async function promoteSkill(
   candidate: PromotionCandidate,
   skillDir: string,
@@ -435,12 +424,10 @@ export async function promoteSkill(
   // Dedup: check for existing skills with the same hostname
   const existing = await findExistingSkillsForHostname(skillDir, candidate.hostname);
   if (existing.length > 0) {
-    // Extract confidence from the first matching file's frontmatter
     const existingConfidence = await readSkillConfidence(existing[0]!);
-    if (existingConfidence !== undefined && existingConfidence >= candidate.confidence) {
-      return undefined; // skip — existing skill is at least as good
+    if (existingConfidence !== undefined && existingConfidence - 0.05 > candidate.confidence) {
+      return undefined;
     }
-    // New skill is better — remove the old one(s)
     for (const path of existing) {
       try { await unlink(path); } catch { /* best effort */ }
     }
@@ -452,13 +439,9 @@ export async function promoteSkill(
   return filePath;
 }
 
-/**
- * Read the confidence value from a skill file's frontmatter.
- * Returns undefined if the file can't be parsed or has no confidence.
- */
 async function readSkillConfidence(filePath: string): Promise<number | undefined> {
   try {
-    const raw = await import("node:fs/promises").then((fs) => fs.readFile(filePath, "utf-8"));
+    const raw = await readFile(filePath, "utf-8");
     const match = raw.match(/^---\n([\s\S]*?)\n---/u);
     if (!match) return undefined;
     const frontmatter = match[1]!;

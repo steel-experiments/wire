@@ -33,6 +33,7 @@ export interface SteelRetryEvent {
 
 const DEFAULT_BASE_URL = "https://api.steel.dev/v1";
 const DEFAULT_CDP_COMMAND_TIMEOUT_MS = 30_000;
+const RAW_RUNTIME_EVALUATE_TIMEOUT_MS = 12_000;
 
 interface SteelSessionResponse {
   id: string;
@@ -422,9 +423,11 @@ export class SteelProvider implements BrowserProvider {
         const targets = await listPageTargets(cdp);
         const target = pickTarget(targets);
         const targetSessionId = await attachToTarget(cdp, target.targetId);
-        return cdp.send(input.method, input.params, targetSessionId);
+        const raw = capRawRuntimeEvaluate(input.method, input.params);
+        return cdp.send(input.method, raw.params, targetSessionId, raw.timeoutMs);
       }
-      return cdp.send(input.method, input.params);
+      const raw = capRawRuntimeEvaluate(input.method, input.params);
+      return cdp.send(input.method, raw.params, undefined, raw.timeoutMs);
     });
   }
 
@@ -450,7 +453,8 @@ export class SteelProvider implements BrowserProvider {
       let lastResult: unknown;
       for (const cmd of commands) {
         const sid = cdpMethodNeedsTargetSession(cmd.method) ? targetSessionId : undefined;
-        lastResult = await cdp.send(cmd.method, cmd.params, sid);
+        const raw = capRawRuntimeEvaluate(cmd.method, cmd.params);
+        lastResult = await cdp.send(cmd.method, raw.params, sid, raw.timeoutMs);
       }
       return lastResult;
     });
@@ -459,6 +463,15 @@ export class SteelProvider implements BrowserProvider {
 
 function cdpMethodNeedsTargetSession(method: string): boolean {
   return /^(DOM|Input|Page|Runtime)\./u.test(method);
+}
+
+function capRawRuntimeEvaluate(method: string, params?: Record<string, unknown>): { params?: Record<string, unknown>; timeoutMs?: number } {
+  if (method !== "Runtime.evaluate") return params ? { params } : {};
+  const requested = typeof params?.timeout === "number" && Number.isFinite(params.timeout)
+    ? Math.floor(params.timeout)
+    : RAW_RUNTIME_EVALUATE_TIMEOUT_MS;
+  const timeout = Math.min(RAW_RUNTIME_EVALUATE_TIMEOUT_MS, Math.max(1, requested));
+  return { params: { ...params, timeout }, timeoutMs: timeout };
 }
 
 const OBSERVE_SCRIPT = `(() => {
@@ -748,14 +761,17 @@ class CdpConnection {
     });
   }
 
-  async send<T>(method: string, params?: Record<string, unknown>, sessionId?: string): Promise<T> {
+  async send<T>(method: string, params?: Record<string, unknown>, sessionId?: string, timeoutMs?: number): Promise<T> {
     await this.ready;
     const id = this.nextId++;
+    const effectiveTimeoutMs = timeoutMs
+      ? Math.min(this.commandTimeoutMs, Math.max(1, timeoutMs))
+      : this.commandTimeoutMs;
     return await new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`CDP command timed out after ${this.commandTimeoutMs}ms: ${method}`));
-      }, this.commandTimeoutMs);
+        reject(new Error(`CDP command timed out after ${effectiveTimeoutMs}ms: ${method}`));
+      }, effectiveTimeoutMs);
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
       const message: Record<string, unknown> = { id, method };
       if (params) {
@@ -867,6 +883,7 @@ async function evaluateJson<T>(
       timeout: timeoutMs,
     },
     sessionId,
+    timeoutMs,
   );
 
   if (response.exceptionDetails) {

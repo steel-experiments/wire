@@ -350,11 +350,11 @@ test("sanitizeSkillContent strips <system> tags and content", () => {
   assert.ok(result.includes("After"));
 });
 
-test("sanitizeSkillContent caps output at 300 characters", () => {
-  const longContent = "A".repeat(500);
+test("sanitizeSkillContent caps output at 1000 characters", () => {
+  const longContent = "A".repeat(1200);
   const result = sanitizeSkillContent(longContent);
 
-  assert.equal(result.length, 300);
+  assert.equal(result.length, 1000);
 });
 
 test("sanitizeSkillContent passes legitimate content through unchanged", () => {

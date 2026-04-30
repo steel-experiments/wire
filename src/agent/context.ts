@@ -1,7 +1,3 @@
-// ---------------------------------------------------------------------------
-// Context assembly types
-// ---------------------------------------------------------------------------
-
 export interface TaskObjective {
   mode: string;
   objective: string;
@@ -54,35 +50,20 @@ export interface ContextBundle {
   providerActions?: Array<{ kind: string; description: string }>;
 }
 
-// ---------------------------------------------------------------------------
-// Prompt assembly
-// ---------------------------------------------------------------------------
-
 import { redactSecrets } from "../shared/redact.js";
-
-// ---------------------------------------------------------------------------
-// Context assembly types
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Skill content sanitization — strip injection patterns before LLM injection
-// ---------------------------------------------------------------------------
 
 const INJECTION_LINE_PATTERN = /^(system|ignore previous|disregard|forget)\b/iu;
 const SYSTEM_TAG_PATTERN = /<system>[\s\S]*?<\/system>/giu;
-const SKILL_GUIDANCE_CHAR_LIMIT = 300;
+const SKILL_GUIDANCE_CHAR_LIMIT = 1000;
 
 export function sanitizeSkillContent(text: string): string {
-  // Strip <system>...</system> blocks
   let result = text.replace(SYSTEM_TAG_PATTERN, "");
 
-  // Strip injection-attempt lines
   result = result
     .split("\n")
     .filter((line) => !INJECTION_LINE_PATTERN.test(line))
     .join("\n");
 
-  // Cap at char limit
   return result.slice(0, SKILL_GUIDANCE_CHAR_LIMIT);
 }
 
@@ -152,7 +133,7 @@ export function assembleUserPrompt(context: ContextBundle): string {
         return base;
       },
     );
-    sections.push("Loaded skills:\n" + skillLines.join("\n"));
+    sections.push("Loaded skills:\nSite-specific; follow their Workflow and Traps before guessing.\n" + skillLines.join("\n"));
   }
 
   // Current observations
@@ -213,9 +194,9 @@ const BASE_ACTION_GUIDANCE = [
   "Return exactly one next action as JSON.",
   'For "observe", omit payload unless you need {"targetId":"..."}',
   'For "exec", set payload.code to JavaScript that runs in the browser. Code is auto-wrapped as (async () => { YOUR_CODE })(). Do NOT wrap your code in another IIFE; use top-level `return` to output results.',
-  "Each exec call has a hard 30-second CDP timeout. Keep total wall-clock work (including awaited setTimeouts) under ~25s. For long sequences (key-spam, scrolling, polling), split across multiple exec turns or use raw CDP commands which run per-call rather than per-script.",
+  "Each exec call defaults to a 12-second CDP timeout and payload.timeoutMs is capped at 12000. Keep scripts short; avoid sleep/poll loops. For long sequences, split across turns or return wireActions.",
   'For "raw", set payload.method to a CDP method and payload.params to its parameters. Use raw only when exec cannot reach the needed browser behavior.',
-  '"exec" code can return {wireActions: [{method, params}, ...]} to send CDP commands after the code runs.',
+  '"exec" code can return {wireActions: [{method, params}, ...]} to send CDP commands after the code runs. Keep wireActions batches under 80 commands; send another action after reading state.',
   "Observation gives you orientation (URL, title, headings, element counts) — NOT page content. To read page content, write exec code (e.g. return document.body.innerText or query specific selectors).",
   "Prefer direct URL patterns before brittle DOM hunting when the destination is obvious.",
   "For web search tasks, use DuckDuckGo (duckduckgo.com) or Bing (bing.com). Google blocks headless browsers with captchas.",

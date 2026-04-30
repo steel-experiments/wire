@@ -1,10 +1,6 @@
 import type { RunClassification, RunClassificationKind, TaskMode, TraceEvent } from "../shared/types.js";
 import { isNavigationOnlyResult } from "./state-helpers.js";
 
-// ---------------------------------------------------------------------------
-// Objective relevance check
-// ---------------------------------------------------------------------------
-
 const STOP_WORDS = new Set([
   "the", "and", "for", "with", "from", "this", "that", "then", "than",
   "are", "was", "has", "have", "been", "will", "would", "could", "should",
@@ -19,18 +15,11 @@ const ACTION_VERBS = new Set([
   "achieve", "beat", "finish", "play",
 ]);
 
-/**
- * Extract keywords from a string: lowercase alphanumeric tokens of 3+ chars.
- */
 function objectiveKeywords(text: string): Set<string> {
   const matches = text.match(/[a-z0-9]{3,}/giu) ?? [];
   return new Set(matches.map((m) => m.toLowerCase()).filter((w) => !STOP_WORDS.has(w)));
 }
 
-/**
- * Extract verb phrases from an objective — words that indicate what "done" looks like.
- * Example: "win the game" → ["win", "game"]
- */
 function objectiveVerbPhrases(text: string): Set<string> {
   const matches = text.match(/[a-z0-9]{3,}/giu) ?? [];
   return new Set(
@@ -40,11 +29,7 @@ function objectiveVerbPhrases(text: string): Set<string> {
   );
 }
 
-/**
- * Extract the last meaningful result text from the trace.
- */
 function extractFinalResultText(events: TraceEvent[]): string | undefined {
-  // Check the last code-result with output
   const lastResult = [...events].reverse().find((e) =>
     e.kind === "code-result" &&
     e.payload.ok === true &&
@@ -65,7 +50,6 @@ function extractFinalResultText(events: TraceEvent[]): string | undefined {
     }
   }
 
-  // Check the last note artifact
   const lastNote = [...events].reverse().find((e) =>
     e.kind === "artifact" &&
     e.payload.kind === "note" &&
@@ -80,13 +64,19 @@ function extractFinalResultText(events: TraceEvent[]): string | undefined {
   return undefined;
 }
 
-/**
- * Check whether the extracted result plausibly addresses the objective.
- * Requires at least one verb phrase from the objective to appear in the result,
- * not just any keyword. This prevents "2048" in a page title from satisfying "win the game".
- */
+function objectiveIterationSatisfied(resultText: string | undefined, objective: string): boolean {
+  const needed = objective.match(/\b(\d+)\s+(?:times|runs?|plays?|games?)\b/iu);
+  if (!needed || !resultText) return false;
+  const target = Number(needed[1]);
+  const repeatedItems = resultText.match(/"(?:run|game|play)"\s*:/giu)?.length ?? 0;
+  if (repeatedItems >= target) return true;
+  const count = resultText.match(/"(?:runsCount|playsCompleted|playsDone|gamesCompleted|completed)"\s*:\s*(\d+)/iu);
+  return count ? Number(count[1]) >= target : false;
+}
+
 function resultAddressesObjective(resultText: string | undefined, objective: string): boolean {
-  if (!resultText || !objective) return true; // no objective = no gate
+  if (!resultText || !objective) return true;
+  if (objectiveIterationSatisfied(resultText, objective)) return true;
 
   const verbPhrases = objectiveVerbPhrases(objective);
   if (verbPhrases.size === 0) return true;
@@ -98,7 +88,6 @@ function resultAddressesObjective(resultText: string | undefined, objective: str
     }
   }
 
-  // Fallback: check broader keywords too, but with lower confidence
   const objWords = objectiveKeywords(objective);
   for (const word of objWords) {
     if (resultLower.includes(word)) {
@@ -108,10 +97,6 @@ function resultAddressesObjective(resultText: string | undefined, objective: str
 
   return false;
 }
-
-// ---------------------------------------------------------------------------
-// Run classification from trace evidence
-// ---------------------------------------------------------------------------
 
 export interface ClassificationInput {
   mode: TaskMode;
@@ -289,13 +274,19 @@ export function classifyRun(input: ClassificationInput): RunClassification {
     if (taskModeHasCompletionEvidence) {
       if (addressesObjective) {
         if (errorCount > 0) {
-          return applyStagnationDowngrade({
+          const recovered: RunClassification = {
             kind: "task-complete",
             confidence: 0.7,
             notes: [`Recovered after ${errorCount} error${errorCount === 1 ? "" : "s"}`],
-          }, consecutiveUnchanged);
+          };
+          return mode === "task" && hasAnswerArtifact
+            ? recovered
+            : applyStagnationDowngrade(recovered, consecutiveUnchanged);
         }
-        return applyStagnationDowngrade({ kind: "task-complete", confidence: 0.85 }, consecutiveUnchanged);
+        const complete: RunClassification = { kind: "task-complete", confidence: 0.85 };
+        return mode === "task" && hasAnswerArtifact
+          ? complete
+          : applyStagnationDowngrade(complete, consecutiveUnchanged);
       }
       // Has output but it doesn't address the objective
       return {
@@ -320,11 +311,11 @@ export function classifyRun(input: ClassificationInput): RunClassification {
   if (codeSuccessCount > 0 && codeFailCount > 0) {
     const hasAnswerArtifact = answerArtifactCount > 0 && codeSuccessWithOutputCount > 0;
     if (mode === "task" && hasAnswerArtifact && addressesObjective) {
-      return applyStagnationDowngrade({
+      return {
         kind: "task-complete",
         confidence: 0.7,
         notes: [`Recovered after ${codeFailCount} failed code execution${codeFailCount === 1 ? "" : "s"}`],
-      }, consecutiveUnchanged);
+      };
     }
     if (mode === "task" && hasAnswerArtifact && !addressesObjective) {
       return {

@@ -46,6 +46,7 @@ import {
   hasExtractedTaskResult,
   hasAttemptedExtraction,
   hasMeaningfulProgress,
+  hasObjectiveCardinalityEvidence,
   buildFailureSummary,
   isRecoverableStepError,
   computeObservationDiff,
@@ -58,10 +59,6 @@ import {
   codeResultDigest,
 } from "./state-helpers.js";
 import { ActionRegistry, type ActionHandler } from "./actions.js";
-
-// ---------------------------------------------------------------------------
-// RuntimeConfig — what the runtime needs to run
-// ---------------------------------------------------------------------------
 
 export interface RuntimeConfig {
   provider: BrowserProvider;
@@ -188,9 +185,24 @@ function planForState(state: LoopState): TaskPlan {
   return advancePlanBy(basePlan, estimatePlanSignals(state));
 }
 
-// ---------------------------------------------------------------------------
-// defaultAgentTurn — uses LLM if available, falls back to observe+finish
-// ---------------------------------------------------------------------------
+function metacognitionTraces(events: TraceEvent[]): Array<{ kind: string; summary: string }> {
+  const traces: Array<{ kind: string; summary: string }> = [];
+  const execs = events.filter((e) => e.kind === "code-exec" && typeof e.payload.code === "string");
+  const lastCode = execs.at(-1)?.payload.code;
+  if (lastCode) {
+    let count = 0;
+    for (let i = execs.length - 1; i >= 0 && execs[i]?.payload.code === lastCode; i--) count++;
+    if (count >= 2) traces.push({ kind: "thought-summary", summary: `WARNING: identical exec code was tried ${count} times; change strategy before retrying.` });
+  }
+  const error = [...events].reverse().find((e) => e.kind === "error");
+  const message = String(error?.payload.message ?? error?.payload.stderr ?? JSON.stringify(error?.payload ?? ""));
+  if (/timed?\s*out|timeout|Execution context was destroyed|WebSocket error/iu.test(message)) {
+    traces.push({ kind: "error", summary: `Reactive constraint: last browser error was "${message}". Use shorter execs, avoid sleeps/reloads, and re-observe before continuing.` });
+  }
+  const cdp = [...events].reverse().find((e) => e.kind === "code-result" && e.payload.source === "wireActions" && e.payload.truncated === true);
+  if (cdp) traces.push({ kind: "code-result", summary: "Reactive constraint: last wireActions batch was filtered/truncated; keep batches under 80 and do not use Runtime.evaluate there." });
+  return traces;
+}
 
 export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number, actionRegistry?: ActionRegistry): AgentTurnFn {
   return async (state: LoopState, provider: BrowserProvider): Promise<ProposedAction> => {
@@ -255,7 +267,7 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number, a
         guidance: skillGuidance(skill),
       })),
       observations,
-      recentTraces,
+      recentTraces: [...recentTraces, ...metacognitionTraces(state.events)],
       policyNotes: [],
       plan: planToContext(taskPlan),
     };
@@ -380,10 +392,6 @@ async function appendSkillProposalEvents(
     payload,
   });
 }
-
-// ---------------------------------------------------------------------------
-// executeTask — run an agent loop to completion
-// ---------------------------------------------------------------------------
 
 export async function executeTask(
   task: Task,
@@ -619,6 +627,12 @@ async function runMainLoop(
     if (action.kind === "finish") {
       // Prevent finish when step count is too low for real progress
       if (
+        state.task.mode === "task" &&
+        !hasObjectiveCardinalityEvidence(state) &&
+        state.stepCount < config.maxSteps
+      ) {
+        action = buildVerificationAction();
+      } else if (
         state.stepCount < 3 &&
         state.task.mode === "task" &&
         !hasRecordedTaskArtifact(state) &&
@@ -814,6 +828,35 @@ async function runMainLoop(
         consecutiveRecoverableErrors++;
         const budgetRemaining = state.stepCount < config.maxSteps;
         if (budgetRemaining && consecutiveRecoverableErrors < 5) {
+          try {
+            const observation = await observeBrowser({ provider: config.provider, sessionId: state.sessionId });
+            state.events.push({
+              id: createId("event"),
+              runId: state.run.id,
+              ts: nowIsoUtc(),
+              kind: "observation",
+              payload: toObservationPayload(observation),
+            });
+            if (observation.screenshotBase64) {
+              state.latestScreenshotBase64 = observation.screenshotBase64;
+            }
+            signals.authWallHit = detectAuthWall(observation).detected;
+            await syncMatchedSkills(state, config.skillDir);
+            await flushTraceSink(state, config, signals);
+          } catch (observeErr) {
+            state.events.push({
+              id: createId("event"),
+              runId: state.run.id,
+              ts: nowIsoUtc(),
+              kind: "error",
+              payload: {
+                message: observeErr instanceof Error ? observeErr.message : String(observeErr),
+                code: "EOBSERVE",
+              },
+            });
+            await flushTraceSink(state, config, signals);
+            break;
+          }
           continue;
         }
       }

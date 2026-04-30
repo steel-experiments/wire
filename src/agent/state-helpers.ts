@@ -3,10 +3,6 @@ import { createId, nowIsoUtc } from "../shared/ids.js";
 import { isLikelyNavigationCode } from "../browser/exec.js";
 import type { LoopState } from "./loop.js";
 
-// ---------------------------------------------------------------------------
-// State query helpers — pure functions over LoopState
-// ---------------------------------------------------------------------------
-
 function latestEventByKind(state: LoopState, kind: TraceEvent["kind"]): TraceEvent | undefined {
   return [...state.events].reverse().find((event) => event.kind === kind);
 }
@@ -52,6 +48,23 @@ export function hasExtractedTaskResult(state: LoopState): boolean {
     (typeof result.payload.stdout === "string" && result.payload.stdout.trim().length > 0) ||
     result.payload.returnValue !== undefined
   );
+}
+
+export function hasObjectiveCardinalityEvidence(state: LoopState): boolean {
+  const needed = state.task.objective.match(/\b(\d+)\s+(?:times|runs?|plays?|games?)\b/iu);
+  if (!needed) return true;
+  const target = Number(needed[1]);
+  const result = latestCodeResult(state);
+  if (!result || result.payload.ok !== true) return false;
+  const parts = [
+    typeof result.payload.stdout === "string" ? result.payload.stdout : "",
+    result.payload.returnValue === undefined ? "" : JSON.stringify(result.payload.returnValue),
+  ];
+  const text = parts.join("\n");
+  const repeatedItems = text.match(/"(?:run|game|play)"\s*:/giu)?.length ?? 0;
+  if (repeatedItems >= target) return true;
+  const count = text.match(/"(?:runsCount|playsCompleted|playsDone|gamesCompleted|completed)"\s*:\s*(\d+)/iu);
+  return count ? Number(count[1]) >= target : false;
 }
 
 /** Detect code-results that only confirm navigation without extracting meaningful content. */

@@ -21,7 +21,7 @@ confidence: 0.95
 - The original 2048 game uses `.tile-container .tile` elements with value classes `.tile-{N}` and position classes `.tile-position-{row}-{col}`.
 - Win: `.game-message.game-won` element appears inside the iframe document. Score will be > 0.
 - Loss: `.game-message.game-over` element appears inside the iframe document.
-- Do not run long JavaScript move loops in `exec`; Steel has a 30s Runtime.evaluate timeout and navigation/reload destroys execution contexts.
+- Do not run long JavaScript move loops, `sleep`, polling, or `location.reload()` in `exec`; keep scripts short because execution contexts can be destroyed.
 
 ## Selectors
 
@@ -39,7 +39,7 @@ confidence: 0.95
 3. Verify game started: `const doc = document.querySelector('iframe').contentDocument; return JSON.stringify({tiles: doc.querySelectorAll('.tile').length, score: doc.querySelector('.score-container')?.textContent});` — tiles should be > 0
 4. Read state only through the iframe:
    `const doc = document.querySelector('iframe')?.contentDocument; return {score: doc?.querySelector('.score-container')?.textContent, best: doc?.querySelector('.best-container')?.textContent, over: !!doc?.querySelector('.game-message.game-over'), won: !!doc?.querySelector('.game-message.game-won'), tiles: [...doc?.querySelectorAll('.tile') ?? []].map(t => t.className)};`
-5. Play via `wireActions`, not awaited key loops. Return 20-80 CDP commands per exec:
+5. Play via `wireActions`, not awaited key loops. Return 20-60 CDP commands per exec, then stop and read state in the next action:
    `const keys = ['ArrowDown','ArrowLeft','ArrowRight','ArrowDown','ArrowLeft','ArrowUp']; return {wireActions: keys.flatMap(key => [{method:'Input.dispatchKeyEvent', params:{type:'keyDown', key, code:key, windowsVirtualKeyCode:{ArrowUp:38,ArrowDown:40,ArrowLeft:37,ArrowRight:39}[key]}},{method:'Input.dispatchKeyEvent', params:{type:'keyUp', key, code:key, windowsVirtualKeyCode:{ArrowUp:38,ArrowDown:40,ArrowLeft:37,ArrowRight:39}[key]}}])};`
 6. After each raw batch, exec a quick iframe read. If `.game-message.game-over` appears, click the iframe `.retry-button` or the visible "Try Again" button for a new game instead of reloading the page.
 7. For "5 new plays", keep an array of `{run, score, best, over, won}` and finish only after five game-over/retry cycles or a win. Extract the final JSON result from the iframe.

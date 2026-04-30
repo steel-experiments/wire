@@ -191,6 +191,25 @@ describe("classifyRun", () => {
     assert.equal(result.confidence, 0.7);
   });
 
+  it("does not downgrade artifact-backed task completion for stale observations", () => {
+    const events = [
+      makeEvent("observation", { url: "https://example.com", title: "Example" }),
+      makeEvent("observation", { url: "https://example.com", title: "Example" }),
+      makeEvent("observation", { url: "https://example.com", title: "Example" }),
+      makeEvent("code-result", { ok: true, stdout: '{"objectiveVerified":true,"sessionOpen":true}' }),
+      makeEvent("code-result", { ok: false, stderr: "Execution context was destroyed" }),
+      makeEvent("artifact", { kind: "json-output", content: '{"objectiveVerified":true,"sessionOpen":true}' }),
+    ];
+    const result = classifyRun(makeInput({
+      mode: "task",
+      events,
+      objective: "verify objective and keep session open",
+      consecutiveUnchanged: 5,
+    }));
+    assert.equal(result.kind, "task-complete");
+    assert.equal(result.confidence, 0.7);
+  });
+
   it("downgrades task-complete to partial-success when output does not address objective", () => {
     const events = [
       makeEvent("code-result", { ok: true, stdout: '{"title":"Booking.com","url":"https://www.booking.com/"}' }),
@@ -205,6 +224,26 @@ describe("classifyRun", () => {
     assert.equal(result.kind, "partial-success");
     assert.ok(result.confidence < 0.6);
     assert.ok(result.notes?.some((n) => /does not.*address/i.test(n)));
+  });
+
+  it("credits structured iteration evidence for repeat objectives", () => {
+    const payload = {
+      runs: [
+        { run: 1, score: 2872 },
+        { run: 2, score: 8728 },
+        { run: 3, score: 8520 },
+        { run: 4, score: 5120 },
+        { run: 5, score: 9664 },
+      ],
+      sessionOpen: true,
+    };
+    const events = [makeEvent("code-result", { ok: true, returnValue: payload })];
+    const result = classifyRun(makeInput({
+      mode: "task",
+      events,
+      objective: "play 2048 and achieve high score for 5 games",
+    }));
+    assert.equal(result.kind, "task-complete");
   });
 
   it("downgrades recovered task-complete when output does not address objective", () => {
