@@ -34,6 +34,7 @@ import {
   isNavigationOnlyResult,
   hasPostNavigationExtraction,
   isRecoverableStepError,
+  computeRepeatStreak,
 } from "./state-helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -2740,4 +2741,44 @@ test("executeTask does not bail when failures are interleaved with successes", a
 
   // Should run the full budget — alternating success resets the counter
   assert.ok(execCallCount >= 5, `expected the loop to keep going, got ${execCallCount} exec calls`);
+});
+
+test("computeRepeatStreak counts trailing identical exec signatures", () => {
+  const events = [
+    { id: "e1" as never, runId: "r" as never, ts: "1", kind: "code-exec" as const, payload: { code: "alpha" } },
+    { id: "e2" as never, runId: "r" as never, ts: "2", kind: "code-result" as const, payload: { ok: true, returnValue: 1 } },
+    { id: "e3" as never, runId: "r" as never, ts: "3", kind: "code-exec" as const, payload: { code: "alpha" } },
+    { id: "e4" as never, runId: "r" as never, ts: "4", kind: "code-result" as const, payload: { ok: true, returnValue: 1 } },
+    { id: "e5" as never, runId: "r" as never, ts: "5", kind: "code-exec" as const, payload: { code: "alpha" } },
+    { id: "e6" as never, runId: "r" as never, ts: "6", kind: "code-result" as const, payload: { ok: true, returnValue: 1 } },
+  ];
+  const streak = computeRepeatStreak(events);
+  assert.equal(streak.sameSig, 3);
+  assert.equal(streak.sameResult, 3);
+});
+
+test("computeRepeatStreak resets when sig changes", () => {
+  const events = [
+    { id: "e1" as never, runId: "r" as never, ts: "1", kind: "code-exec" as const, payload: { code: "alpha" } },
+    { id: "e2" as never, runId: "r" as never, ts: "2", kind: "code-result" as const, payload: { ok: true, returnValue: 1 } },
+    { id: "e3" as never, runId: "r" as never, ts: "3", kind: "code-exec" as const, payload: { code: "alpha" } },
+    { id: "e4" as never, runId: "r" as never, ts: "4", kind: "code-result" as const, payload: { ok: true, returnValue: 1 } },
+    { id: "e5" as never, runId: "r" as never, ts: "5", kind: "code-exec" as const, payload: { code: "beta" } },
+    { id: "e6" as never, runId: "r" as never, ts: "6", kind: "code-result" as const, payload: { ok: true, returnValue: 2 } },
+  ];
+  const streak = computeRepeatStreak(events);
+  assert.equal(streak.sameSig, 1);
+  assert.equal(streak.sameResult, 1);
+});
+
+test("computeRepeatStreak counts sig matches but not result when results differ", () => {
+  const events = [
+    { id: "e1" as never, runId: "r" as never, ts: "1", kind: "code-exec" as const, payload: { code: "alpha" } },
+    { id: "e2" as never, runId: "r" as never, ts: "2", kind: "code-result" as const, payload: { ok: true, returnValue: 1 } },
+    { id: "e3" as never, runId: "r" as never, ts: "3", kind: "code-exec" as const, payload: { code: "alpha" } },
+    { id: "e4" as never, runId: "r" as never, ts: "4", kind: "code-result" as const, payload: { ok: true, returnValue: 2 } },
+  ];
+  const streak = computeRepeatStreak(events);
+  assert.equal(streak.sameSig, 2);
+  assert.equal(streak.sameResult, 1);
 });

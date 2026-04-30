@@ -240,22 +240,23 @@ const ACCOUNT_PATTERNS = [
 const SUBMIT_PATTERNS = [
   /\.submit\s*\(/u,
   /\brequestSubmit\s*\(/u,
-  /\bclick\s*\(\s*\)/u,
-  /\bmethod\s*:\s*["'](POST|PUT|PATCH)["']/iu,
   /\b(purchase|checkout|pay|send)\b/iu,
 ];
 
+// Bare zero-arg .click() is a user-input gesture, not inherently a submit.
+// Real submits are caught by .submit()/requestSubmit(), purchase/checkout/pay
+// keywords, or by the surrounding fetch verb.
 const INPUT_PATTERNS = [
   /\.value\s*=/u,
   /\.checked\s*=/u,
   /\bdispatchEvent\s*\(/u,
   /\bInput\./u,
+  /\bclick\s*\(\s*\)/u,
 ];
 
 const DOWNLOAD_PATTERNS = [
   /\bdownload\b/iu,
   /URL\.createObjectURL/u,
-  /\.click\s*\(\s*\)/u,
 ];
 
 const NAVIGATION_PATTERNS = [
@@ -266,12 +267,27 @@ const NAVIGATION_PATTERNS = [
   /\bhistory\s*\.\s*(pushState|replaceState)\b/u,
 ];
 
-const NETWORK_MUTATION_PATTERNS = [
-  /\bfetch\s*\([^)]*\bmethod\s*:\s*["'](POST|PUT|PATCH|DELETE)["']/isu,
-  /\bXMLHttpRequest\b[\s\S]*\b(open|send)\s*\(/iu,
-  /\bnavigator\s*\.\s*sendBeacon\s*\(/iu,
-  /\bWebSocket\s*\(/iu,
+// Read-style endpoints that legitimately accept POST as a query verb (search
+// APIs, GraphQL, RPC list/lookup). Used to downgrade POST fetches from
+// "unknown-mutation" to "read" so search tasks don't trip approval.
+const READ_STYLE_URL_PATTERNS = [
+  /\/(?:search|query|lookup|filter|list|find|browse|count|aggregate)\b/iu,
+  /\bgraphql\b/iu,
+  /\?(?:[^"'\s)]*&)?(?:keyword|keywords|q|query|search|term|filter)=/iu,
 ];
+
+function isMutatingNetwork(code: string): boolean {
+  if (/\bfetch\s*\([\s\S]*?\bmethod\s*:\s*["'](?:PUT|PATCH|DELETE)["']/iu.test(code)) return true;
+  if (/\bnavigator\s*\.\s*sendBeacon\s*\(/iu.test(code)) return true;
+  if (/\bWebSocket\s*\(/iu.test(code)) return true;
+  if (/\bXMLHttpRequest\b[\s\S]*\b(?:open|send)\s*\(/iu.test(code)) return true;
+  const postFetches = code.match(/\bfetch\s*\([\s\S]*?\bmethod\s*:\s*["']POST["']/giu) ?? [];
+  if (postFetches.length === 0) return false;
+  return !postFetches.every((expr) => {
+    const m = expr.match(/\bfetch\s*\(\s*['"`]([^'"`]+)['"`]/u);
+    return !!m && READ_STYLE_URL_PATTERNS.some((p) => p.test(m[1]!));
+  });
+}
 
 export function classifyExecRisk(code: string): ExecRisk {
   const reasons: string[] = [];
@@ -284,7 +300,7 @@ export function classifyExecRisk(code: string): ExecRisk {
     return { kind: "account-change", reasons: ["account or billing mutation terms"] };
   }
 
-  if (NETWORK_MUTATION_PATTERNS.some((pattern) => pattern.test(code))) {
+  if (isMutatingNetwork(code)) {
     return { kind: "unknown-mutation", reasons: ["network mutation or outbound channel"] };
   }
 

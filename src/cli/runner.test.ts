@@ -1,8 +1,15 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createId, nowIsoUtc } from "../shared/ids.js";
+import type { ApprovalRequest, RunCheckpoint, SessionId } from "../shared/types.js";
+import { saveApprovalRequest } from "../storage/approvals.js";
+import { saveRunCheckpoint, loadRunCheckpoint } from "../storage/checkpoints.js";
+import type { BrowserProvider } from "../browser/bridge.js";
 
-import { createExperimentBundleFromRuns, resolveProviderSelection } from "./runner.js";
+import { createExperimentBundleFromRuns, reapExpiredApprovals, resolveProviderSelection } from "./runner.js";
 
 test("resolveProviderSelection uses explicit provider", () => {
   assert.equal(resolveProviderSelection("anthropic", "claude-sonnet-4-6"), "anthropic");
@@ -45,6 +52,67 @@ test("resolveProviderSelection rejects ambiguous provider choice when both keys 
     } else {
       process.env.ANTHROPIC_API_KEY = originalAnthropic;
     }
+  }
+});
+
+test("reapExpiredApprovals stops sessions and marks approvals expired", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wire-reap-"));
+  try {
+    const runId = createId("run");
+    const sessionId = createId("session") as unknown as SessionId;
+    const expiredReq: ApprovalRequest = {
+      id: createId("approval"),
+      runId,
+      actionId: createId("action"),
+      summary: "Stale approval",
+      consequences: ["Execute action"],
+      expiresAt: nowIsoUtc(new Date(Date.now() - 60_000)),
+      status: "pending",
+    };
+    const freshReq: ApprovalRequest = {
+      id: createId("approval"),
+      runId: createId("run"),
+      actionId: createId("action"),
+      summary: "Fresh approval",
+      consequences: ["Execute action"],
+      expiresAt: nowIsoUtc(new Date(Date.now() + 60_000)),
+      status: "pending",
+    };
+    await saveApprovalRequest(root, expiredReq);
+    await saveApprovalRequest(root, freshReq);
+
+    const checkpoint: RunCheckpoint = {
+      runId,
+      task: { id: createId("task"), title: "t", mode: "task", objective: "o", constraints: [], successCriteria: ["done"], createdAt: nowIsoUtc() },
+      run: { id: runId, taskId: createId("task"), status: "awaiting-approval", startedAt: nowIsoUtc() },
+      sessionId,
+      events: [],
+      stepCount: 0,
+      startedAt: nowIsoUtc(),
+      pendingAction: { kind: "exec", summary: "x", payload: { code: "x" } },
+      approvalRequestId: expiredReq.id,
+      savedAt: nowIsoUtc(),
+    };
+    await saveRunCheckpoint(root, checkpoint);
+
+    const stopped: SessionId[] = [];
+    const provider = {
+      async stopSession(id: SessionId) { stopped.push(id); },
+    } as unknown as BrowserProvider;
+
+    const reaped = await reapExpiredApprovals(root, provider);
+    assert.equal(reaped, 1);
+    assert.deepEqual(stopped, [sessionId]);
+
+    // Checkpoint deleted, approval marked expired.
+    await assert.rejects(loadRunCheckpoint(root, runId));
+    const approvals = await import("../storage/approvals.js").then((m) => m.listApprovalRequests(root));
+    const reapedApproval = approvals.find((a) => a.id === expiredReq.id);
+    assert.equal(reapedApproval?.status, "expired");
+    const freshApproval = approvals.find((a) => a.id === freshReq.id);
+    assert.equal(freshApproval?.status, "pending");
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 

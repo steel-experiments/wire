@@ -347,6 +347,30 @@ export function execActionSignature(action: ProposedAction): string | undefined 
   return undefined;
 }
 
+/** Trailing streak of identical exec sig + result digest — fed to the LLM so it can change strategy before the loop guard bails. */
+export function computeRepeatStreak(events: TraceEvent[]): { sameSig: number; sameResult: number } {
+  const pairs: Array<[string, string | undefined]> = [];
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i]!;
+    if (e.kind !== "code-exec" || typeof e.payload["code"] !== "string") continue;
+    const sig = (e.payload["code"] as string).replace(/\s+/gu, " ").trim().slice(0, 80);
+    let result: TraceEvent | undefined;
+    for (let j = i + 1; j < events.length && events[j]!.kind !== "code-exec"; j++) {
+      if (events[j]!.kind === "code-result") { result = events[j]; break; }
+    }
+    pairs.push([sig, codeResultDigest(result)]);
+  }
+  if (pairs.length === 0) return { sameSig: 0, sameResult: 0 };
+  const [lastSig, lastDigest] = pairs[pairs.length - 1]!;
+  let sameSig = 1, sameResult = lastDigest !== undefined ? 1 : 0, broken = lastDigest === undefined;
+  for (let i = pairs.length - 2; i >= 0 && pairs[i]![0] === lastSig; i--) {
+    sameSig++;
+    if (!broken && pairs[i]![1] !== undefined && pairs[i]![1] === lastDigest) sameResult++;
+    else broken = true;
+  }
+  return { sameSig, sameResult };
+}
+
 export function buildVerificationAction(): ProposedAction {
   return {
     kind: "exec",

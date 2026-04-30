@@ -15,7 +15,9 @@ import {
   loadRunCheckpoint,
   saveRunCheckpoint,
 } from "../storage/checkpoints.js";
-import { resolveApproval } from "../policy/approvals.js";
+import { isExpired, resolveApproval } from "../policy/approvals.js";
+import { stopBrowserSession } from "../browser/session.js";
+import type { BrowserProvider } from "../browser/bridge.js";
 import { createPolicyEngine, type PolicyEngine } from "../policy/engine.js";
 import type { PolicyAction } from "../policy/rules.js";
 import { createSteelProvider, createSteelActionHandlers } from "../providers/browser/steel.js";
@@ -346,6 +348,30 @@ async function persistTraceArtifacts(root: string, events: TraceEvent[]): Promis
   }
 }
 
+// Release Steel sessions abandoned at an approval gate past their expiresAt.
+// Awaiting-approval runs keep the browser session alive for resume; if the
+// human never approves, the session would leak without this sweep.
+export async function reapExpiredApprovals(
+  root: string,
+  provider: BrowserProvider,
+  log?: (msg: string) => void,
+): Promise<number> {
+  const approvals = await listApprovalRequests(root).catch(() => []);
+  let reaped = 0;
+  for (const req of approvals) {
+    if (req.status !== "pending" || !isExpired(req)) continue;
+    const checkpoint = await loadRunCheckpoint(root, req.runId).catch(() => undefined);
+    if (checkpoint) {
+      await stopBrowserSession(provider, checkpoint.sessionId).catch(() => {});
+      await deleteRunCheckpoint(root, req.runId);
+    }
+    await saveApprovalRequest(root, { ...req, status: "expired" });
+    reaped += 1;
+    log?.(`Released expired approval ${req.id} (run ${req.runId}${checkpoint ? `, session ${checkpoint.sessionId}` : ""}).`);
+  }
+  return reaped;
+}
+
 // ---------------------------------------------------------------------------
 // runTask — returns RunResult
 // ---------------------------------------------------------------------------
@@ -366,6 +392,12 @@ export async function runTask(options: RunOptions): Promise<RunResult> {
 
   const isJson = options.json === true;
   const config = createRuntimeConfig(options);
+
+  await reapExpiredApprovals(
+    root,
+    config.provider,
+    isJson ? undefined : (msg) => console.log(msg),
+  );
 
   if (!isJson) {
     console.log(`Task created: ${task.id}`);

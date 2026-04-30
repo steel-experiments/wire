@@ -220,6 +220,70 @@ test("classifyExecRisk flags submit and delete browser code", () => {
   assert.equal(classifyExecRisk("await fetch('/items/1', { method: 'DELETE' })").kind, "delete");
 });
 
+test("classifyExecRisk treats POST to search-style endpoints as read", () => {
+  // Search/query/list endpoints often use POST for body-encoded queries; these
+  // are reads, not mutations, and should not trip approval.
+  assert.equal(
+    classifyExecRisk("fetch('https://api.example.com/v1/search', { method: 'POST', body: JSON.stringify({q:'ai'}) })").kind,
+    "read",
+  );
+  assert.equal(
+    classifyExecRisk("fetch('https://www.grants.gov/grantsws/rest/opportunities/search', { method: 'POST' })").kind,
+    "read",
+  );
+  assert.equal(
+    classifyExecRisk("fetch('/graphql', { method: 'POST', body: query })").kind,
+    "read",
+  );
+  assert.equal(
+    classifyExecRisk("fetch('/api/items?q=test', { method: 'POST' })").kind,
+    "read",
+  );
+});
+
+test("classifyExecRisk still flags PUT/PATCH regardless of URL", () => {
+  assert.equal(
+    classifyExecRisk("fetch('/api/search', { method: 'PUT' })").kind,
+    "unknown-mutation",
+  );
+  assert.equal(
+    classifyExecRisk("fetch('/api/search', { method: 'PATCH' })").kind,
+    "unknown-mutation",
+  );
+});
+
+test("classifyExecRisk still flags non-search POSTs and variable URLs as mutation", () => {
+  // Variable URL — can't verify it's read-style, default to flagging.
+  assert.equal(
+    classifyExecRisk("fetch(targetUrl, { method: 'POST', body: payload })").kind,
+    "unknown-mutation",
+  );
+  // Non-read-style URL.
+  assert.equal(
+    classifyExecRisk("fetch('/api/orders', { method: 'POST', body: order })").kind,
+    "unknown-mutation",
+  );
+});
+
+test("classifyExecRisk classifies bare .click() as input, not submit/download", () => {
+  // A bare .click() on a search/nav button is just a user gesture; flagging
+  // it as submit blocked legitimate read tasks.
+  assert.equal(
+    classifyExecRisk("document.querySelector('button.search').click()").kind,
+    "input",
+  );
+  assert.equal(
+    classifyExecRisk("btn.click()").kind,
+    "input",
+  );
+});
+
+test("classifyExecRisk still flags real submit code", () => {
+  assert.equal(classifyExecRisk("form.submit()").kind, "submit");
+  assert.equal(classifyExecRisk("form.requestSubmit()").kind, "submit");
+  assert.equal(classifyExecRisk("checkout()").kind, "submit");
+});
+
 // ---------------------------------------------------------------------------
 // rules.ts — BASELINE_RULES
 // ---------------------------------------------------------------------------

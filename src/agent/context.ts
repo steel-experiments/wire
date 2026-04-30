@@ -46,6 +46,7 @@ export interface ContextBundle {
   budget?: BudgetSummary;
   plan?: string;
   stateDiff?: StateDiffSummary;
+  repeatSignal?: { sameSig: number; sameResult: number };
   sessionCapabilities?: Record<string, unknown>;
   providerActions?: Array<{ kind: string; description: string }>;
 }
@@ -166,6 +167,12 @@ export function assembleUserPrompt(context: ContextBundle): string {
       diffParts.push("WARNING: Your last 2+ actions had no effect. Try a different approach: raw CDP input (Input.dispatchKeyEvent for trusted keypresses), click a specific element, or inspect the DOM more carefully.");
     }
     sections.push(diffParts.join("\n"));
+  }
+
+  if (context.repeatSignal) {
+    const { sameSig, sameResult } = context.repeatSignal;
+    if (sameResult >= 3) sections.push(`STUCK: You ran the same exec code ${sameSig} times in a row and got the same result ${sameResult} times. Stop probing — change strategy now or the run will be aborted.`);
+    else if (sameSig >= 4) sections.push(`REPEATING: You ran the same exec code ${sameSig} times in a row. If this isn't progressing, switch to a different selector, action, or approach.`);
   }
 
   // Session capabilities (generic rendering)

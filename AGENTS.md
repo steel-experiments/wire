@@ -20,4 +20,4 @@ When new knowledge or behavior needs a home, ask:
 - True for many sites; expressible as a thin callable function? → **helper**
 - True regardless of site or task; a property of how wire itself works? → **core**
 
-The project is capped at **12,000 lines of code** (`src/`). This is a hard limit that must never be crossed. Before adding code, consider what can be removed or consolidated first. If a change would push the total past 12k LOC, stop and propose deletions to make room.
+The project is capped at **12,500 lines of code** (`src/`). This is a hard limit that must never be crossed. Before adding code, consider what can be removed or consolidated first. If a change would push the total past 12.5k LOC, stop and propose deletions to make room. The cap was raised from 12,000 once the foundation was complete (live trace UI, layered stuck-loop guards, full skill lifecycle, .env loading, repeat-detector metacognition); future bumps should be similarly justified by structural milestones, not feature accretion.

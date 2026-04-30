@@ -57,6 +57,7 @@ import {
   buildVerificationAction,
   execActionSignature,
   codeResultDigest,
+  computeRepeatStreak,
 } from "./state-helpers.js";
 import { ActionRegistry, type ActionHandler } from "./actions.js";
 
@@ -288,6 +289,12 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number, a
       const diff = computeObservationDiff(previous, latest);
       const consecutiveUnchanged = countConsecutiveUnchanged(state.events);
       context.stateDiff = { summary: diff.summary, consecutiveUnchanged };
+    }
+
+    // Repeat-streak signal: lets the LLM see what our stuck-loop guards see.
+    const streak = computeRepeatStreak(state.events);
+    if (streak.sameSig >= 2) {
+      context.repeatSignal = streak;
     }
 
     // Populate budget info
