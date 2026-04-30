@@ -548,8 +548,41 @@ export interface FinalizeOptions {
   pendingAction?: ProposedAction;
 }
 
+function looksLikeErrorReturn(returnValue: unknown): boolean {
+  if (!returnValue || typeof returnValue !== "object" || Array.isArray(returnValue)) {
+    return false;
+  }
+  const obj = returnValue as Record<string, unknown>;
+  if (typeof obj["error"] === "string" && obj["error"].length > 0) return true;
+  if (obj["clicked"] === false) return true;
+  if (obj["success"] === false) return true;
+  if (typeof obj["status"] === "string" && /error|fail|notfound/iu.test(obj["status"] as string)) return true;
+  return false;
+}
+
+function hasMeaningfulPayload(payload: TraceEvent["payload"]): boolean {
+  const stdout = payload["stdout"];
+  if (typeof stdout === "string" && stdout.trim().length > 0) return true;
+  const ret = payload["returnValue"];
+  if (ret === undefined || ret === null) return false;
+  if (typeof ret === "string") return ret.trim().length > 0;
+  if (Array.isArray(ret)) return ret.length > 0;
+  if (typeof ret === "object") return Object.keys(ret as Record<string, unknown>).length > 0;
+  return true;
+}
+
+// A returnValue containing a top-level `wireActions` array is wire's internal
+// control envelope (CDP commands the agent asked the runtime to dispatch),
+// not a final answer to the task. Skip these when picking the result.
+function looksLikeWireCommand(returnValue: unknown): boolean {
+  if (!returnValue || typeof returnValue !== "object" || Array.isArray(returnValue)) {
+    return false;
+  }
+  return Array.isArray((returnValue as Record<string, unknown>)["wireActions"]);
+}
+
 export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | undefined {
-  const latestAnswerEvent = [...events].reverse().find((event) =>
+  const candidates = [...events].reverse().filter((event) =>
     event.kind === "code-result" &&
     event.payload.ok === true &&
     (
@@ -557,6 +590,18 @@ export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | 
       event.payload.returnValue !== undefined
     )
   );
+
+  // Three-tier preference: meaningful + not-error-shaped + not-a-wire-command,
+  // then merely meaningful, then anything. Empty payloads ({}, [], "") and
+  // wireActions envelopes don't answer the task.
+  const latestAnswerEvent =
+    candidates.find((event) =>
+      hasMeaningfulPayload(event.payload) &&
+      !looksLikeErrorReturn(event.payload.returnValue) &&
+      !looksLikeWireCommand(event.payload.returnValue)
+    ) ??
+    candidates.find((event) => hasMeaningfulPayload(event.payload)) ??
+    candidates[0];
 
   if (latestAnswerEvent) {
     const stdout = latestAnswerEvent.payload.stdout;
@@ -575,7 +620,7 @@ export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | 
   if (mode === "task") {
     const latestNoteArtifact = [...events].reverse().find((event) =>
       event.kind === "artifact" &&
-      (event.payload.kind === "note" || event.payload.kind === "task-summary") &&
+      event.payload.kind === "note" &&
       typeof event.payload.content === "string" &&
       event.payload.content.trim().length > 0
     );

@@ -213,6 +213,7 @@ const BASE_ACTION_GUIDANCE = [
   "Return exactly one next action as JSON.",
   'For "observe", omit payload unless you need {"targetId":"..."}',
   'For "exec", set payload.code to JavaScript that runs in the browser. Code is auto-wrapped as (async () => { YOUR_CODE })(). Do NOT wrap your code in another IIFE; use top-level `return` to output results.',
+  "Each exec call has a hard 30-second CDP timeout. Keep total wall-clock work (including awaited setTimeouts) under ~25s. For long sequences (key-spam, scrolling, polling), split across multiple exec turns or use raw CDP commands which run per-call rather than per-script.",
   'For "raw", set payload.method to a CDP method and payload.params to its parameters. Use raw only when exec cannot reach the needed browser behavior.',
   '"exec" code can return {wireActions: [{method, params}, ...]} to send CDP commands after the code runs.',
   "Observation gives you orientation (URL, title, headings, element counts) — NOT page content. To read page content, write exec code (e.g. return document.body.innerText or query specific selectors).",

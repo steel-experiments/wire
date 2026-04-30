@@ -14,4 +14,10 @@ Do not add framework weight, hidden retries, prompt soup, secret-bearing skills,
 
 When in doubt, choose the simplest change that preserves inspectability, traceability, and real-browser behavior.
 
+When new knowledge or behavior needs a home, ask:
+
+- True for one site or task pattern? → **skill**
+- True for many sites; expressible as a thin callable function? → **helper**
+- True regardless of site or task; a property of how wire itself works? → **core**
+
 The project is capped at **12,000 lines of code** (`src/`). This is a hard limit that must never be crossed. Before adding code, consider what can be removed or consolidated first. If a change would push the total past 12k LOC, stop and propose deletions to make room.

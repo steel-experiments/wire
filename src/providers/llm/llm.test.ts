@@ -238,6 +238,122 @@ test("OpenAIProvider.chat omits temperature and maxTokens when not set", async (
   }
 });
 
+test("OpenAIProvider.chat sends reasoning.effort from constructor config", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedBody: Record<string, unknown> = {};
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+    capturedBody = JSON.parse(init?.body as string) as Record<string, unknown>;
+    return makeOpenAIResponse();
+  };
+
+  try {
+    const provider = new OpenAIProvider({ apiKey: "test-key", reasoningEffort: "high" });
+    await provider.chat(makeMessages());
+    assert.deepEqual(capturedBody.reasoning, { effort: "high" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("OpenAIProvider.chat passes through xhigh reasoning effort", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedBody: Record<string, unknown> = {};
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+    capturedBody = JSON.parse(init?.body as string) as Record<string, unknown>;
+    return makeOpenAIResponse();
+  };
+
+  try {
+    const provider = new OpenAIProvider({ apiKey: "test-key", reasoningEffort: "xhigh" });
+    await provider.chat(makeMessages());
+    assert.deepEqual(capturedBody.reasoning, { effort: "xhigh" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("OpenAIProvider.chat omits reasoning field when effort is none", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedBody: Record<string, unknown> = {};
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+    capturedBody = JSON.parse(init?.body as string) as Record<string, unknown>;
+    return makeOpenAIResponse();
+  };
+
+  try {
+    const provider = new OpenAIProvider({ apiKey: "test-key", reasoningEffort: "none" });
+    await provider.chat(makeMessages());
+    assert.equal(capturedBody.reasoning, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("OpenAIProvider.chat omits reasoning when not configured", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedBody: Record<string, unknown> = {};
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+    capturedBody = JSON.parse(init?.body as string) as Record<string, unknown>;
+    return makeOpenAIResponse();
+  };
+
+  try {
+    const provider = new OpenAIProvider({ apiKey: "test-key" });
+    await provider.chat(makeMessages());
+    assert.equal(capturedBody.reasoning, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("createOpenAIProvider reads OPENAI_REASONING_EFFORT env var", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEnv = process.env.OPENAI_REASONING_EFFORT;
+  process.env.OPENAI_REASONING_EFFORT = "medium";
+  let capturedBody: Record<string, unknown> = {};
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+    capturedBody = JSON.parse(init?.body as string) as Record<string, unknown>;
+    return makeOpenAIResponse();
+  };
+
+  try {
+    const provider = createOpenAIProvider({ apiKey: "test-key" });
+    await provider.chat(makeMessages());
+    assert.deepEqual(capturedBody.reasoning, { effort: "medium" });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalEnv === undefined) delete process.env.OPENAI_REASONING_EFFORT;
+    else process.env.OPENAI_REASONING_EFFORT = originalEnv;
+  }
+});
+
+test("createOpenAIProvider ignores invalid OPENAI_REASONING_EFFORT", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEnv = process.env.OPENAI_REASONING_EFFORT;
+  process.env.OPENAI_REASONING_EFFORT = "bogus";
+  let capturedBody: Record<string, unknown> = {};
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+    capturedBody = JSON.parse(init?.body as string) as Record<string, unknown>;
+    return makeOpenAIResponse();
+  };
+
+  try {
+    const provider = createOpenAIProvider({ apiKey: "test-key" });
+    await provider.chat(makeMessages());
+    assert.equal(capturedBody.reasoning, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalEnv === undefined) delete process.env.OPENAI_REASONING_EFFORT;
+    else process.env.OPENAI_REASONING_EFFORT = originalEnv;
+  }
+});
+
 test("OpenAIProvider.chat throws LLMNetworkError on fetch failure", async () => {
   const originalFetch = globalThis.fetch;
 
@@ -615,5 +731,103 @@ test("AnthropicProvider.chat uses custom model from constructor", async () => {
     assert.equal(capturedBody.model, "claude-3-haiku-20240307");
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("AnthropicProvider.chat sends thinking.effort from constructor config", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedBody: Record<string, unknown> = {};
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+    capturedBody = JSON.parse(init?.body as string) as Record<string, unknown>;
+    return makeAnthropicResponse();
+  };
+
+  try {
+    const provider = new AnthropicProvider({ apiKey: "test-key", reasoningEffort: "max" });
+    await provider.chat(makeMessages());
+    assert.deepEqual(capturedBody.thinking, { type: "enabled", effort: "max" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("AnthropicProvider.chat passes through xhigh effort", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedBody: Record<string, unknown> = {};
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+    capturedBody = JSON.parse(init?.body as string) as Record<string, unknown>;
+    return makeAnthropicResponse();
+  };
+
+  try {
+    const provider = new AnthropicProvider({ apiKey: "test-key", reasoningEffort: "xhigh" });
+    await provider.chat(makeMessages());
+    assert.deepEqual(capturedBody.thinking, { type: "enabled", effort: "xhigh" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("AnthropicProvider.chat omits thinking when not configured", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedBody: Record<string, unknown> = {};
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+    capturedBody = JSON.parse(init?.body as string) as Record<string, unknown>;
+    return makeAnthropicResponse();
+  };
+
+  try {
+    const provider = new AnthropicProvider({ apiKey: "test-key" });
+    await provider.chat(makeMessages());
+    assert.equal(capturedBody.thinking, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("createAnthropicProvider reads ANTHROPIC_REASONING_EFFORT env var", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEnv = process.env.ANTHROPIC_REASONING_EFFORT;
+  process.env.ANTHROPIC_REASONING_EFFORT = "high";
+  let capturedBody: Record<string, unknown> = {};
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+    capturedBody = JSON.parse(init?.body as string) as Record<string, unknown>;
+    return makeAnthropicResponse();
+  };
+
+  try {
+    const provider = createAnthropicProvider({ apiKey: "test-key" });
+    await provider.chat(makeMessages());
+    assert.deepEqual(capturedBody.thinking, { type: "enabled", effort: "high" });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalEnv === undefined) delete process.env.ANTHROPIC_REASONING_EFFORT;
+    else process.env.ANTHROPIC_REASONING_EFFORT = originalEnv;
+  }
+});
+
+test("createAnthropicProvider ignores invalid ANTHROPIC_REASONING_EFFORT", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEnv = process.env.ANTHROPIC_REASONING_EFFORT;
+  process.env.ANTHROPIC_REASONING_EFFORT = "none";
+  let capturedBody: Record<string, unknown> = {};
+
+  globalThis.fetch = async (_input: string | URL | Request, init?: RequestInit) => {
+    capturedBody = JSON.parse(init?.body as string) as Record<string, unknown>;
+    return makeAnthropicResponse();
+  };
+
+  try {
+    const provider = createAnthropicProvider({ apiKey: "test-key" });
+    await provider.chat(makeMessages());
+    assert.equal(capturedBody.thinking, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalEnv === undefined) delete process.env.ANTHROPIC_REASONING_EFFORT;
+    else process.env.ANTHROPIC_REASONING_EFFORT = originalEnv;
   }
 });

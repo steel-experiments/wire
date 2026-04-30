@@ -22,7 +22,6 @@ export * from "./browser/helpers/clicks.js";
 export * from "./browser/helpers/uploads.js";
 export * from "./browser/helpers/tables.js";
 export * from "./providers/browser/steel.js";
-export * from "./providers/browser/custom.js";
 export * from "./policy/rules.js";
 export * from "./policy/engine.js";
 export * from "./policy/approvals.js";
@@ -64,6 +63,7 @@ const entryArg = process.argv[1];
 const isDirectExecution = entryArg !== undefined && import.meta.url === pathToFileURL(entryArg).href;
 
 if (isDirectExecution) {
+  try { process.loadEnvFile(); } catch { /* .env optional */ }
   void main(process.argv).catch((err) => {
     const message = err instanceof Error ? err.stack ?? err.message : String(err);
     console.error(message);

@@ -11,6 +11,7 @@ import type {
   BrowserObservation,
   BrowserSession,
   JsonValue,
+  RunCheckpoint,
   SessionId,
   Task,
   TraceEvent,
@@ -20,7 +21,7 @@ import type { BrowserObserveInput, BrowserProvider } from "../browser/bridge.js"
 import type { PolicyEngine } from "../policy/engine.js";
 
 import { classifyRun, generateOutcomeSummary } from "./classify.js";
-import { defaultAgentTurn, executeTask } from "./runtime.js";
+import { defaultAgentTurn, executeTask, resumeTask } from "./runtime.js";
 import {
   createLoopState,
   executeStep,
@@ -32,6 +33,7 @@ import { ActionRegistry } from "./actions.js";
 import {
   isNavigationOnlyResult,
   hasPostNavigationExtraction,
+  isRecoverableStepError,
 } from "./state-helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -343,6 +345,79 @@ test("executeStep handles exec action requiring approval", async () => {
   assert.equal(result.state.stepCount, 0);
 });
 
+test("resumeTask executes an approved pending action without re-requesting approval", async () => {
+  const task = makeTask({ objective: "Submit approved form" });
+  const sessionId = makeSessionId();
+  let execCount = 0;
+  let policyChecks = 0;
+  const provider = createMockProvider({
+    async createSession(): Promise<BrowserSession> {
+      return {
+        id: sessionId,
+        provider: "custom",
+        createdAt: new Date().toISOString(),
+        status: "ready",
+      };
+    },
+    async exec(): Promise<BrowserExecResult> {
+      execCount++;
+      return { ok: true, stdout: "approved done", durationMs: 10 };
+    },
+    async stopSession() {},
+  });
+  const policy = createMockPolicyEngine({
+    check(actionId) {
+      policyChecks++;
+      return {
+        id: createId("policy"),
+        actionId,
+        result: "require-approval",
+        reason: "Submit requires approval",
+      };
+    },
+  });
+
+  const first = await executeTask(
+    task,
+    { provider, policyEngine: policy, maxSteps: 3 },
+    async () => ({ kind: "exec", summary: "Submit form", payload: { policyKind: "submit", code: "return 'submitted'" } }),
+  );
+
+  assert.ok(first.pendingApproval);
+  assert.ok(first.pendingAction);
+  assert.equal(execCount, 0);
+  assert.equal(policyChecks, 1);
+
+  const checkpoint: RunCheckpoint = {
+    runId: first.run.id,
+    task,
+    run: first.run,
+    sessionId: first.sessionId,
+    events: first.events,
+    stepCount: first.stepCount,
+    startedAt: first.startedAt,
+    pendingAction: first.pendingAction,
+    approvalRequestId: first.pendingApproval.id,
+    savedAt: new Date().toISOString(),
+  };
+
+  const resumed = await resumeTask(
+    checkpoint,
+    { provider, policyEngine: policy, maxSteps: 3 },
+    async () => ({ kind: "finish", summary: "Done" }),
+  );
+
+  assert.equal(execCount, 1);
+  assert.equal(policyChecks, 1, "approved action should not re-run policy");
+  assert.equal(resumed.pendingApproval, undefined);
+  assert.equal(resumed.run.result, "approved done");
+  assert.equal(
+    resumed.events.filter((event) => event.kind === "approval-request").length,
+    1,
+    "resume should not add another approval request",
+  );
+});
+
 // ---------------------------------------------------------------------------
 // executeStep — finish action
 // ---------------------------------------------------------------------------
@@ -389,6 +464,7 @@ test("defaultAgentTurn falls back to observe when LLM returns prose", async () =
   const state = createLoopState(task, makeSessionId());
   const provider = createMockProvider();
   const turn = defaultAgentTurn({
+    model: "test-model",
     async chat() {
       return {
         content: "The title is probably Example Domain.",
@@ -408,6 +484,7 @@ test("defaultAgentTurn parses raw JSON without code fences", async () => {
   const state = createLoopState(task, makeSessionId());
   const provider = createMockProvider();
   const turn = defaultAgentTurn({
+    model: "test-model",
     async chat() {
       return {
         content: '{"kind":"observe","summary":"Inspect page"}',
@@ -548,6 +625,56 @@ test("finalizeRun persists final result from successful returnValue", () => {
   assert.equal(result.run.result, '{"answer":"Final answer","price":29}');
 });
 
+test("finalizeRun skips error-shaped returnValue when picking final result", () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+
+  state.events.push(
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, durationMs: 10, returnValue: { score: 4668, title: "2048" } },
+    },
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, durationMs: 8, returnValue: { error: "Start Bot not found", buttons: ["a", "b"] } },
+    },
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, durationMs: 5, returnValue: { clicked: false, reason: "no match" } },
+    },
+  );
+
+  const result = finalizeRun(state);
+  assert.ok(result.run.result, "expected a derived result");
+  assert.ok(!result.run.result!.includes("Start Bot not found"), `expected error-shaped result to be skipped: ${result.run.result}`);
+  assert.ok(result.run.result!.includes("4668"), `expected to pick the meaningful earlier result: ${result.run.result}`);
+});
+
+test("finalizeRun falls back to error-shaped result when nothing better exists", () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: new Date().toISOString(),
+    kind: "code-result",
+    payload: { ok: true, durationMs: 5, returnValue: { error: "Only error" } },
+  });
+
+  const result = finalizeRun(state);
+  assert.ok(result.run.result?.includes("Only error"), `expected error-shaped fallback: ${result.run.result}`);
+});
+
 test("finalizeRun does not persist finish summary as task result", () => {
   const task = makeTask();
   const state = createLoopState(task, makeSessionId());
@@ -675,6 +802,7 @@ test("executeTask proposes domain skill updates from reusable trace evidence", a
   const policy = createMockPolicyEngine();
 
   const mockLlmProvider = {
+    model: "test-model",
     async chat(messages: { content: string | import("../providers/llm/openai.js").ContentPart[] }[]) {
       const userMsg = messages.find((m) => typeof m.content === "string" && m.content.includes("[observation]"));
       if (userMsg) {
@@ -772,6 +900,7 @@ test("executeTask loads matched skills into the live agent prompt", async () => 
   await writeFile(join(skillDir, "example.md"), skillContent, "utf-8");
 
   const llmProvider = {
+    model: "test-model",
     async chat(messages: { role: string; content: string | import("../providers/llm/openai.js").ContentPart[] }[]) {
       const raw = messages.find((message) => message.role === "user")?.content ?? "";
       const userPrompt = typeof raw === "string" ? raw : raw.filter((p): p is { type: "text"; text: string } => p.type === "text").map((p) => p.text).join("");
@@ -855,7 +984,7 @@ test("executeTask persists a task note artifact when finishing without extracted
   assert.equal(result.classification.kind, "partial-success");
   const noteArtifact = result.events.find((event) =>
     event.kind === "artifact" &&
-    event.payload.kind === "task-summary" &&
+    event.payload.kind === "note" &&
     typeof event.payload.content === "string"
   );
   assert.ok(noteArtifact);
@@ -964,6 +1093,33 @@ test("executeTask streams trace events to an optional sink", async () => {
   assert.equal(streamed[0]!.kind, "observation");
 });
 
+test("executeTask leaves browser session open when requested", async () => {
+  const task = makeTask({ objective: "Keep session open" });
+  const sessionId = makeSessionId();
+  let stopped = false;
+  const provider = createMockProvider({
+    async createSession() {
+      return {
+        id: sessionId,
+        provider: "custom",
+        createdAt: new Date().toISOString(),
+        status: "ready",
+      };
+    },
+    async stopSession() {
+      stopped = true;
+    },
+  });
+
+  await executeTask(
+    task,
+    { provider, policyEngine: createMockPolicyEngine(), maxSteps: 1, keepSessionOpen: true },
+    async () => ({ kind: "finish", summary: "Done" }),
+  );
+
+  assert.equal(stopped, false);
+});
+
 test("executeTask retries after a recoverable step error when budget remains", async () => {
   const task = makeTask({ objective: "Recover from transient browser error" });
   const sessionId = makeSessionId();
@@ -1011,6 +1167,10 @@ test("executeTask retries after a recoverable step error when budget remains", a
   assert.equal(execCount, 2);
   assert.equal(result.run.status, "succeeded");
   assert.equal(result.run.result, "Recovered answer");
+});
+
+test("isRecoverableStepError treats transient WebSocket failures as recoverable", () => {
+  assert.equal(isRecoverableStepError("WebSocket error"), true);
 });
 
 test("executeTask persists failure note artifact for task runs that stop on error", async () => {
@@ -1066,7 +1226,7 @@ test("executeTask persists failure note artifact for task runs that stop on erro
   assert.match(result.run.result ?? "", /Run stopped with error: Target not found: page/u);
   const noteArtifact = result.events.find((event) =>
     event.kind === "artifact" &&
-    event.payload.kind === "task-summary" &&
+    event.payload.kind === "note" &&
     typeof event.payload.content === "string"
   );
   assert.ok(noteArtifact);
@@ -1618,6 +1778,7 @@ test("defaultAgentTurn rejects LLM payload with missing kind", async () => {
   const state = createLoopState(task, makeSessionId());
   const provider = createMockProvider();
   const turn = defaultAgentTurn({
+    model: "test-model",
     async chat() {
       return {
         content: '{"summary":"Do something","payload":{}}',
@@ -1637,6 +1798,7 @@ test("defaultAgentTurn rejects LLM payload with unknown kind", async () => {
   const state = createLoopState(task, makeSessionId());
   const provider = createMockProvider();
   const turn = defaultAgentTurn({
+    model: "test-model",
     async chat() {
       return {
         content: '{"kind":"unknown-action","summary":"Do something"}',
@@ -1655,6 +1817,7 @@ test("defaultAgentTurn rejects non-object LLM payload (bare function string)", a
   const state = createLoopState(task, makeSessionId());
   const provider = createMockProvider();
   const turn = defaultAgentTurn({
+    model: "test-model",
     async chat() {
       return {
         content: 'function() { return "malicious"; }',
@@ -1673,6 +1836,7 @@ test("defaultAgentTurn rejects array LLM payload", async () => {
   const state = createLoopState(task, makeSessionId());
   const provider = createMockProvider();
   const turn = defaultAgentTurn({
+    model: "test-model",
     async chat() {
       return {
         content: '[{"kind":"observe","summary":"Array payload"}]',
@@ -2110,4 +2274,316 @@ test("executeStep reconfigure merges with existing sessionConfig", async () => {
   assert.equal(createdSessionInput!.sessionConfig?.useProxy, true);
   assert.equal(createdSessionInput!.sessionConfig?.solveCaptcha, true);
   assert.equal(createdSessionInput!.sessionConfig?.region, "us-east-1");
+});
+
+test("executeTask aborts when same exec succeeds with same return value repeatedly", async () => {
+  const task = makeTask({ objective: "Test stuck-on-success guard" });
+  const sessionId = makeSessionId();
+  const stuckCode = "return { score: null, best: null };";
+  let execCallCount = 0;
+  const provider = createMockProvider({
+    async createSession() {
+      return {
+        id: sessionId,
+        provider: "custom",
+        createdAt: new Date().toISOString(),
+        status: "ready",
+      };
+    },
+    async exec(): Promise<BrowserExecResult> {
+      execCallCount++;
+      return {
+        ok: true,
+        durationMs: 10,
+        returnValue: { score: null, best: null },
+      };
+    },
+    async stopSession() {},
+  });
+
+  const result = await executeTask(
+    task,
+    { provider, policyEngine: createMockPolicyEngine(), maxSteps: 30 },
+    async () => ({
+      kind: "exec",
+      summary: "Probe with no progress",
+      payload: { code: stuckCode },
+    }),
+  );
+
+  // STUCK_THRESHOLD=3 means we bail on the 5th identical attempt.
+  assert.ok(execCallCount <= 6, `expected the loop to bail before maxSteps, got ${execCallCount} exec calls`);
+
+  const stopReason = result.events.find((e) =>
+    e.kind === "thought-summary" &&
+    typeof e.payload["reason"] === "string" &&
+    /returned the same result/iu.test(e.payload["reason"] as string),
+  );
+  assert.ok(stopReason, "expected a stuck-on-success stop reason");
+});
+
+test("executeTask aborts when same exec sig repeats with cosmetically varying results", async () => {
+  // Reproduces the slow-stuck case: same probe code, return value differs in
+  // small ways each time (added field, renamed field) but the agent isn't
+  // making real progress. Digest matching keeps resetting; sig-only backstop
+  // must catch it.
+  const task = makeTask({ objective: "Test sig-only backstop" });
+  const sessionId = makeSessionId();
+  let execCallCount = 0;
+  const provider = createMockProvider({
+    async createSession() {
+      return {
+        id: sessionId,
+        provider: "custom",
+        createdAt: new Date().toISOString(),
+        status: "ready",
+      };
+    },
+    async exec(): Promise<BrowserExecResult> {
+      execCallCount++;
+      // Vary one field per call so the digest keeps changing
+      return {
+        ok: true,
+        durationMs: 10,
+        returnValue: {
+          score: null,
+          best: null,
+          probeId: execCallCount,
+          [`field${execCallCount}`]: true,
+        },
+      };
+    },
+    async stopSession() {},
+  });
+
+  const result = await executeTask(
+    task,
+    { provider, policyEngine: createMockPolicyEngine(), maxSteps: 30 },
+    async () => ({
+      kind: "exec",
+      summary: "Probe with cosmetic variation",
+      payload: { code: "return probeStuff()" },
+    }),
+  );
+
+  // SIG_ONLY_THRESHOLD=6 → bail on the 7th attempt (8th call would not happen).
+  assert.ok(execCallCount <= 8, `expected sig-only backstop to bail, got ${execCallCount} exec calls`);
+
+  const stopReason = result.events.find((e) =>
+    e.kind === "thought-summary" &&
+    typeof e.payload["reason"] === "string" &&
+    /attempted .+ times in a row/iu.test(e.payload["reason"] as string),
+  );
+  assert.ok(stopReason, "expected a sig-only stop reason");
+});
+
+test("executeTask does not bail when same code returns different results", async () => {
+  const task = makeTask({ objective: "Test stuck guard does not false-positive on progress" });
+  const sessionId = makeSessionId();
+  let execCallCount = 0;
+  const provider = createMockProvider({
+    async createSession() {
+      return {
+        id: sessionId,
+        provider: "custom",
+        createdAt: new Date().toISOString(),
+        status: "ready",
+      };
+    },
+    async exec(): Promise<BrowserExecResult> {
+      execCallCount++;
+      return {
+        ok: true,
+        durationMs: 10,
+        returnValue: { i: execCallCount },
+      };
+    },
+    async stopSession() {},
+  });
+
+  await executeTask(
+    task,
+    { provider, policyEngine: createMockPolicyEngine(), maxSteps: 8 },
+    async () => ({
+      kind: "exec",
+      summary: "Probe that progresses",
+      payload: { code: "return { i: progress }" },
+    }),
+  );
+
+  // Same action sig but each result is unique → counter should reset every turn
+  assert.ok(execCallCount >= 7, `expected the loop to keep going, got ${execCallCount} exec calls`);
+});
+
+test("finalizeRun skips wireActions envelopes when picking final result", () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+
+  state.events.push(
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, durationMs: 10, returnValue: { score: 4668, board: "...2...4..." } },
+    },
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: {
+        ok: true,
+        durationMs: 5,
+        returnValue: {
+          wireActions: [{ method: "Input.dispatchKeyEvent", params: { key: "ArrowUp" } }],
+          state: { score: 0, over: false, text: "current board" },
+        },
+      },
+    },
+  );
+
+  const result = finalizeRun(state);
+  assert.ok(result.run.result, "expected a derived result");
+  assert.ok(result.run.result!.includes("4668"), `expected to skip wireActions envelope: ${result.run.result}`);
+  assert.ok(!result.run.result!.includes("wireActions"), "result should not be the command envelope");
+});
+
+test("finalizeRun falls back to wireActions envelope when nothing else is meaningful", () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: new Date().toISOString(),
+    kind: "code-result",
+    payload: {
+      ok: true,
+      durationMs: 5,
+      returnValue: {
+        wireActions: [{ method: "Input.dispatchKeyEvent" }],
+        state: { score: 0 },
+      },
+    },
+  });
+
+  const result = finalizeRun(state);
+  // No better candidate exists — the second tier (merely meaningful) accepts
+  // the envelope rather than returning nothing.
+  assert.ok(result.run.result?.includes("wireActions"), "expected fallback to envelope when nothing better exists");
+});
+
+test("finalizeRun skips empty returnValue payloads when picking final result", () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+
+  state.events.push(
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, durationMs: 10, returnValue: { score: 4668 } },
+    },
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, durationMs: 5, returnValue: {} },
+    },
+  );
+
+  const result = finalizeRun(state);
+  assert.ok(result.run.result, "expected a derived result");
+  assert.ok(result.run.result!.includes("4668"), `expected to skip empty {} and pick meaningful result: ${result.run.result}`);
+});
+
+test("executeTask aborts when same exec signature fails repeatedly", async () => {
+  const task = makeTask({ objective: "Test repeat-fail guard" });
+  const sessionId = makeSessionId();
+  const stuckCode = "const sleep = ms => new Promise(r => setTimeout(r, ms)); for (let i=0;i<100;i++){await sleep(500);}";
+  let execCallCount = 0;
+  const provider = createMockProvider({
+    async createSession() {
+      return {
+        id: sessionId,
+        provider: "custom",
+        createdAt: new Date().toISOString(),
+        status: "ready",
+      };
+    },
+    async exec(): Promise<BrowserExecResult> {
+      execCallCount++;
+      return {
+        ok: false,
+        stderr: "CDP command timed out after 30000ms: Runtime.evaluate",
+        durationMs: 30000,
+      };
+    },
+    async stopSession() {},
+  });
+
+  const result = await executeTask(
+    task,
+    { provider, policyEngine: createMockPolicyEngine(), maxSteps: 30 },
+    async () => ({
+      kind: "exec",
+      summary: "Run the stuck script",
+      payload: { code: stuckCode },
+    }),
+  );
+
+  // Three failures should be enough to bail (2 repeats past the threshold).
+  assert.ok(execCallCount <= 4, `expected the loop to bail early, got ${execCallCount} exec calls`);
+
+  const stopReason = result.events.find((e) =>
+    e.kind === "thought-summary" &&
+    typeof e.payload["reason"] === "string" &&
+    /failed.+times in a row/iu.test(e.payload["reason"] as string),
+  );
+  assert.ok(stopReason, "expected a repeat-fail stop reason in trace events");
+});
+
+test("executeTask does not bail when failures are interleaved with successes", async () => {
+  const task = makeTask({ objective: "Test repeat-fail reset" });
+  const sessionId = makeSessionId();
+  let execCallCount = 0;
+  const provider = createMockProvider({
+    async createSession() {
+      return {
+        id: sessionId,
+        provider: "custom",
+        createdAt: new Date().toISOString(),
+        status: "ready",
+      };
+    },
+    async exec(): Promise<BrowserExecResult> {
+      execCallCount++;
+      // alternating fail/success — should never hit the repeat threshold
+      return execCallCount % 2 === 1
+        ? { ok: false, stderr: "boom", durationMs: 10 }
+        : { ok: true, stdout: "ok", durationMs: 10 };
+    },
+    async stopSession() {},
+  });
+
+  let turnCount = 0;
+  await executeTask(
+    task,
+    { provider, policyEngine: createMockPolicyEngine(), maxSteps: 6 },
+    async () => {
+      turnCount++;
+      // Same exec code each turn, but exec alternates ok/err
+      return {
+        kind: "exec",
+        summary: "Try again",
+        payload: { code: `attempt ${turnCount}` },
+      };
+    },
+  );
+
+  // Should run the full budget — alternating success resets the counter
+  assert.ok(execCallCount >= 5, `expected the loop to keep going, got ${execCallCount} exec calls`);
 });

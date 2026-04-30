@@ -11,6 +11,16 @@ export interface ChatMessage {
   content: string | ContentPart[];
 }
 
+export type OpenAIReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh";
+
+const OPENAI_REASONING_EFFORT_VALUES = ["none", "low", "medium", "high", "xhigh"] as const;
+
+export function parseOpenAIReasoningEffort(value: unknown): OpenAIReasoningEffort | undefined {
+  return (OPENAI_REASONING_EFFORT_VALUES as readonly string[]).includes(value as string)
+    ? (value as OpenAIReasoningEffort)
+    : undefined;
+}
+
 export interface ChatOptions {
   model?: string;
   temperature?: number;
@@ -24,6 +34,8 @@ export interface ChatResponse {
 }
 
 export interface LLMProvider {
+  readonly model: string;
+  readonly reasoningEffort?: string | undefined;
   chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResponse>;
 }
 
@@ -74,6 +86,7 @@ export interface OpenAIProviderConfig {
   apiKey: string;
   baseUrl?: string;
   model?: string;
+  reasoningEffort?: OpenAIReasoningEffort;
 }
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
@@ -115,16 +128,18 @@ interface OpenAIErrorResponse {
 export class OpenAIProvider implements LLMProvider {
   private readonly apiKey: string;
   private readonly baseUrl: string;
-  private readonly defaultModel: string;
+  public readonly model: string;
+  public readonly reasoningEffort: OpenAIReasoningEffort | undefined;
 
   constructor(config: OpenAIProviderConfig) {
     this.apiKey = config.apiKey;
     this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
-    this.defaultModel = config.model ?? DEFAULT_MODEL;
+    this.model = config.model ?? DEFAULT_MODEL;
+    this.reasoningEffort = config.reasoningEffort;
   }
 
   async chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResponse> {
-    const model = options?.model ?? this.defaultModel;
+    const model = options?.model ?? this.model;
 
     // Separate system messages for the `instructions` field
     const systemParts: string[] = [];
@@ -166,6 +181,10 @@ export class OpenAIProvider implements LLMProvider {
 
     if (options?.maxTokens !== undefined) {
       body.max_output_tokens = options.maxTokens;
+    }
+
+    if (this.reasoningEffort !== undefined && this.reasoningEffort !== "none") {
+      body.reasoning = { effort: this.reasoningEffort };
     }
 
     const url = `${this.baseUrl}/responses`;
@@ -246,6 +265,11 @@ export function createOpenAIProvider(
 
   if (config?.model) {
     providerConfig.model = config.model;
+  }
+
+  const reasoningEffort = config?.reasoningEffort ?? parseOpenAIReasoningEffort(process.env.OPENAI_REASONING_EFFORT);
+  if (reasoningEffort) {
+    providerConfig.reasoningEffort = reasoningEffort;
   }
 
   return new OpenAIProvider(providerConfig);

@@ -1,5 +1,6 @@
 import type { ArtifactId, JsonObject, ProposedAction, TraceEvent } from "../shared/types.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
+import { isLikelyNavigationCode } from "../browser/exec.js";
 import type { LoopState } from "./loop.js";
 
 // ---------------------------------------------------------------------------
@@ -84,7 +85,7 @@ export function hasPostNavigationExtraction(state: LoopState): boolean {
   const events = state.events;
   let sawNavigation = false;
   for (const e of events) {
-    if (e.kind === "code-exec" && typeof e.payload.code === "string" && isLikelyNavCode(e.payload.code)) {
+    if (e.kind === "code-exec" && typeof e.payload.code === "string" && isLikelyNavigationCode(e.payload.code)) {
       sawNavigation = true;
       continue;
     }
@@ -97,14 +98,6 @@ export function hasPostNavigationExtraction(state: LoopState): boolean {
   }
   // No navigation happened — nothing to guard against
   return !sawNavigation;
-}
-
-function isLikelyNavCode(code: string): boolean {
-  // Match navigation writes (assignment) but not reads (property access).
-  // `location = url`, `location.href = url`, `location.assign(...)`, `location.replace(...)`
-  // but NOT `location.href` in a return/expression context.
-  return /\blocation\s*(=|\.href\s*=|\.assign\s*\(|\.replace\s*\()/u.test(code) ||
-    /\bwindow\.location\s*(=|\.href\s*=|\.assign\s*\(|\.replace\s*\()/u.test(code);
 }
 
 export function hasAttemptedExtraction(state: LoopState): boolean {
@@ -148,7 +141,7 @@ export function buildFailureSummary(state: LoopState): string | undefined {
 }
 
 export function isRecoverableStepError(message: string): boolean {
-  return /Target not found|timeout|network|ECONN|ETIMEDOUT|ENOTFOUND|fetch|Execution context was destroyed|Cannot find context|wasn't found|Not supported|CDP error|Session closed/iu
+  return /Target not found|timeout|network|ECONN|ETIMEDOUT|ENOTFOUND|fetch|Execution context was destroyed|Cannot find context|wasn't found|Not supported|CDP error|Session closed|WebSocket error/iu
     .test(message);
 }
 
@@ -208,20 +201,6 @@ export function countConsecutiveUnchanged(events: TraceEvent[]): number {
   }
   return count;
 }
-
-export function buildGenericExtractionAction(): ProposedAction {
-  return {
-    kind: "exec",
-    summary: "Extract current page content",
-    payload: {
-      code: "/* wire:extract */ return { title: document.title, url: location.href, text: document.body?.innerText?.slice(0, 5000) ?? '' }",
-    },
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Task completion helpers — artifact extraction and verification
-// ---------------------------------------------------------------------------
 
 export function appendExtractedResultArtifact(state: LoopState): void {
   const result = latestCodeResult(state);
@@ -299,12 +278,60 @@ export function appendTaskNoteArtifact(state: LoopState, summary: string): void 
     kind: "artifact",
     payload: {
       artifactId,
-      kind: "task-summary",
+      kind: "note",
+      source: "task-summary",
       mimeType: "text/plain",
       path: `artifacts/${artifactId}.txt`,
       content: lines.join("\n"),
     },
   });
+}
+
+/**
+ * Stable digest of a code-result event payload — used alongside the action
+ * signature to detect "same code, same result, no progress" loops where the
+ * agent is technically succeeding but learning nothing new.
+ */
+export function codeResultDigest(event: TraceEvent | undefined): string | undefined {
+  if (!event || event.kind !== "code-result") return undefined;
+  const ok = event.payload["ok"];
+  const stdout = event.payload["stdout"];
+  const stderr = event.payload["stderr"];
+  const returnValue = event.payload["returnValue"];
+  const parts: string[] = [`ok:${String(ok)}`];
+  if (typeof stdout === "string") parts.push(`o:${stdout.replace(/\s+/gu, " ").slice(0, 80)}`);
+  if (typeof stderr === "string") parts.push(`e:${stderr.replace(/\s+/gu, " ").slice(0, 80)}`);
+  if (returnValue !== undefined) {
+    let serialized: string;
+    try {
+      serialized = JSON.stringify(returnValue);
+    } catch {
+      serialized = String(returnValue);
+    }
+    parts.push(`r:${serialized.slice(0, 120)}`);
+  }
+  return parts.join("|");
+}
+
+/**
+ * Stable signature for a proposed exec/raw action — used to detect when the
+ * agent is re-issuing the same broken code. Matches the renderer's repeat
+ * marker so what the user sees on screen and what the loop bails out on are
+ * the same thing.
+ */
+export function execActionSignature(action: ProposedAction): string | undefined {
+  if (action.kind === "exec") {
+    const code = action.payload?.["code"];
+    if (typeof code === "string") {
+      return code.replace(/\s+/gu, " ").trim().slice(0, 80);
+    }
+    return undefined;
+  }
+  if (action.kind === "raw") {
+    const method = action.payload?.["method"];
+    if (typeof method === "string") return `raw:${method}`;
+  }
+  return undefined;
 }
 
 export function buildVerificationAction(): ProposedAction {

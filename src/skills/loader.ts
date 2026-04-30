@@ -43,7 +43,8 @@ export async function loadSkillDocsFromDir(dir: string): Promise<LoadedSkill[]> 
     let raw: string;
     try {
       raw = await readFile(filePath, "utf-8");
-    } catch {
+    } catch (err) {
+      logSkillLoadFailure(filePath, "read", err);
       continue;
     }
 
@@ -68,13 +69,24 @@ export async function loadSkillDocsFromDir(dir: string): Promise<LoadedSkill[]> 
           : {}),
       };
       results.push(loadedSkill);
-    } catch {
-      // Skip unparseable skill files rather than crashing the entire load.
+    } catch (err) {
+      logSkillLoadFailure(filePath, "parse", err);
       continue;
     }
   }
 
   return results;
+}
+
+let skillLoadWarningSink: ((line: string) => void) | undefined;
+
+export function setSkillLoadWarningSink(sink: ((line: string) => void) | undefined): void {
+  skillLoadWarningSink = sink;
+}
+
+function logSkillLoadFailure(path: string, phase: "read" | "parse", err: unknown): void {
+  const message = err instanceof Error ? err.message : String(err);
+  (skillLoadWarningSink ?? console.error)(`[skill-loader] ${phase} failed for ${path}: ${message}`);
 }
 
 // ---------------------------------------------------------------------------

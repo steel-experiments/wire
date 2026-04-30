@@ -229,7 +229,7 @@ export function classifyRun(input: ClassificationInput): RunClassification {
   const artifactCount = events.filter((e) => e.kind === "artifact").length;
   // Only count substantive artifacts (extracted data), not synthetic task summaries
   const answerArtifactCount = events.filter(
-    (e) => e.kind === "artifact" && e.payload.kind !== "task-summary",
+    (e) => e.kind === "artifact" && e.payload.source !== "task-summary",
   ).length;
   const observationCount = events.filter((e) => e.kind === "observation").length;
 

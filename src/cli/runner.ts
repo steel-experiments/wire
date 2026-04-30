@@ -31,6 +31,7 @@ import type { SessionConfig } from "../shared/types.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Artifact, TraceEvent } from "../shared/types.js";
+import { createConsoleTraceSink } from "../ui/stream.js";
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -73,6 +74,10 @@ export interface RunOptions {
   sessionConfig?: SessionConfig;
   json?: boolean;
   yes?: boolean;
+  verbose?: boolean;
+  quiet?: boolean;
+  color?: boolean;
+  keepSessionOpen?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +171,7 @@ function defaultMaxSteps(mode: "task" | "investigate" | "experiment"): number {
 }
 
 function createRuntimeConfig(
-  options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "sessionConfig" | "provider" | "model" | "yes" | "json" | "mode">,
+  options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "sessionConfig" | "provider" | "model" | "yes" | "json" | "mode" | "verbose" | "quiet" | "color" | "keepSessionOpen">,
 ): RuntimeConfig {
   let policyEngine: PolicyEngine = createPolicyEngine();
   if (options.yes) {
@@ -174,12 +179,13 @@ function createRuntimeConfig(
   }
 
   const isJson = options.json === true;
+  const maxSteps = options.maxSteps ?? defaultMaxSteps(options.mode ?? "task");
 
   const config: RuntimeConfig = {
     provider: createSteelProvider(),
     actionHandlers: createSteelActionHandlers(),
     policyEngine,
-    maxSteps: options.maxSteps ?? defaultMaxSteps(options.mode ?? "task"),
+    maxSteps,
     async onSessionCreated(session) {
       const url = session.debugUrl ?? session.liveUrl;
       if (!isJson && url) {
@@ -202,6 +208,15 @@ function createRuntimeConfig(
       await saveSession(defaultStorageRoot(), newSession);
     },
   };
+  if (options.keepSessionOpen) config.keepSessionOpen = true;
+
+  if (!isJson && options.quiet !== true) {
+    const sinkOpts: Parameters<typeof createConsoleTraceSink>[0] = { maxSteps };
+    if (options.verbose !== undefined) sinkOpts.verbose = options.verbose;
+    if (options.color !== undefined) sinkOpts.color = options.color;
+    const consoleSink = createConsoleTraceSink(sinkOpts);
+    config.traceSink = { onEvent: (event) => consoleSink.onEvent(event) };
+  }
 
   const llmProvider = createLlmProvider(options.provider, options.model);
   if (llmProvider) {
@@ -350,15 +365,19 @@ export async function runTask(options: RunOptions): Promise<RunResult> {
   };
 
   const isJson = options.json === true;
+  const config = createRuntimeConfig(options);
 
   if (!isJson) {
     console.log(`Task created: ${task.id}`);
     console.log(`Objective:    ${options.objective}`);
     console.log(`Mode:         ${mode}`);
+    if (config.llmProvider) {
+      const effort = config.llmProvider.reasoningEffort;
+      console.log(`Model:        ${config.llmProvider.model}${effort ? ` / ${effort}` : ""}`);
+    }
     console.log("");
   }
 
-  const config = createRuntimeConfig(options);
   const result = await executeTask(task, config);
   await persistExecutionArtifacts(root, task, result);
 

@@ -13,6 +13,7 @@ import type {
   TraceEvent,
 } from "../shared/types.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
+import { basename } from "node:path";
 
 import type { BrowserProvider } from "../browser/bridge.js";
 import { createBrowserSession, stopBrowserSession } from "../browser/session.js";
@@ -53,6 +54,8 @@ import {
   appendExtractedResultArtifact,
   appendTaskNoteArtifact,
   buildVerificationAction,
+  execActionSignature,
+  codeResultDigest,
 } from "./state-helpers.js";
 import { ActionRegistry, type ActionHandler } from "./actions.js";
 
@@ -73,6 +76,7 @@ export interface RuntimeConfig {
   ) => Promise<void> | void;
   traceSink?: TraceSink;
   actionHandlers?: ActionHandler[];
+  keepSessionOpen?: boolean;
 }
 
 export interface TraceSink {
@@ -154,10 +158,20 @@ async function syncMatchedSkills(state: LoopState, skillDir?: string): Promise<v
     kind: "skill-load",
     payload: {
       skills: matched.map((skill) => skill.id),
+      labels: matched.map(skillDisplayLabel),
       hostname: hostname ?? "",
       source: skillDir,
     },
   });
+}
+
+function skillDisplayLabel(skill: LoadedSkill): string {
+  const file = basename(skill.path).replace(/\.md$/u, "");
+  if (file.length > 0) return file;
+  if (skill.hostnamePatterns && skill.hostnamePatterns.length > 0) {
+    return skill.hostnamePatterns[0]!;
+  }
+  return skill.id;
 }
 
 function estimatePlanSignals(state: LoopState): number {
@@ -323,19 +337,16 @@ async function appendSkillProposalEvents(
   llmProvider?: LLMProvider,
 ): Promise<void> {
   if (!llmProvider) {
-    console.error("[skill-promote] No LLM provider configured, skipping skill proposal");
     return;
   }
 
   const alreadyProposed = state.events.some((event) => event.kind === "skill-proposal");
   if (alreadyProposed) {
-    console.error("[skill-promote] Skill already proposed, skipping");
     return;
   }
 
   const candidate = await llmProposeSkill(state.events, state.run.id, llmProvider);
   if (!candidate) {
-    console.error("[skill-promote] No candidate produced from LLM");
     return;
   }
 
@@ -474,7 +485,7 @@ async function initializeState(
       skipPolicyCheck: boolean;
       actionRegistry?: ActionRegistry;
       actionContext?: { onSessionReconfigured: NonNullable<RuntimeConfig["onSessionReconfigured"]> };
-    } = { skipPolicyCheck: false };
+    } = { skipPolicyCheck: true };
     if (actionRegistry) resumeOpts.actionRegistry = actionRegistry;
     if (config.onSessionReconfigured) {
       resumeOpts.actionContext = { onSessionReconfigured: config.onSessionReconfigured };
@@ -547,6 +558,24 @@ async function runMainLoop(
 ): Promise<void> {
   let consecutiveRecoverableErrors = 0;
   let totalCodeFailures = 0;
+  let lastFailedSig: string | undefined;
+  let repeatFailCount = 0;
+  const REPEAT_FAIL_THRESHOLD = 2;
+  let lastActionSig: string | undefined;
+  let lastResultDigest: string | undefined;
+  let stuckCount = 0;
+  // Bail when the same action returned the same result this many times in a
+  // row. Threshold of 3 means 5 identical attempts before bailing — tight
+  // enough to catch slow probe-without-progress loops, generous enough to
+  // tolerate legitimate brief retries.
+  const STUCK_THRESHOLD = 3;
+  let lastSigOnly: string | undefined;
+  let sigOnlyCount = 0;
+  // Safety net for the cosmetic-variation case: same action, slightly
+  // different result each time. Threshold of 6 means 7 identical-signature
+  // attempts before bailing — looser so it doesn't false-positive on
+  // legitimate sequential work, but still bounds the worst case.
+  const SIG_ONLY_THRESHOLD = 6;
 
   while (true) {
     // Check stopping conditions
@@ -667,6 +696,91 @@ async function runMainLoop(
       ) {
         appendExtractedResultArtifact(state);
       }
+
+      // Stuck-loop guards. Three layered failure modes:
+      //   (a) same code keeps erroring → repeatFailCount, tight threshold
+      //   (b) same code + same result keeps repeating → stuckCount, mid threshold
+      //   (c) same code regardless of result → sigOnlyCount, generous backstop
+      //       (catches the cosmetic-variation case where (b) keeps resetting
+      //       on minor field changes that aren't real progress).
+      const sig = execActionSignature(action);
+      if (sig) {
+        const lastResult = latestCodeResult(state);
+        const failed = lastResult?.payload["ok"] === false;
+        const digest = codeResultDigest(lastResult);
+
+        if (sig === lastSigOnly) {
+          sigOnlyCount += 1;
+        } else {
+          lastSigOnly = sig;
+          sigOnlyCount = 0;
+        }
+        if (sigOnlyCount > SIG_ONLY_THRESHOLD) {
+          state.events.push({
+            id: createId("event"),
+            runId: state.run.id,
+            ts: nowIsoUtc(),
+            kind: "thought-summary",
+            payload: {
+              reason: `Same action attempted ${sigOnlyCount + 1} times in a row — aborting to force re-plan`,
+            },
+          });
+          await flushTraceSink(state, config, signals);
+          break;
+        }
+
+        if (failed) {
+          if (sig === lastFailedSig) {
+            repeatFailCount += 1;
+          } else {
+            lastFailedSig = sig;
+            repeatFailCount = 1;
+          }
+          // Errors reset the stuck-on-success tracker — mixed signal.
+          lastActionSig = undefined;
+          lastResultDigest = undefined;
+          stuckCount = 0;
+
+          if (repeatFailCount > REPEAT_FAIL_THRESHOLD) {
+            state.events.push({
+              id: createId("event"),
+              runId: state.run.id,
+              ts: nowIsoUtc(),
+              kind: "thought-summary",
+              payload: {
+                reason: `Same code failed ${repeatFailCount} times in a row — aborting to force re-plan`,
+              },
+            });
+            await flushTraceSink(state, config, signals);
+            break;
+          }
+        } else {
+          lastFailedSig = undefined;
+          repeatFailCount = 0;
+
+          if (sig === lastActionSig && digest !== undefined && digest === lastResultDigest) {
+            stuckCount += 1;
+            if (stuckCount > STUCK_THRESHOLD) {
+              state.events.push({
+                id: createId("event"),
+                runId: state.run.id,
+                ts: nowIsoUtc(),
+                kind: "thought-summary",
+                payload: {
+                  reason: `Same action returned the same result ${stuckCount + 1} times — aborting to force re-plan`,
+                },
+              });
+              await flushTraceSink(state, config, signals);
+              break;
+            }
+          } else {
+            lastActionSig = sig;
+            lastResultDigest = digest;
+            stuckCount = 0;
+          }
+        }
+      }
+
       await flushTraceSink(state, config, signals);
 
       if (stepResult.pendingApproval) {
@@ -795,7 +909,7 @@ async function executeWithState(
     await runMainLoop(state, config, turn, signals, actionRegistry);
   } finally {
     // Always clean up the browser session
-    if (!signals.awaitingApproval) {
+    if (!signals.awaitingApproval && !config.keepSessionOpen) {
       try {
         await stopBrowserSession(config.provider, state.sessionId);
       } catch {

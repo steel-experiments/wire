@@ -22,6 +22,9 @@ export interface CliArgs {
   json?: boolean;
   yes?: boolean;
   strict?: boolean;
+  verbose?: boolean;
+  quiet?: boolean;
+  noColor?: boolean;
   help?: boolean;
 }
 
@@ -213,6 +216,24 @@ export function parseArgs(argv: string[]): CliArgs {
       continue;
     }
 
+    if (arg === "--verbose" || arg === "-v") {
+      result.verbose = true;
+      i++;
+      continue;
+    }
+
+    if (arg === "--quiet" || arg === "-q") {
+      result.quiet = true;
+      i++;
+      continue;
+    }
+
+    if (arg === "--no-color") {
+      result.noColor = true;
+      i++;
+      continue;
+    }
+
     // Positional: the command
     if (arg !== undefined && VALID_COMMANDS.has(arg)) {
       result.command = arg as CliArgs["command"];
@@ -293,6 +314,9 @@ export function formatHelp(): string {
     "  --json                   Output machine-readable JSON",
     "  --yes, --non-interactive Auto-approve policy actions",
     "  --strict                 Fail on missing config or schema violations",
+    "  --verbose, -v            Stream observations, policy checks and full output",
+    "  --quiet, -q              Suppress per-step trace stream",
+    "  --no-color               Disable ANSI color in trace stream",
     "  --help, -h               Show this help message",
   ].join("\n");
 }

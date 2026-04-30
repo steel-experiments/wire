@@ -9,7 +9,7 @@ import { test, afterEach } from "node:test";
 import { createId } from "../shared/ids.js";
 import type { SkillFrontmatter, SkillMetadata } from "../shared/types.js";
 
-import { loadSkillDocsFromDir, loadSkillsFromDir, findMatchingSkills } from "./loader.js";
+import { loadSkillDocsFromDir, loadSkillsFromDir, findMatchingSkills, setSkillLoadWarningSink } from "./loader.js";
 import { matchSkillsByHostname, matchSkillsByTags, scoreSkills, sortByRelevance } from "./matcher.js";
 import { extractSections, parseSkillFile } from "./parser.js";
 import { manageSkillPromotion, promoteSkill, generateSkillProposal, type PromotionCandidate } from "./promote.js";
@@ -416,7 +416,7 @@ test("loadSkillsFromDir skips non-.md files", async () => {
   assert.equal(skills.length, 1);
 });
 
-test("loadSkillsFromDir skips unparseable .md files", async () => {
+test("loadSkillsFromDir skips unparseable .md files and surfaces a warning", async () => {
   testRoot = makeRoot();
   const dir = join(testRoot, "skills");
   await mkdir(dir, { recursive: true });
@@ -424,9 +424,43 @@ test("loadSkillsFromDir skips unparseable .md files", async () => {
   await writeFile(join(dir, "good.md"), STRIPE_SKILL_MD, "utf-8");
   await writeFile(join(dir, "bad.md"), "not valid frontmatter at all", "utf-8");
 
-  const skills = await loadSkillsFromDir(dir);
-  assert.equal(skills.length, 1);
-  assert.equal(skills[0]!.id, "skill_stripe-dashboard");
+  const warnings: string[] = [];
+  setSkillLoadWarningSink((line) => warnings.push(line));
+  try {
+    const skills = await loadSkillsFromDir(dir);
+    assert.equal(skills.length, 1);
+    assert.equal(skills[0]!.id, "skill_stripe-dashboard");
+  } finally {
+    setSkillLoadWarningSink(undefined);
+  }
+
+  assert.equal(warnings.length, 1, "expected a single warning for the bad file");
+  assert.match(warnings[0]!, /\[skill-loader\] parse failed/u);
+  assert.match(warnings[0]!, /bad\.md/u);
+});
+
+test("loadSkillsFromDir warns on schema-invalid source values", async () => {
+  // Repro of the elgoog_im-skill_27c5ad36 case: source: curated is not in the
+  // SkillSource enum, so the file was dropped silently for weeks.
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  await mkdir(dir, { recursive: true });
+
+  const invalid = STRIPE_SKILL_MD.replace("source: team", "source: curated");
+  await writeFile(join(dir, "curated.md"), invalid, "utf-8");
+
+  const warnings: string[] = [];
+  setSkillLoadWarningSink((line) => warnings.push(line));
+  try {
+    const skills = await loadSkillsFromDir(dir);
+    assert.equal(skills.length, 0);
+  } finally {
+    setSkillLoadWarningSink(undefined);
+  }
+
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0]!, /parse failed/u);
+  assert.match(warnings[0]!, /builtin.+team.+generated/u);
 });
 
 test("loadSkillsFromDir returns empty for missing directory that gets created", async () => {
@@ -574,6 +608,66 @@ test("findMatchingSkills excludes inactive skills before scoring", async () => {
   assert.equal((await findMatchingSkills(dir, "dashboard.stripe.com")).length, 0);
   assert.equal((await findMatchingSkills(dir, undefined, ["code-review"])).length, 0);
   assert.equal((await findMatchingSkills(dir)).length, 1);
+});
+
+test("findMatchingSkills excludes skills with no actual match signal when filters are provided", async () => {
+  // Bug repro: a domain-scoped, generated active skill scores +3 (scope) +
+  // round(0.9*4)=4 (source*confidence) = 7 points purely from bonuses, with
+  // no hostname or tag overlap. At minScore=6 it would slip through. Fix:
+  // require an actual match signal (hostname OR tag) when filters are given.
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  await mkdir(dir, { recursive: true });
+
+  const unrelated = [
+    "---",
+    "id: skill_unrelated",
+    "scope: domain",
+    'hostnamePatterns:',
+    '  - "google.com"',
+    "tags:",
+    "  - google.com",
+    "  - auto-promoted",
+    "updatedAt: 2026-04-30",
+    "source: generated",
+    "confidence: 0.9",
+    "---",
+    "# Unrelated",
+  ].join("\n");
+  await writeFile(join(dir, "unrelated.md"), unrelated, "utf-8");
+
+  // Hostname doesn't match google.com; tags don't overlap either.
+  const matched = await findMatchingSkills(dir, "elgoog.im", ["play", "2048", "session"]);
+  assert.equal(matched.length, 0, "skill with no matching hostname or tag must not load purely on scope+source bonuses");
+});
+
+test("scoreSkills includes hostname-matched skill even with no tag overlap", () => {
+  // Sanity: we didn't regress legitimate hostname-only matches.
+  const skill: SkillMetadata = {
+    id: "skill_test",
+    scope: "domain",
+    hostnamePatterns: ["elgoog.im"],
+    tags: ["auto-promoted", "elgoog.im"],
+    updatedAt: "2026-04-30",
+    source: "generated",
+    confidence: 0.9,
+  };
+  const matched = scoreSkills([skill], { hostname: "elgoog.im", tags: ["unrelated", "tags"], minScore: 6 });
+  assert.equal(matched.length, 1, "hostname match alone should be enough");
+});
+
+test("scoreSkills includes tag-matched skill even with no hostname match", () => {
+  const skill: SkillMetadata = {
+    id: "skill_test",
+    scope: "domain",
+    hostnamePatterns: ["github.com"],
+    tags: ["pull-requests", "code-review"],
+    updatedAt: "2026-04-30",
+    source: "generated",
+    confidence: 0.9,
+  };
+  const matched = scoreSkills([skill], { hostname: "elgoog.im", tags: ["pull-requests"], minScore: 6 });
+  assert.equal(matched.length, 1, "tag overlap alone should still pass");
 });
 
 test("findMatchingSkills returns more than six valid matches", async () => {

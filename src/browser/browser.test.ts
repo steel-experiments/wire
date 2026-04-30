@@ -10,7 +10,7 @@ import type {
 } from "../shared/types.js";
 import type { JsonObject } from "../shared/types.js";
 import type { BrowserObserveInput, BrowserProvider } from "./bridge.js";
-import { execCode } from "./exec.js";
+import { execCode, isLikelyNavigationCode } from "./exec.js";
 import { observeBrowser } from "./observe.js";
 import { execRaw } from "./raw.js";
 import { describeTarget, resolveTarget } from "./targets.js";
@@ -358,6 +358,15 @@ test("execCode propagates provider errors", async () => {
     () => execCode({ provider, sessionId: createId("session"), code: "while(true){}" }),
     { message: "Execution timeout" },
   );
+});
+
+test("isLikelyNavigationCode detects navigation writes but not reads", () => {
+  assert.equal(isLikelyNavigationCode("window.location.href = 'https://example.com'"), true);
+  assert.equal(isLikelyNavigationCode("location.assign('/next')"), true);
+  assert.equal(isLikelyNavigationCode("location.reload()"), true);
+  assert.equal(isLikelyNavigationCode("document.location = '/next'"), true);
+  assert.equal(isLikelyNavigationCode("return location.href"), false);
+  assert.equal(isLikelyNavigationCode("return document.location.href"), false);
 });
 
 // ---------------------------------------------------------------------------

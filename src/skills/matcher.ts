@@ -99,9 +99,11 @@ export function scoreSkills<T extends SkillMetadata>(
   const tags = new Set((options.tags ?? []).map((tag) => tag.toLowerCase()));
   const minScore = options.minScore ?? 1;
 
+  const filtersProvided = Boolean(hostname) || tags.size > 0;
   const scored: SkillMatchScore<T>[] = [];
   for (const skill of skills) {
     let score = 0;
+    let hasMatchSignal = false;
     const reasons: string[] = [];
 
     if (hostname && skill.hostnamePatterns?.length) {
@@ -109,6 +111,7 @@ export function scoreSkills<T extends SkillMetadata>(
         if (hostnameMatches(pattern, hostname)) {
           const exact = !pattern.startsWith("*.") && pattern.toLowerCase() === hostname;
           score += exact ? 100 : 80;
+          hasMatchSignal = true;
           reasons.push(exact ? "exact-hostname" : "wildcard-hostname");
           break;
         }
@@ -119,6 +122,7 @@ export function scoreSkills<T extends SkillMetadata>(
       const overlap = skill.tags.filter((tag) => tags.has(tag.toLowerCase())).length;
       if (overlap > 0) {
         score += overlap * 6;
+        hasMatchSignal = true;
         reasons.push(`tag-overlap:${overlap}`);
       }
     }
@@ -130,6 +134,11 @@ export function scoreSkills<T extends SkillMetadata>(
     if (skill.source === "generated") score += Math.round((skill.confidence ?? 0.5) * 4);
     if (skill.status === "proposed") score -= 40;
     if (skill.status === "rejected" || skill.status === "superseded") score -= 100;
+
+    // When filters are provided, a skill must have an actual match signal
+    // (hostname or tag overlap) — scope and source bonuses alone aren't a
+    // reason to load a skill that has nothing to do with the current task.
+    if (filtersProvided && !hasMatchSignal) continue;
 
     if (score >= minScore) {
       scored.push({ skill, score, reasons });

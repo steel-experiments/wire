@@ -5,10 +5,21 @@ import { LLMNetworkError, LLMApiError } from "./openai.js";
 // Anthropic provider configuration
 // ---------------------------------------------------------------------------
 
+export type AnthropicReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max";
+
+const ANTHROPIC_REASONING_EFFORT_VALUES = ["low", "medium", "high", "xhigh", "max"] as const;
+
+export function parseAnthropicReasoningEffort(value: unknown): AnthropicReasoningEffort | undefined {
+  return (ANTHROPIC_REASONING_EFFORT_VALUES as readonly string[]).includes(value as string)
+    ? (value as AnthropicReasoningEffort)
+    : undefined;
+}
+
 export interface AnthropicProviderConfig {
   apiKey: string;
   baseUrl?: string;
   model?: string;
+  reasoningEffort?: AnthropicReasoningEffort;
 }
 
 const DEFAULT_BASE_URL = "https://api.anthropic.com/v1";
@@ -49,16 +60,18 @@ interface AnthropicErrorResponse {
 export class AnthropicProvider implements LLMProvider {
   private readonly apiKey: string;
   private readonly baseUrl: string;
-  private readonly defaultModel: string;
+  public readonly model: string;
+  public readonly reasoningEffort: AnthropicReasoningEffort | undefined;
 
   constructor(config: AnthropicProviderConfig) {
     this.apiKey = config.apiKey;
     this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
-    this.defaultModel = config.model ?? DEFAULT_MODEL;
+    this.model = config.model ?? DEFAULT_MODEL;
+    this.reasoningEffort = config.reasoningEffort;
   }
 
   async chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResponse> {
-    const model = options?.model ?? this.defaultModel;
+    const model = options?.model ?? this.model;
 
     // Anthropic uses a separate system prompt instead of a system message in the array
     let systemPrompt: string | undefined;
@@ -109,6 +122,10 @@ export class AnthropicProvider implements LLMProvider {
 
     if (options?.temperature !== undefined) {
       body.temperature = options.temperature;
+    }
+
+    if (this.reasoningEffort !== undefined) {
+      body.thinking = { type: "enabled", effort: this.reasoningEffort };
     }
 
     const url = `${this.baseUrl}/messages`;
@@ -183,6 +200,11 @@ export function createAnthropicProvider(
 
   if (config?.model) {
     providerConfig.model = config.model;
+  }
+
+  const reasoningEffort = config?.reasoningEffort ?? parseAnthropicReasoningEffort(process.env.ANTHROPIC_REASONING_EFFORT);
+  if (reasoningEffort) {
+    providerConfig.reasoningEffort = reasoningEffort;
   }
 
   return new AnthropicProvider(providerConfig);

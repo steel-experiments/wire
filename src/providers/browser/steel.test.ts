@@ -321,6 +321,53 @@ test("SteelProvider.raw sends a CDP command over websocket", async () => {
   }
 });
 
+test("SteelProvider.raw attaches page-scoped CDP commands to a target session", async () => {
+  const sent: Array<Record<string, unknown>> = [];
+  class CapturingSocket {
+    onopen: ((event: any) => void) | null = null;
+    onmessage: ((event: any) => void) | null = null;
+    onerror: ((event: any) => void) | null = null;
+    onclose: ((event: any) => void) | null = null;
+    constructor() {
+      queueMicrotask(() => this.onopen?.({}));
+    }
+    send(data: string): void {
+      const message = JSON.parse(data) as { id: number; method: string };
+      sent.push(message as unknown as Record<string, unknown>);
+      const result = message.method === "Target.getTargets"
+        ? { targetInfos: [{ targetId: "tab-1", type: "page", title: "Example", url: "https://example.com" }] }
+        : message.method === "Target.attachToTarget"
+          ? { sessionId: "cdp-session-1" }
+          : { result: { value: 2 } };
+      queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ id: message.id, result }) }));
+    }
+    close(): void {
+      this.onclose?.({});
+    }
+  }
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(
+    JSON.stringify(fakeSteelSession({ id: "aaa-bbb-ccc" })),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+
+  try {
+    const provider = new SteelProvider({
+      apiKey: "ste-test-key",
+      webSocketFactory: () => new CapturingSocket(),
+    });
+    await provider.raw({
+      sessionId: "session_aaa-bbb-ccc" as never,
+      method: "Runtime.evaluate",
+      params: { expression: "1+1" },
+    });
+    const evaluate = sent.find((message) => message["method"] === "Runtime.evaluate");
+    assert.equal(evaluate?.["sessionId"], "cdp-session-1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("SteelProvider.raw rejects malformed CDP frames", async () => {
   class BadFrameSocket {
     onopen: ((event: any) => void) | null = null;
@@ -420,6 +467,18 @@ test("validateBrowserCode rejects unsafe calls without scanning string literals"
   assert.throws(
     () => validateBrowserCode("return document.cookie"),
     /document\.cookie/,
+  );
+  assert.throws(
+    () => validateBrowserCode("return document?.cookie"),
+    /document\.cookie/,
+  );
+  assert.throws(
+    () => validateBrowserCode("return window?.eval('1')"),
+    /window\.eval/,
+  );
+  assert.throws(
+    () => validateBrowserCode("return document?.[\"co\" + \"okie\"]"),
+    /document\[cookie\]/,
   );
   assert.doesNotThrow(
     () => validateBrowserCode("const message = \"fetch( is text only\"; return message;"),

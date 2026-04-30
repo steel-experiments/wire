@@ -133,6 +133,7 @@ async function handleRun(
     );
 
     const opts: RunOptions = { objective };
+    if (/\bkeep(?:ing)?\s+(?:the\s+)?session\s+open\b/iu.test(objective)) opts.keepSessionOpen = true;
     if (config.browser?.session) opts.sessionConfig = { ...config.browser.session };
     if (args.mode) opts.mode = args.mode;
     if (args.profileId) opts.profileId = args.profileId;
@@ -147,6 +148,9 @@ async function handleRun(
     if (args.userAgent) opts.sessionConfig = { ...(opts.sessionConfig ?? {}), userAgent: args.userAgent };
     if (args.json) opts.json = args.json;
     if (args.yes) opts.yes = args.yes;
+    if (args.verbose) opts.verbose = args.verbose;
+    if (args.quiet) opts.quiet = args.quiet;
+    if (args.noColor) opts.color = false;
 
     const result = await runTask(opts);
 

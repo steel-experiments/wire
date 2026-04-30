@@ -417,8 +417,7 @@ export class SteelProvider implements BrowserProvider {
   async raw(input: BrowserRawRequest): Promise<unknown> {
     const session = this.withAuth(await this.getSession(input.sessionId));
     return withConnection(this.webSocketFactory, session, this.cdpCommandTimeoutMs, async (cdp) => {
-      // Input methods require targeting a specific page session
-      const needsTargetSession = input.method.startsWith("Input.");
+      const needsTargetSession = cdpMethodNeedsTargetSession(input.method);
       if (needsTargetSession) {
         const targets = await listPageTargets(cdp);
         const target = pickTarget(targets);
@@ -440,8 +439,7 @@ export class SteelProvider implements BrowserProvider {
   ): Promise<unknown> {
     const session = this.withAuth(await this.getSession(sessionId));
     return withConnection(this.webSocketFactory, session, this.cdpCommandTimeoutMs, async (cdp) => {
-      // Check if any commands need a target session
-      const needsTarget = commands.some((c) => c.method.startsWith("Input."));
+      const needsTarget = commands.some((c) => cdpMethodNeedsTargetSession(c.method));
       let targetSessionId: string | undefined;
       if (needsTarget) {
         const targets = await listPageTargets(cdp);
@@ -451,12 +449,16 @@ export class SteelProvider implements BrowserProvider {
 
       let lastResult: unknown;
       for (const cmd of commands) {
-        const sid = cmd.method.startsWith("Input.") ? targetSessionId : undefined;
+        const sid = cdpMethodNeedsTargetSession(cmd.method) ? targetSessionId : undefined;
         lastResult = await cdp.send(cmd.method, cmd.params, sid);
       }
       return lastResult;
     });
   }
+}
+
+function cdpMethodNeedsTargetSession(method: string): boolean {
+  return /^(DOM|Input|Page|Runtime)\./u.test(method);
 }
 
 const OBSERVE_SCRIPT = `(() => {
@@ -614,6 +616,26 @@ function isCallLike(tokens: CodeToken[], index: number): boolean {
   return previous?.kind === "identifier" && previous.value === "new";
 }
 
+function memberAccessStart(tokens: CodeToken[], index: number): number | undefined {
+  const next = tokens[index + 1];
+  if (next?.kind === "punct" && next.value === ".") {
+    return index + 2;
+  }
+  if (next?.kind === "punct" && next.value === "[") {
+    return index + 1;
+  }
+  if (next?.kind === "punct" && next.value === "?" && tokens[index + 2]?.kind === "punct") {
+    const afterQuestion = tokens[index + 2]!;
+    if (afterQuestion.value === ".") {
+      return index + 3;
+    }
+    if (afterQuestion.value === "[") {
+      return index + 2;
+    }
+  }
+  return undefined;
+}
+
 export function validateBrowserCode(code: string): void {
   const found: string[] = [];
   const tokens = tokenizeCode(code);
@@ -636,18 +658,22 @@ export function validateBrowserCode(code: string): void {
       continue;
     }
 
-    const dot = tokens[i + 1];
-    const property = tokens[i + 2];
-    if (dot?.kind === "punct" && dot.value === "." && property?.kind === "identifier" && blockedProperties.has(property.value)) {
+    const accessStart = memberAccessStart(tokens, i);
+    if (accessStart === undefined) {
+      continue;
+    }
+
+    const property = tokens[accessStart];
+    if (property?.kind === "identifier" && blockedProperties.has(property.value)) {
       found.push(`${token.value}.${property.value}`);
       continue;
     }
 
-    const open = tokens[i + 1];
+    const open = tokens[accessStart];
     if (open?.kind !== "punct" || open.value !== "[") {
       continue;
     }
-    let closeIndex = i + 2;
+    let closeIndex = accessStart + 1;
     while (closeIndex < tokens.length) {
       const close = tokens[closeIndex]!;
       if (close.kind === "punct" && close.value === "]") {
@@ -658,7 +684,7 @@ export function validateBrowserCode(code: string): void {
     if (closeIndex >= tokens.length) {
       continue;
     }
-    const computed = staticStringExpression(tokens, i + 2, closeIndex);
+    const computed = staticStringExpression(tokens, accessStart + 1, closeIndex);
     if (computed && blockedProperties.has(computed)) {
       found.push(`${token.value}[${computed}]`);
     }

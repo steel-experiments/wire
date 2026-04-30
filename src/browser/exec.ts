@@ -51,10 +51,9 @@ export async function execCode(options: ExecOptions): Promise<BrowserExecResult>
 }
 
 const NAVIGATION_PATTERNS = [
-  /\bwindow\s*\.\s*location\s*[\[.]/u,
-  /\blocation\s*\.\s*(href|assign|replace|reload)\b/u,
-  /\blocation\s*=/u,
-  /\bdocument\s*\.\s*location\s*[\[.]/u,
+  /\bwindow\s*\.\s*location\s*(?:=|\.href\s*=|\.assign\s*\(|\.replace\s*\(|\.reload\s*\(|\[)/u,
+  /\blocation\s*(?:=|\.href\s*=|\.assign\s*\(|\.replace\s*\(|\.reload\s*\()/u,
+  /\bdocument\s*\.\s*location\s*(?:=|\.href\s*=|\.assign\s*\(|\.replace\s*\(|\.reload\s*\(|\[)/u,
 ];
 
 export function isLikelyNavigationCode(code: string): boolean {
