@@ -53,5 +53,16 @@
       "answerContains": ["User-Agent"],
       "maxSteps": 4
     }
+  },
+  {
+    "id": "elgoog-2048",
+    "objective": "Navigate to https://elgoog.im/2048/ and play one game by sending arrow-key wireActions, then extract a JSON snapshot containing the current score and maxTile from the iframe game state",
+    "mode": "task",
+    "maxSteps": 25,
+    "expected": {
+      "classification": "partial-success",
+      "answerContains": ["score", "maxTile"],
+      "maxSteps": 18
+    }
   }
 ]

@@ -425,6 +425,32 @@ test("createApprovalRequest sets a future expiresAt", () => {
   assert.ok(expiresAt > before, "expiresAt should be in the future");
 });
 
+test("createApprovalRequest carries proposedAction detail when supplied", () => {
+  const runId = createId("run") as RunId;
+  const actionId = createId("action") as ActionId;
+
+  const request = createApprovalRequest(runId, actionId, "Search posts.", [], {
+    kind: "exec",
+    riskKind: "unknown-mutation",
+    reason: "Matched rules: baseline-exec-risk-mutation",
+    codeExcerpt: "fetch('/api/search', { method: 'POST' })",
+  });
+
+  assert.deepEqual(request.proposedAction, {
+    kind: "exec",
+    riskKind: "unknown-mutation",
+    reason: "Matched rules: baseline-exec-risk-mutation",
+    codeExcerpt: "fetch('/api/search', { method: 'POST' })",
+  });
+});
+
+test("createApprovalRequest omits proposedAction when not supplied", () => {
+  const runId = createId("run") as RunId;
+  const actionId = createId("action") as ActionId;
+  const request = createApprovalRequest(runId, actionId, "Test.", []);
+  assert.equal(request.proposedAction, undefined);
+});
+
 // ---------------------------------------------------------------------------
 // approvals.ts — isExpired
 // ---------------------------------------------------------------------------

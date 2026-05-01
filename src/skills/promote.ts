@@ -424,6 +424,14 @@ export async function promoteSkill(
   // Dedup: check for existing skills with the same hostname
   const existing = await findExistingSkillsForHostname(skillDir, candidate.hostname);
   if (existing.length > 0) {
+    // Authored skills (source: team or builtin) are sacred to auto-promotion.
+    // Generated proposals can coexist in .proposals/ but never overwrite a
+    // human-curated active skill — those insights are durable and shouldn't
+    // be lost to lower-confidence generated content.
+    const existingSource = await readSkillSource(existing[0]!);
+    if (existingSource === "team" || existingSource === "builtin") {
+      return undefined;
+    }
     const existingConfidence = await readSkillConfidence(existing[0]!);
     if (existingConfidence !== undefined && existingConfidence - 0.05 > candidate.confidence) {
       return undefined;
@@ -437,6 +445,18 @@ export async function promoteSkill(
   await writeFile(filePath, content, "utf-8");
 
   return filePath;
+}
+
+async function readSkillSource(filePath: string): Promise<string | undefined> {
+  try {
+    const raw = await readFile(filePath, "utf-8");
+    const match = raw.match(/^---\n([\s\S]*?)\n---/u);
+    if (!match) return undefined;
+    const sourceMatch = match[1]!.match(/^source:\s*(\S+)/mu);
+    return sourceMatch ? sourceMatch[1] : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function readSkillConfidence(filePath: string): Promise<number | undefined> {

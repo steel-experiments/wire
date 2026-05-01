@@ -4,6 +4,7 @@ import type {
   ApprovalId,
   ApprovalRequest,
   ApprovalStatus,
+  ProposedActionDetail,
   RunId,
 } from "../shared/types.js";
 
@@ -22,10 +23,11 @@ export function createApprovalRequest(
   actionId: ActionId,
   summary: string,
   consequences: string[],
+  proposedAction?: ProposedActionDetail,
 ): ApprovalRequest {
   const expiresAt = nowIsoUtc(new Date(Date.now() + DEFAULT_TTL_MS));
 
-  return {
+  const request: ApprovalRequest = {
     id: createId("approval"),
     runId,
     actionId,
@@ -34,6 +36,8 @@ export function createApprovalRequest(
     expiresAt,
     status: "pending",
   };
+  if (proposedAction) request.proposedAction = proposedAction;
+  return request;
 }
 
 // ---------------------------------------------------------------------------

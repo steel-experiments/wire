@@ -4,6 +4,7 @@ import type {
   ApprovalRequest,
   JsonObject,
   ProposedAction,
+  ProposedActionDetail,
   Run,
   RunId,
   SessionId,
@@ -32,6 +33,45 @@ import type { ActionExecutionContext } from "./actions.js";
 
 const MAX_CDP_BATCH_COMMANDS = 80;
 const DEFAULT_EXEC_TIMEOUT_MS = 12_000;
+const APPROVAL_CODE_EXCERPT_MAX = 2000;
+
+// Build a ProposedActionDetail to attach to an approval request so a human
+// reviewing the gate can see the actual code/CDP methods and the policy reason
+// — not just a canned "Execute action kind X" string. Code is redacted and
+// length-capped before it lands on disk or in the trace.
+function buildProposedActionDetail(
+  action: ProposedAction,
+  policyKind: string,
+  execRiskKind: string | undefined,
+  reason: string | undefined,
+): ProposedActionDetail {
+  const detail: ProposedActionDetail = { kind: action.kind };
+  if (execRiskKind && execRiskKind !== action.kind) detail.riskKind = execRiskKind;
+  else if (policyKind !== action.kind) detail.riskKind = policyKind;
+  if (reason) detail.reason = reason;
+  const code = action.payload?.code;
+  if (typeof code === "string" && code.length > 0) {
+    const redacted = redactJsonObject({ code }).code as string;
+    if (redacted.length > APPROVAL_CODE_EXCERPT_MAX) {
+      detail.codeExcerpt = redacted.slice(0, APPROVAL_CODE_EXCERPT_MAX);
+      detail.truncated = true;
+    } else {
+      detail.codeExcerpt = redacted;
+    }
+  }
+  const methods: string[] = [];
+  const single = action.payload?.method;
+  if (typeof single === "string") methods.push(single);
+  const batch = action.payload?.commands;
+  if (Array.isArray(batch)) {
+    for (const cmd of batch) {
+      const m = (cmd as { method?: unknown })?.method;
+      if (typeof m === "string") methods.push(m);
+    }
+  }
+  if (methods.length > 0) detail.cdpMethods = methods;
+  return detail;
+}
 
 /** Static input: task identity and browser session. */
 interface TaskContext {
@@ -218,25 +258,34 @@ export async function executeStep(
     }
 
     if (decision.result === "require-approval") {
+      const proposedDetail = buildProposedActionDetail(
+        action,
+        policyKind,
+        execRisk?.kind,
+        decision.reason,
+      );
       const approvalRequest = createApprovalRequest(
         state.run.id,
         actionId,
         action.summary,
         [`Execute action kind "${policyKind}"`],
+        proposedDetail,
       );
 
       // Record approval request event
+      const approvalEventPayload: JsonObject = {
+        actionId,
+        approvalId: approvalRequest.id,
+        summary: action.summary,
+        consequences: approvalRequest.consequences,
+        proposedAction: proposedDetail as unknown as JsonObject,
+      };
       state.events.push({
         id: createId("event"),
         runId: state.run.id,
         ts: nowIsoUtc(),
         kind: "approval-request",
-        payload: {
-          actionId,
-          approvalId: approvalRequest.id,
-          summary: action.summary,
-          consequences: approvalRequest.consequences,
-        },
+        payload: approvalEventPayload,
       });
 
       return {

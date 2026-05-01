@@ -54,3 +54,6 @@ confidence: 0.95
 - Do NOT search for a "Start Bot" button — it does not exist. The correct button is "Play the Easter Egg Now!".
 - Avoid `location.reload()` between plays unless explicitly required; it often raises "Execution context was destroyed." Prefer iframe retry controls.
 - If the user asks to keep the session open, do not finish by navigating away or closing the page; leave the game page visible.
+- Do NOT parse `.score-container.textContent` with `.replace(/\D/g, '')` — the element renders the current score plus a transient `+N` merge-delta animation, so stripping non-digits concatenates them into impossible values like `213322048`. Use `parseInt((text.match(/^\d+/) || ['0'])[0])` or `text.split('\n')[0]` to extract just the score, and read `.best-container` separately for best.
+- After reaching 2048 a 'Keep Going!' control appears inside the iframe — click it (or the `.retry-button`) to continue or restart, instead of reloading the page.
+- Verify `.game-message.game-over`/`.game-won` *visibility*, not just presence — hidden overlays may stay mounted in the DOM after a state change.

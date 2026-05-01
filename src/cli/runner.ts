@@ -521,6 +521,26 @@ export async function runTask(options: RunOptions): Promise<RunResult> {
   };
 }
 
+function renderProposedAction(request: import("../shared/types.js").ApprovalRequest): void {
+  console.log(`Approval:     ${request.id}`);
+  console.log(`Summary:      ${request.summary}`);
+  const detail = request.proposedAction;
+  if (!detail) {
+    console.log("");
+    return;
+  }
+  const kindLabel = detail.riskKind ? `${detail.kind} (risk: ${detail.riskKind})` : detail.kind;
+  console.log(`Action kind:  ${kindLabel}`);
+  if (detail.reason) console.log(`Policy:       ${detail.reason}`);
+  if (detail.cdpMethods?.length) console.log(`CDP methods:  ${detail.cdpMethods.join(", ")}`);
+  if (detail.codeExcerpt) {
+    console.log("Proposed code:");
+    for (const line of detail.codeExcerpt.split("\n")) console.log(`  ${line}`);
+    if (detail.truncated) console.log("  … (truncated)");
+  }
+  console.log("");
+}
+
 // ---------------------------------------------------------------------------
 // approveRun — returns ApproveResult
 // ---------------------------------------------------------------------------
@@ -544,6 +564,12 @@ export async function approveRun(runId: RunId, jsonOutput?: boolean): Promise<Ap
       }
       process.exitCode = 1;
       return { approved: false, approvalId: request.id, runId, status: "expired" };
+    }
+  }
+
+  if (!jsonOutput) {
+    for (const request of pending) {
+      renderProposedAction(request);
     }
   }
 

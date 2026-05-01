@@ -374,6 +374,69 @@ test("executeStep handles exec action requiring approval", async () => {
   assert.equal(result.state.stepCount, 0);
 });
 
+test("approval requests carry proposed code, risk, and reason", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  const provider = createMockProvider();
+  const policy = createMockPolicyEngine({
+    check(actionId) {
+      return {
+        id: createId("policy"),
+        actionId,
+        result: "require-approval",
+        reason: "Matched rules: baseline-exec-risk-mutation",
+      };
+    },
+  });
+
+  const result = await executeStep(
+    state,
+    {
+      kind: "exec",
+      summary: "Probe API",
+      payload: { code: "return fetch('/api/items', { method: 'POST', body: '{}' })" },
+    },
+    provider,
+    policy,
+  );
+
+  assert.ok(result.pendingApproval);
+  const detail = result.pendingApproval!.proposedAction;
+  assert.ok(detail, "proposedAction should be populated");
+  assert.equal(detail!.kind, "exec");
+  assert.equal(detail!.riskKind, "unknown-mutation");
+  assert.equal(detail!.reason, "Matched rules: baseline-exec-risk-mutation");
+  assert.match(detail!.codeExcerpt ?? "", /method: 'POST'/u);
+  // Approval-request event mirrors the detail.
+  const approvalEvent = result.state.events.find((e) => e.kind === "approval-request");
+  assert.ok(approvalEvent);
+  const eventDetail = approvalEvent!.payload.proposedAction as Record<string, unknown> | undefined;
+  assert.equal(eventDetail?.riskKind, "unknown-mutation");
+});
+
+test("approval request truncates very long code excerpts", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  const provider = createMockProvider();
+  const policy = createMockPolicyEngine({
+    check(actionId) {
+      return { id: createId("policy"), actionId, result: "require-approval" };
+    },
+  });
+
+  const longCode = "// padding\n".repeat(300) + "fetch('/x', { method: 'POST' })";
+  const result = await executeStep(
+    state,
+    { kind: "exec", summary: "Big code", payload: { code: longCode } },
+    provider,
+    policy,
+  );
+
+  const detail = result.pendingApproval!.proposedAction;
+  assert.equal(detail?.truncated, true);
+  assert.ok((detail?.codeExcerpt?.length ?? 0) <= 2000);
+});
+
 test("resumeTask executes an approved pending action without re-requesting approval", async () => {
   const task = makeTask({ objective: "Submit approved form" });
   const sessionId = makeSessionId();

@@ -293,6 +293,15 @@ export interface PolicyDecision {
   reason?: string;
 }
 
+export interface ProposedActionDetail {
+  kind: string;
+  riskKind?: string;
+  reason?: string;
+  codeExcerpt?: string;
+  truncated?: boolean;
+  cdpMethods?: string[];
+}
+
 export interface ApprovalRequest {
   id: ApprovalId;
   runId: RunId;
@@ -301,6 +310,7 @@ export interface ApprovalRequest {
   consequences: string[];
   expiresAt?: string;
   status?: ApprovalStatus;
+  proposedAction?: ProposedActionDetail;
 }
 
 export interface Artifact {

@@ -766,6 +766,39 @@ test("promoteSkill replaces stale incumbent when confidence is close", async () 
   assert.match(raw, /New useful trap/u);
 });
 
+test("promoteSkill never displaces a team-authored skill with a generated proposal", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  await mkdir(dir, { recursive: true });
+
+  // Hand-author a team skill on disk (simulating a curated skill).
+  const teamSkillPath = join(dir, "example_com-skill_team.md");
+  await writeFile(teamSkillPath, [
+    "---",
+    "id: skill_team-example",
+    "scope: domain",
+    "source: team",
+    "tags:",
+    "  - curated",
+    "updatedAt: 2026-04-26",
+    "hostnamePatterns:",
+    '  - "example.com"',
+    "confidence: 0.95",
+    "---",
+    "",
+    "# Team-authored skill",
+    "- Critical insight that must not be lost.",
+  ].join("\n"), "utf-8");
+
+  // A higher-confidence generated proposal would normally displace, but
+  // shouldn't be allowed to overwrite human-authored knowledge.
+  const result = await promoteSkill(makeCandidate({ confidence: 0.99, facts: ["Generated insight"] }), dir);
+  assert.equal(result, undefined, "team skill must remain untouched");
+
+  const surviving = await readFile(teamSkillPath, "utf-8");
+  assert.match(surviving, /Critical insight that must not be lost/u);
+});
+
 test("promoteSkill writes when no existing skill for hostname", async () => {
   testRoot = makeRoot();
   const dir = join(testRoot, "skills");

@@ -353,6 +353,17 @@ export const policyDecisionSchema = z
   })
   .strict();
 
+export const proposedActionDetailSchema = z
+  .object({
+    kind: z.string().min(1),
+    riskKind: z.string().min(1).optional(),
+    reason: z.string().min(1).optional(),
+    codeExcerpt: z.string().optional(),
+    truncated: z.boolean().optional(),
+    cdpMethods: z.array(z.string()).optional(),
+  })
+  .strict();
+
 export const approvalRequestSchema = z
   .object({
     id: approvalIdSchema,
@@ -362,6 +373,7 @@ export const approvalRequestSchema = z
     consequences: z.array(z.string()),
     expiresAt: isoUtcTimestampSchema.optional(),
     status: approvalStatusSchema.optional(),
+    proposedAction: proposedActionDetailSchema.optional(),
   })
   .strict();
 
