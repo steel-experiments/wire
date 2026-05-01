@@ -2101,6 +2101,72 @@ test("executeStep executes wireActions from exec returnValue (JSON string)", asy
   assert.equal(codeResults[1]!.payload.source, "wireActions");
 });
 
+test("executeStep auto-observes after wireActions Page.navigate", async () => {
+  // Repro of grants.gov run_48b5ae4d: agent navigated via wireActions
+  // Page.navigate, but no auto-observation followed, so it flew blind.
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  let observeCount = 0;
+  const provider = createMockProvider({
+    async exec() {
+      return {
+        ok: true,
+        durationMs: 10,
+        returnValue: { wireActions: [{ method: "Page.navigate", params: { url: "https://example.com/x" } }] },
+      };
+    },
+    async observe(input: BrowserObserveInput): Promise<BrowserObservation> {
+      observeCount++;
+      return {
+        sessionId: input.sessionId,
+        url: "https://example.com/x",
+        title: "After nav",
+        tabs: [{ id: "tab-1", title: "After nav", url: "https://example.com/x", active: true }],
+      };
+    },
+  } as Partial<BrowserProvider>);
+  (provider as unknown as Record<string, unknown>).rawBatch = async () => ({ ok: true });
+
+  await executeStep(
+    state,
+    { kind: "exec", summary: "Navigate via CDP", payload: { code: "return {wireActions:[{method:'Page.navigate',params:{url:'https://example.com/x'}}]}" } },
+    provider,
+    createMockPolicyEngine(),
+  );
+
+  assert.equal(observeCount, 1, "should auto-observe once after Page.navigate via wireActions");
+  const observations = state.events.filter((e) => e.kind === "observation");
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0]!.payload.url, "https://example.com/x");
+});
+
+test("executeStep auto-observes after raw Page.navigate", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  let observeCount = 0;
+  const provider = createMockProvider({
+    async raw() { return { ok: true }; },
+    async observe(input: BrowserObserveInput): Promise<BrowserObservation> {
+      observeCount++;
+      return {
+        sessionId: input.sessionId,
+        url: "https://example.com/raw",
+        title: "Raw nav",
+        tabs: [{ id: "tab-1", title: "Raw nav", url: "https://example.com/raw", active: true }],
+      };
+    },
+  } as Partial<BrowserProvider>);
+
+  await executeStep(
+    state,
+    { kind: "raw", summary: "Raw navigate", payload: { method: "Page.navigate", params: { url: "https://example.com/raw" } } },
+    provider,
+    createMockPolicyEngine(),
+  );
+
+  assert.equal(observeCount, 1);
+});
+
 test("executeStep caps oversized wireActions batches", async () => {
   const task = makeTask();
   const state = createLoopState(task, makeSessionId());
@@ -2227,6 +2293,36 @@ test("isNavigationOnlyResult identifies navigation-only return values", () => {
   assert.equal(isNavigationOnlyResult(makeEvent({ navigatedTo: "https://weather.com", temperature: "43°F" })), false);
   assert.equal(isNavigationOnlyResult(makeEvent("just a string")), false);
   assert.equal(isNavigationOnlyResult(makeEvent(null)), false);
+});
+
+// ---------------------------------------------------------------------------
+// isNoProgressResult
+// ---------------------------------------------------------------------------
+
+test("isNoProgressResult flags empty/nav-only/error-shaped successful results", async () => {
+  const { isNoProgressResult } = await import("./state-helpers.js");
+  const make = (payload: Record<string, unknown>): TraceEvent => ({
+    id: createId("event"),
+    runId: "run_test" as never,
+    ts: new Date().toISOString(),
+    kind: "code-result" as const,
+    payload: { ok: true, durationMs: 10, ...payload },
+  });
+
+  assert.equal(isNoProgressResult(make({})), true, "empty payload");
+  assert.equal(isNoProgressResult(make({ returnValue: {} })), true, "empty object");
+  assert.equal(isNoProgressResult(make({ returnValue: [] })), true, "empty array");
+  assert.equal(isNoProgressResult(make({ returnValue: "" })), true, "empty string");
+  assert.equal(isNoProgressResult(make({ returnValue: null })), true, "null");
+  assert.equal(isNoProgressResult(make({ returnValue: { navigatedTo: "https://x.com" } })), true, "nav-only");
+  assert.equal(isNoProgressResult(make({ returnValue: { error: "not found" } })), true, "error-only");
+  assert.equal(isNoProgressResult(make({ returnValue: { temperature: "43°F" } })), false, "real data");
+  assert.equal(isNoProgressResult(make({ stdout: "real text" })), false, "stdout text");
+  assert.equal(
+    isNoProgressResult({ ...make({ returnValue: {} }), payload: { ok: false, durationMs: 10 } } as TraceEvent),
+    false,
+    "failed result is not no-progress",
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -2844,4 +2940,25 @@ test("computeRepeatStreak counts sig matches but not result when results differ"
   const streak = computeRepeatStreak(events);
   assert.equal(streak.sameSig, 2);
   assert.equal(streak.sameResult, 1);
+});
+
+test("computeNoProgressStreak counts trailing empty/nav-only/error successes", async () => {
+  const { computeNoProgressStreak } = await import("./state-helpers.js");
+  const events = [
+    { id: "e1" as never, runId: "r" as never, ts: "1", kind: "code-result" as const, payload: { ok: true, returnValue: { score: 5 } } },
+    { id: "e2" as never, runId: "r" as never, ts: "2", kind: "code-result" as const, payload: { ok: true, returnValue: {} } },
+    { id: "e3" as never, runId: "r" as never, ts: "3", kind: "code-result" as const, payload: { ok: true, returnValue: { error: "not found" } } },
+    { id: "e4" as never, runId: "r" as never, ts: "4", kind: "code-result" as const, payload: { ok: true, returnValue: { navigated: true } } },
+  ];
+  assert.equal(computeNoProgressStreak(events), 3);
+});
+
+test("computeNoProgressStreak resets when a meaningful result lands at the tail", async () => {
+  const { computeNoProgressStreak } = await import("./state-helpers.js");
+  const events = [
+    { id: "e1" as never, runId: "r" as never, ts: "1", kind: "code-result" as const, payload: { ok: true, returnValue: {} } },
+    { id: "e2" as never, runId: "r" as never, ts: "2", kind: "code-result" as const, payload: { ok: true, returnValue: {} } },
+    { id: "e3" as never, runId: "r" as never, ts: "3", kind: "code-result" as const, payload: { ok: true, returnValue: { score: 100 } } },
+  ];
+  assert.equal(computeNoProgressStreak(events), 0);
 });

@@ -317,6 +317,18 @@ async function findSimilarProposal(candidate: PromotionCandidate, skillDir: stri
   return undefined;
 }
 
+// Count existing proposals (any similarity) for a hostname. Used to detect
+// when the agent has independently rediscovered knowledge across runs —
+// that's stronger evidence than any single confidence number.
+async function countProposalsForHostname(skillDir: string, hostname: string): Promise<number> {
+  const dir = join(skillDir, ".proposals");
+  const prefix = hostname.replace(/\./gu, "_");
+  try {
+    const entries = await readdir(dir);
+    return entries.filter((n) => n.startsWith(prefix) && n.endsWith(".md")).length;
+  } catch { return 0; }
+}
+
 async function pruneProposals(skillDir: string, hostname: string, keep: number): Promise<void> {
   const dir = join(skillDir, ".proposals");
   const prefix = hostname.replace(/\./gu, "_");
@@ -371,7 +383,16 @@ export async function manageSkillPromotion(
     };
   }
 
-  if (candidate.confidence < policy.autoPromoteMinConfidence) {
+  // Cumulative-evidence promotion: if the agent already filed a proposal for
+  // this hostname before (and this is the second), independent rediscovery is
+  // worth more than the per-run confidence number. Promote even if confidence
+  // is below the auto-promote floor, provided reusable signal exists.
+  // The candidate count *includes* the proposal we just wrote, so ≥2 means
+  // there is at least one prior.
+  const proposalCount = await countProposalsForHostname(skillDir, candidate.hostname);
+  const repeatedDiscovery = proposalCount >= 2;
+
+  if (!repeatedDiscovery && candidate.confidence < policy.autoPromoteMinConfidence) {
     return {
       proposalPath,
       promoted: false,
@@ -380,10 +401,13 @@ export async function manageSkillPromotion(
   }
 
   const activePath = await promoteSkill(candidate, skillDir, { activeStatus: "active" });
+  const promotedReason = repeatedDiscovery && candidate.confidence < policy.autoPromoteMinConfidence
+    ? `auto-promoted: rediscovered knowledge across ${proposalCount} proposals`
+    : "auto-promoted";
   const managed: ManagedSkillPromotion = {
     proposalPath,
     promoted: Boolean(activePath),
-    reason: activePath ? "auto-promoted" : "proposal-only: active skill confidence is clearly higher",
+    reason: activePath ? promotedReason : "proposal-only: active skill confidence is clearly higher",
   };
   if (activePath) managed.activePath = activePath;
   return managed;

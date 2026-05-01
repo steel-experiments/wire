@@ -855,6 +855,34 @@ test("manageSkillPromotion rejects duplicate proposals for a hostname", async ()
   assert.equal((await readdir(join(dir, ".proposals"))).length, 1);
 });
 
+test("manageSkillPromotion auto-promotes on rediscovered knowledge below confidence floor", async () => {
+  // Repro of the grants.gov gap: a single 0.85-confidence proposal stays
+  // below the 0.9 auto-promote floor forever. When the agent independently
+  // files a *second* proposal (different selectors/facts) for the same
+  // hostname, the rediscovery itself is evidence — promote even at 0.85.
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+
+  const first = await manageSkillPromotion(
+    makeCandidate({ hostname: "grants.gov", confidence: 0.85, facts: ["deep links resolve to home"] }),
+    dir,
+  );
+  assert.equal(first.promoted, false, "first proposal stays in proposals");
+
+  const second = await manageSkillPromotion(
+    makeCandidate({
+      hostname: "grants.gov",
+      confidence: 0.85,
+      facts: ["search box bounces back to homepage"],
+      selectors: ["input[type='search']"],
+    }),
+    dir,
+  );
+  assert.equal(second.promoted, true, "second distinct proposal triggers cumulative promotion");
+  assert.match(second.reason, /rediscovered/u);
+  assert.ok(second.activePath?.endsWith(".md"));
+});
+
 test("manageSkillPromotion caps proposals per hostname", async () => {
   testRoot = makeRoot();
   const dir = join(testRoot, "skills");

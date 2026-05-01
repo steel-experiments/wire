@@ -58,6 +58,8 @@ import {
   execActionSignature,
   codeResultDigest,
   computeRepeatStreak,
+  computeNoProgressStreak,
+  isNoProgressResult,
 } from "./state-helpers.js";
 import { ActionRegistry, type ActionHandler } from "./actions.js";
 
@@ -293,8 +295,9 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number, a
 
     // Repeat-streak signal: lets the LLM see what our stuck-loop guards see.
     const streak = computeRepeatStreak(state.events);
-    if (streak.sameSig >= 2) {
-      context.repeatSignal = streak;
+    const noProgress = computeNoProgressStreak(state.events);
+    if (streak.sameSig >= 2 || noProgress >= 2) {
+      context.repeatSignal = { ...streak, noProgress };
     }
 
     // Populate budget info
@@ -591,6 +594,12 @@ async function runMainLoop(
   // attempts before bailing — looser so it doesn't false-positive on
   // legitimate sequential work, but still bounds the worst case.
   const SIG_ONLY_THRESHOLD = 6;
+  // Cross-signature stall: consecutive no-progress results (nav-only,
+  // empty payload, error-shaped) regardless of which code produced them.
+  // Catches the grants.gov-shaped failure where the agent walks across
+  // different dead URLs and signature/digest-based guards never fire.
+  let noProgressCount = 0;
+  const NO_PROGRESS_THRESHOLD = 4;
 
   while (true) {
     // Check stopping conditions
@@ -716,6 +725,31 @@ async function runMainLoop(
         action.payload.code.includes("wire:extract")
       ) {
         appendExtractedResultArtifact(state);
+      }
+
+      // Cross-signature no-progress stall — fires regardless of action sig.
+      // Counts consecutive successful execs that produced nothing usable
+      // (empty/nav-only/error-shaped). Resets on any meaningful result.
+      const lastResultForProgress = latestCodeResult(state);
+      if (lastResultForProgress) {
+        if (lastResultForProgress.payload.ok === true && isNoProgressResult(lastResultForProgress)) {
+          noProgressCount += 1;
+          if (noProgressCount > NO_PROGRESS_THRESHOLD) {
+            state.events.push({
+              id: createId("event"),
+              runId: state.run.id,
+              ts: nowIsoUtc(),
+              kind: "thought-summary",
+              payload: {
+                reason: `${noProgressCount} consecutive no-progress results — aborting to force re-plan`,
+              },
+            });
+            await flushTraceSink(state, config, signals);
+            break;
+          }
+        } else if (lastResultForProgress.payload.ok === true) {
+          noProgressCount = 0;
+        }
       }
 
       // Stuck-loop guards. Three layered failure modes:

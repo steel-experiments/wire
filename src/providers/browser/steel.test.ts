@@ -368,6 +368,56 @@ test("SteelProvider.raw attaches page-scoped CDP commands to a target session", 
   }
 });
 
+test("SteelProvider.raw surfaces close-event detail in error message", async () => {
+  // E: WS error path. Bare "CDP socket closed" gave the agent nothing to
+  // act on. Close-event code/reason should be in the rejection message.
+  class CloseMidFlightSocket {
+    onopen: ((event: any) => void) | null = null;
+    onmessage: ((event: any) => void) | null = null;
+    onerror: ((event: any) => void) | null = null;
+    onclose: ((event: any) => void) | null = null;
+    constructor() {
+      queueMicrotask(() => this.onopen?.({}));
+    }
+    send(_data: string): void {
+      // Drop the message and close the socket mid-flight.
+      queueMicrotask(() => this.onclose?.({ code: 1006, reason: "abnormal closure", wasClean: false }));
+    }
+    close(): void { this.onclose?.({ code: 1000, reason: "" }); }
+  }
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(
+    JSON.stringify(fakeSteelSession({ id: "aaa-bbb-ccc" })),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+
+  const originalErr = console.error;
+  const errors: string[] = [];
+  console.error = (...args: unknown[]) => { errors.push(args.map(String).join(" ")); };
+
+  const provider = new SteelProvider({
+    apiKey: "ste-test-key",
+    webSocketFactory: () => new CloseMidFlightSocket(),
+  });
+
+  try {
+    await assert.rejects(
+      () => provider.raw({ sessionId: "session_aaa-bbb-ccc" as never, method: "Browser.getVersion" }),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /code=1006/);
+        assert.match(err.message, /abnormal closure/);
+        return true;
+      },
+    );
+    assert.ok(errors.some((line) => /\[steel:ws\]/.test(line)), "close should be logged via console.error");
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.error = originalErr;
+  }
+});
+
 test("SteelProvider.raw rejects malformed CDP frames", async () => {
   class BadFrameSocket {
     onopen: ((event: any) => void) | null = null;

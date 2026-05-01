@@ -78,6 +78,30 @@ export function isNavigationOnlyResult(event: TraceEvent): boolean {
   return keys.every((k) => navKeys.has(k));
 }
 
+/**
+ * "No-progress" results: the exec succeeded but produced nothing the agent
+ * can build on — empty returnValue, nav-only, or error-shaped. Used by the
+ * cross-signature stall guard to catch agents wandering across distinct URLs
+ * that all dead-end (e.g. grants.gov 404 walking).
+ */
+export function isNoProgressResult(event: TraceEvent): boolean {
+  if (event.kind !== "code-result") return false;
+  if (event.payload.ok !== true) return false;
+  const stdout = event.payload.stdout;
+  const hasStdout = typeof stdout === "string" && stdout.trim().length > 0;
+  const rv = event.payload.returnValue;
+  if (hasStdout) return false;
+  if (rv === undefined || rv === null) return true;
+  if (typeof rv === "string") return rv.trim().length === 0;
+  if (Array.isArray(rv)) return rv.length === 0;
+  if (typeof rv === "object") {
+    if (Object.keys(rv as Record<string, unknown>).length === 0) return true;
+    if (isNavigationOnlyResult(event)) return true;
+    if (isErrorResult(event)) return true;
+  }
+  return false;
+}
+
 /** Detect code-results that only report an error (e.g. {"error":"not found"}). */
 export function isErrorResult(event: TraceEvent): boolean {
   const rv = event.payload.returnValue;
@@ -345,6 +369,19 @@ export function execActionSignature(action: ProposedAction): string | undefined 
     if (typeof method === "string") return `raw:${method}`;
   }
   return undefined;
+}
+
+/** Trailing streak of consecutive successful no-progress code-results (empty/nav-only/error-shaped). Pairs with computeRepeatStreak to feed all stuck-loop signals back to the LLM. */
+export function computeNoProgressStreak(events: TraceEvent[]): number {
+  let streak = 0;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i]!;
+    if (e.kind !== "code-result") continue;
+    if (e.payload.ok !== true) break;
+    if (!isNoProgressResult(e)) break;
+    streak += 1;
+  }
+  return streak;
 }
 
 /** Trailing streak of identical exec sig + result digest — fed to the LLM so it can change strategy before the loop guard bails. */

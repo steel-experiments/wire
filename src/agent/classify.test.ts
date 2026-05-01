@@ -210,6 +210,35 @@ describe("classifyRun", () => {
     assert.equal(result.confidence, 0.7);
   });
 
+  it("downgrades to partial-success when result has mostly empty extraction fields (grants.gov shape)", () => {
+    // Repro of run_48b5ae4d-d1c9: result was a JSON object with named fields
+    // (oppNumber, agency, deadline, awardCeiling, cfda) all empty strings,
+    // plus a snippet that happened to contain 'intelligence' from the homepage.
+    // Keyword check passed; structural check should reject.
+    const stdout = JSON.stringify({
+      url: "https://simpler.grants.gov/search?utm_source=Grants.gov",
+      oppNumber: "",
+      oppTitle: "",
+      agency: "",
+      deadline: "",
+      awardCeiling: "",
+      cfda: "",
+      snippet: "Skip to main content. Search funding opportunities. artificial intelligence.",
+    });
+    const events = [
+      makeEvent("code-result", { ok: true, stdout }),
+      makeEvent("artifact", { kind: "json-output", content: stdout }),
+    ];
+    const result = classifyRun(makeInput({
+      mode: "task",
+      events,
+      errorCount: 0,
+      objective: "Open grants.gov, search for active funding opportunities containing 'artificial intelligence', and return top 5 with agency, deadline, and CFDA number.",
+    }));
+    assert.equal(result.kind, "partial-success");
+    assert.ok(result.notes?.some((n) => /does not.*address/i.test(n)));
+  });
+
   it("downgrades task-complete to partial-success when output does not address objective", () => {
     const events = [
       makeEvent("code-result", { ok: true, stdout: '{"title":"Booking.com","url":"https://www.booking.com/"}' }),

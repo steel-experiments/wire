@@ -365,21 +365,28 @@ test("sanitizeSkillContent passes legitimate content through unchanged", () => {
 });
 
 test("assembleUserPrompt emits REPEATING when sameSig >= 4", () => {
-  const context = makeContext({ repeatSignal: { sameSig: 5, sameResult: 1 } });
+  const context = makeContext({ repeatSignal: { sameSig: 5, sameResult: 1, noProgress: 0 } });
   const prompt = assembleUserPrompt(context);
   assert.match(prompt, /REPEATING.+5 times/u);
 });
 
 test("assembleUserPrompt emits STUCK when sameResult >= 3", () => {
-  const context = makeContext({ repeatSignal: { sameSig: 4, sameResult: 4 } });
+  const context = makeContext({ repeatSignal: { sameSig: 4, sameResult: 4, noProgress: 0 } });
   const prompt = assembleUserPrompt(context);
   assert.match(prompt, /STUCK.+same result 4 times/u);
   assert.ok(!/REPEATING/.test(prompt), "STUCK takes precedence over REPEATING");
 });
 
-test("assembleUserPrompt omits repeat warning when streak is short", () => {
-  const context = makeContext({ repeatSignal: { sameSig: 2, sameResult: 1 } });
+test("assembleUserPrompt emits STALLED when noProgress >= 2 (highest priority)", () => {
+  const context = makeContext({ repeatSignal: { sameSig: 5, sameResult: 5, noProgress: 3 } });
   const prompt = assembleUserPrompt(context);
-  assert.ok(!/REPEATING/.test(prompt));
-  assert.ok(!/STUCK/.test(prompt));
+  assert.match(prompt, /STALLED.+last 3 successful execs/u);
+  assert.ok(!/STUCK/.test(prompt), "STALLED takes precedence over STUCK");
+  assert.ok(!/REPEATING/.test(prompt), "STALLED takes precedence over REPEATING");
+});
+
+test("assembleUserPrompt omits repeat warning when streak is short", () => {
+  const context = makeContext({ repeatSignal: { sameSig: 2, sameResult: 1, noProgress: 0 } });
+  const prompt = assembleUserPrompt(context);
+  assert.ok(!/REPEATING|STUCK|STALLED/.test(prompt));
 });

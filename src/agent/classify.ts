@@ -74,9 +74,35 @@ function objectiveIterationSatisfied(resultText: string | undefined, objective: 
   return count ? Number(count[1]) >= target : false;
 }
 
+// Detects "JSON-shaped extraction with mostly empty fields" — the classic
+// false-positive shape where the agent built a result schema but couldn't
+// fill it (e.g. grants.gov run_48b5ae4d returned {agency:"",cfda:"",...}).
+// Returns true when ≥50% of the named scalar fields are empty/null/undefined.
+function hasMostlyEmptyFields(resultText: string): boolean {
+  let parsed: unknown;
+  try { parsed = JSON.parse(resultText); } catch { return false; }
+  const records: Array<Record<string, unknown>> = [];
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    records.push(parsed as Record<string, unknown>);
+  } else if (Array.isArray(parsed) && parsed.length > 0 && parsed[0] && typeof parsed[0] === "object") {
+    records.push(...(parsed as Array<Record<string, unknown>>));
+  } else { return false; }
+  let total = 0;
+  let empty = 0;
+  for (const record of records) {
+    for (const value of Object.values(record)) {
+      if (value === null || value === undefined) { total++; empty++; continue; }
+      if (typeof value === "string") { total++; if (value.trim().length === 0) empty++; continue; }
+      if (typeof value === "number" || typeof value === "boolean") { total++; continue; }
+    }
+  }
+  return total >= 3 && empty / total >= 0.5;
+}
+
 function resultAddressesObjective(resultText: string | undefined, objective: string): boolean {
   if (!resultText || !objective) return true;
   if (objectiveIterationSatisfied(resultText, objective)) return true;
+  if (hasMostlyEmptyFields(resultText)) return false;
 
   const verbPhrases = objectiveVerbPhrases(objective);
   if (verbPhrases.size === 0) return true;

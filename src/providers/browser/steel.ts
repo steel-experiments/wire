@@ -723,13 +723,32 @@ class CdpConnection {
   ) {
     this.ready = new Promise((resolve, reject) => {
       this.socket.onopen = () => resolve();
-      this.socket.onerror = () => {
-        const error = new Error("WebSocket error");
+      this.socket.onerror = (event) => {
+        const detail = event && typeof event === "object"
+          ? (event.message || event.error?.message || event.code || event.type || "")
+          : "";
+        const message = detail
+          ? `Steel CDP WebSocket error: ${detail}`
+          : "Steel CDP WebSocket error (no detail from event)";
+        const error = new Error(message);
+        console.error(`[steel:ws] ${message}`);
         this.rejectPending(error);
         reject(error);
       };
-      this.socket.onclose = () => {
-        this.rejectPending(new Error("CDP socket closed"));
+      this.socket.onclose = (event) => {
+        const code = event?.code;
+        const reason = event?.reason;
+        const wasClean = event?.wasClean;
+        const detail = [
+          code !== undefined ? `code=${code}` : "",
+          reason ? `reason=${reason}` : "",
+          wasClean !== undefined ? `wasClean=${wasClean}` : "",
+        ].filter(Boolean).join(" ");
+        const message = `Steel CDP socket closed${detail ? ` (${detail})` : ""}`;
+        if (this.pending.size > 0) {
+          console.error(`[steel:ws] ${message} — ${this.pending.size} pending command(s) aborted`);
+        }
+        this.rejectPending(new Error(message));
       };
       this.socket.onmessage = (event) => {
         let message: {

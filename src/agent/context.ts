@@ -46,7 +46,7 @@ export interface ContextBundle {
   budget?: BudgetSummary;
   plan?: string;
   stateDiff?: StateDiffSummary;
-  repeatSignal?: { sameSig: number; sameResult: number };
+  repeatSignal?: { sameSig: number; sameResult: number; noProgress: number };
   sessionCapabilities?: Record<string, unknown>;
   providerActions?: Array<{ kind: string; description: string }>;
 }
@@ -170,8 +170,9 @@ export function assembleUserPrompt(context: ContextBundle): string {
   }
 
   if (context.repeatSignal) {
-    const { sameSig, sameResult } = context.repeatSignal;
-    if (sameResult >= 3) sections.push(`STUCK: You ran the same exec code ${sameSig} times in a row and got the same result ${sameResult} times. Stop probing — change strategy now or the run will be aborted.`);
+    const { sameSig, sameResult, noProgress } = context.repeatSignal;
+    if (noProgress >= 2) sections.push(`STALLED: Your last ${noProgress} successful execs returned no usable data (empty payloads, navigation-only, or error-shaped). Stop probing the same way — extract real content (innerText, attributes, structured DOM) or pivot to a different page.`);
+    else if (sameResult >= 3) sections.push(`STUCK: You ran the same exec code ${sameSig} times in a row and got the same result ${sameResult} times. Stop probing — change strategy now or the run will be aborted.`);
     else if (sameSig >= 4) sections.push(`REPEATING: You ran the same exec code ${sameSig} times in a row. If this isn't progressing, switch to a different selector, action, or approach.`);
   }
 

@@ -34,6 +34,31 @@ import type { ActionExecutionContext } from "./actions.js";
 const MAX_CDP_BATCH_COMMANDS = 80;
 const DEFAULT_EXEC_TIMEOUT_MS = 12_000;
 const APPROVAL_CODE_EXCERPT_MAX = 2000;
+const NAVIGATION_CDP_METHODS = new Set(["Page.navigate", "Page.reload", "Page.navigateToHistoryEntry"]);
+
+function commandsIncludeNavigation(
+  commands: ReadonlyArray<{ method?: unknown }>,
+): boolean {
+  return commands.some((c) => typeof c?.method === "string" && NAVIGATION_CDP_METHODS.has(c.method));
+}
+
+async function autoObserveAfterNavigation(
+  state: LoopState,
+  provider: BrowserProvider,
+): Promise<{ authWallHit: boolean }> {
+  const observation = await observeBrowser({ provider, sessionId: state.sessionId });
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: nowIsoUtc(),
+    kind: "observation",
+    payload: redactJsonObject(toObservationPayload(observation)),
+  });
+  if (observation.screenshotBase64) {
+    state.latestScreenshotBase64 = observation.screenshotBase64;
+  }
+  return { authWallHit: detectAuthWall(observation).detected };
+}
 
 // Build a ProposedActionDetail to attach to an approval request so a human
 // reviewing the gate can see the actual code/CDP methods and the policy reason
@@ -444,26 +469,23 @@ export async function executeStep(
           } catch { /* returnValue wasn't valid JSON — ignore */ }
         }
 
-        // Auto-observe after navigation: when exec code contains navigation
-        // patterns (location.href/assign/replace), the page URL changes and
-        // the agent needs an observation of the new page before its next turn.
-        // Previously this only fired when navigation code produced no output,
-        // but agents commonly write `location.href=url; return {navigated:url}`
-        // which defeated the gate and left the agent blind on the new page.
-        if (isLikelyNavigationCode(code)) {
-          const observation = await observeBrowser({ provider, sessionId: state.sessionId });
-          const obsPayload = toObservationPayload(observation);
-          state.events.push({
-            id: createId("event"),
-            runId: state.run.id,
-            ts: nowIsoUtc(),
-            kind: "observation",
-            payload: redactJsonObject(obsPayload),
-          });
-          if (observation.screenshotBase64) {
-            state.latestScreenshotBase64 = observation.screenshotBase64;
-          }
-          authWallHit = detectAuthWall(observation).detected;
+        // Auto-observe after navigation. Triggers on either:
+        //   (1) exec code containing location.href/assign/replace, or
+        //   (2) wireActions that included a Page.navigate/reload CDP command.
+        // Without (2), agents using the wireActions envelope to navigate fly
+        // blind — see grants.gov run_48b5ae4d (27 execs, 2 observations).
+        const wireActionsNavigated = (() => {
+          if (!result.ok || result.returnValue === undefined) return false;
+          try {
+            const parsed = typeof result.returnValue === "string"
+              ? JSON.parse(result.returnValue)
+              : result.returnValue;
+            return Array.isArray(parsed?.wireActions) && commandsIncludeNavigation(parsed.wireActions);
+          } catch { return false; }
+        })();
+        if (isLikelyNavigationCode(code) || wireActionsNavigated) {
+          const obs = await autoObserveAfterNavigation(state, provider);
+          if (obs.authWallHit) authWallHit = true;
         }
       }
       break;
@@ -546,6 +568,11 @@ export async function executeStep(
             returnValue: lastResult as unknown as import("../shared/types.js").JsonValue,
           },
         });
+
+        if (ok && commandsIncludeNavigation(commandsToRun)) {
+          const obs = await autoObserveAfterNavigation(state, provider);
+          if (obs.authWallHit) authWallHit = true;
+        }
       }
       break;
     }
