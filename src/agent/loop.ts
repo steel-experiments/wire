@@ -641,14 +641,19 @@ function hasMeaningfulPayload(payload: TraceEvent["payload"]): boolean {
   return true;
 }
 
-// A returnValue containing a top-level `wireActions` array is wire's internal
-// control envelope (CDP commands the agent asked the runtime to dispatch),
-// not a final answer to the task. Skip these when picking the result.
+// Wire's internal control envelopes — not final answers. Catches both the
+// pre-dispatch wireActions shape {wireActions:[...]} and the post-dispatch
+// CDP nav ack {frameId, loaderId} that comes back from Page.navigate.
 function looksLikeWireCommand(returnValue: unknown): boolean {
   if (!returnValue || typeof returnValue !== "object" || Array.isArray(returnValue)) {
     return false;
   }
-  return Array.isArray((returnValue as Record<string, unknown>)["wireActions"]);
+  const obj = returnValue as Record<string, unknown>;
+  if (Array.isArray(obj["wireActions"])) return true;
+  const keys = Object.keys(obj);
+  if (keys.length === 0 || keys.length > 3) return false;
+  const navAckKeys = new Set(["frameId", "loaderId", "errorText"]);
+  return keys.every((k) => navAckKeys.has(k));
 }
 
 export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | undefined {

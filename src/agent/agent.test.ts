@@ -2788,6 +2788,38 @@ test("finalizeRun falls back to wireActions envelope when nothing else is meanin
   assert.ok(result.run.result?.includes("wireActions"), "expected fallback to envelope when nothing better exists");
 });
 
+test("finalizeRun skips bare CDP nav-ack {frameId, loaderId} when picking final result", () => {
+  // Repro of the Amazon run: the agent extracted real product data, then
+  // wireActions-navigated to the review page. The nav ack returned
+  // {frameId, loaderId} — non-empty, no error, no wireActions key —
+  // so deriveRunResult picked it as the final answer instead of the real
+  // extraction. The expanded looksLikeWireCommand catches this shape too.
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+
+  state.events.push(
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, durationMs: 12, returnValue: { title: "Top Product", price: "$11.99" } },
+    },
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, durationMs: 5, returnValue: { frameId: "ABC123", loaderId: "DEF456" } },
+    },
+  );
+
+  const result = finalizeRun(state);
+  assert.ok(result.run.result, "expected a derived result");
+  assert.ok(result.run.result!.includes("Top Product"), `expected to skip nav ack and pick extraction: ${result.run.result}`);
+  assert.ok(!result.run.result!.includes("frameId"), "result must not be the nav ack");
+});
+
 test("finalizeRun skips empty returnValue payloads when picking final result", () => {
   const task = makeTask();
   const state = createLoopState(task, makeSessionId());
