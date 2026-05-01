@@ -1,7 +1,6 @@
 ---
 id: skill_8f8caa5f-0662-4a73-893c-778e3ef80468
 scope: domain
-status: proposed
 source: generated
 confidence: 0.85
 sourceRunIds:
