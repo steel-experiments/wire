@@ -6,11 +6,12 @@ import {
   SteelProvider,
   createSteelProvider,
   validateBrowserCode,
+  type SteelLogger,
 } from "../../providers/browser/steel.js";
 import { createLoopState } from "../../agent/loop.js";
 import type { BrowserProvider } from "../../browser/bridge.js";
 import { createId } from "../../shared/ids.js";
-import type { BrowserObservation, BrowserSession, Task } from "../../shared/types.js";
+import type { BrowserObservation, BrowserSession, SessionId, Task } from "../../shared/types.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -386,24 +387,26 @@ test("SteelProvider.raw surfaces close-event detail in error message", async () 
     close(): void { this.onclose?.({ code: 1000, reason: "" }); }
   }
 
+  const logEntries: Array<string> = [];
+  const logger: SteelLogger = {
+    error(message: string) { logEntries.push(message); },
+  };
+
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(
     JSON.stringify(fakeSteelSession({ id: "aaa-bbb-ccc" })),
     { status: 200, headers: { "Content-Type": "application/json" } },
   );
 
-  const originalErr = console.error;
-  const errors: string[] = [];
-  console.error = (...args: unknown[]) => { errors.push(args.map(String).join(" ")); };
-
   const provider = new SteelProvider({
     apiKey: "ste-test-key",
     webSocketFactory: () => new CloseMidFlightSocket(),
+    logger,
   });
 
   try {
     await assert.rejects(
-      () => provider.raw({ sessionId: "session_aaa-bbb-ccc" as never, method: "Browser.getVersion" }),
+      () => provider.raw({ sessionId: "session_aaa-bbb-ccc" as SessionId, method: "Browser.getVersion" }),
       (err: unknown) => {
         assert.ok(err instanceof Error);
         assert.match(err.message, /code=1006/);
@@ -411,10 +414,9 @@ test("SteelProvider.raw surfaces close-event detail in error message", async () 
         return true;
       },
     );
-    assert.ok(errors.some((line) => /\[steel:ws\]/.test(line)), "close should be logged via console.error");
+    assert.ok(logEntries.some((line) => /steel:ws/.test(line)), "close should be logged via logger");
   } finally {
     globalThis.fetch = originalFetch;
-    console.error = originalErr;
   }
 });
 
@@ -773,4 +775,103 @@ test("Steel reconfigure action notifies replacement session callback", async () 
   assert.equal(callback?.summary, "Enable stealth session");
   assert.equal(state.sessionId, newSession.id);
   assert.equal(state.sessionLiveUrl, newSession.liveUrl);
+});
+
+// ---------------------------------------------------------------------------
+// Logger routing (Change 1)
+// ---------------------------------------------------------------------------
+
+test("SteelProvider routes CDP WebSocket errors to configured logger", async () => {
+  const logEntries: Array<string> = [];
+  const logger: SteelLogger = {
+    error(message: string) { logEntries.push(message); },
+  };
+
+  let consoleErrorCalled = false;
+  const origConsoleError = console.error;
+  console.error = (..._args: unknown[]) => { consoleErrorCalled = true; };
+
+  try {
+    class ErrorSocket {
+      onopen: ((e: any) => void) | null = null;
+      onmessage: ((e: any) => void) | null = null;
+      onerror: ((e: any) => void) | null = null;
+      onclose: ((e: any) => void) | null = null;
+      constructor() {
+        queueMicrotask(() => this.onerror?.({ message: "connection refused" }));
+      }
+      send() {}
+      close() {}
+    }
+
+    const provider = new SteelProvider({
+      apiKey: "ste-test-key",
+      baseUrl: "http://localhost:0/v1",
+      webSocketFactory: () => new ErrorSocket() as any,
+      logger,
+    });
+
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      return new Response(JSON.stringify(fakeSteelSession()), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    };
+
+    try {
+      await assert.rejects(
+        () => provider.observe({ sessionId: `session_${fakeSteelSession().id}` as SessionId }),
+        /WebSocket error/i,
+      );
+      assert.ok(logEntries.length > 0, "logger.error should have been called");
+      assert.ok(!consoleErrorCalled, "console.error should not have been called from provider");
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  } finally {
+    console.error = origConsoleError;
+  }
+});
+
+test("SteelProvider without logger defaults to silent error handling", async () => {
+  let consoleErrorCalled = false;
+  const origConsoleError = console.error;
+  console.error = () => { consoleErrorCalled = true; };
+
+  try {
+    class ErrorSocket {
+      onopen = null as any;
+      onmessage = null as any;
+      onerror = null as any;
+      onclose = null as any;
+      constructor() {
+        queueMicrotask(() => this.onerror?.({ message: "boom" }));
+      }
+      send() {}
+      close() {}
+    }
+
+    const provider = new SteelProvider({
+      apiKey: "ste-test-key",
+      baseUrl: "http://localhost:0/v1",
+      webSocketFactory: () => new ErrorSocket() as any,
+    });
+
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(JSON.stringify(fakeSteelSession()), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    });
+
+    try {
+      await assert.rejects(
+        () => provider.observe({ sessionId: `session_${fakeSteelSession().id}` as SessionId }),
+        /WebSocket error/i,
+      );
+      assert.ok(!consoleErrorCalled, "console.error should not be called from provider");
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  } finally {
+    console.error = origConsoleError;
+  }
 });

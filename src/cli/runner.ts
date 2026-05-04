@@ -225,8 +225,8 @@ function createRuntimeConfig(
     config.llmProvider = llmProvider;
   }
   config.skillDir = options.skillDir ?? "./skills";
+  config.sessionInput = { timeoutMinutes: Math.max(15, Math.ceil(maxSteps * 30 / 60)) };
   if (options.profileId || options.sessionConfig) {
-    config.sessionInput = {};
     if (options.profileId) config.sessionInput.profileId = options.profileId as never;
     if (options.sessionConfig) config.sessionInput.sessionConfig = options.sessionConfig;
   }

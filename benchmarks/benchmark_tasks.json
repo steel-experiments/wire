@@ -1,0 +1,2659 @@
+{
+  "$schema": "./benchmark_tasks.schema.json",
+  "version": 1,
+  "generated_at": "2026-05-04",
+  "tasks": [
+    {
+      "id": "example-title",
+      "prompt": "Go to example.com and return the heading text.",
+      "source": { "name": "wire-default", "task_id": "example-title" },
+      "vertical": "infra-probe", "tier": "scrape",
+      "capabilities": ["navigate", "extract-text"], "infra": ["none"], "tags": ["smoke"],
+      "entry_url": "https://example.com",
+      "difficulty": 1, "max_steps": 4,
+      "graders": [{ "type": "contains", "values": ["Example Domain"] }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "booking-tokyo-hotels",
+      "prompt": "Navigate to https://www.booking.com/searchresults.html?ss=Tokyo&checkin=2026-06-10&checkout=2026-06-12, wait 5 seconds, then extract the first 5 hotel names and prices as JSON.",
+      "source": { "name": "wire-default", "task_id": "booking-search" },
+      "vertical": "travel", "tier": "session",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["stealth"], "tags": ["dynamic", "spa"],
+      "entry_url": "https://www.booking.com/searchresults.html?ss=Tokyo&checkin=2026-06-10&checkout=2026-06-12",
+      "difficulty": 3, "max_steps": 10,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer includes 5 hotel names with prices in structured form. Names must be plausible Tokyo hotels; each entry must include a price with currency or numeric amount.", "must_have": ["hotel"] }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "sec-edgar-apple-10k",
+      "prompt": "Navigate to https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company=Apple&type=10-K&dateb=&owner=include&count=5 and return the most recent filing date and form type.",
+      "source": { "name": "wire-default", "task_id": "sec-edgar-filing" },
+      "vertical": "financial-services", "tier": "session",
+      "capabilities": ["navigate", "extract-table"], "infra": ["none"], "tags": ["gov", "table"],
+      "entry_url": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company=Apple&type=10-K&dateb=&owner=include&count=5",
+      "difficulty": 2, "max_steps": 8,
+      "graders": [
+        { "type": "contains", "values": ["10-K"] },
+        { "type": "regex", "pattern": "\\b\\d{4}-\\d{2}-\\d{2}\\b" }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "lesswrong-front-page",
+      "prompt": "Navigate to https://www.lesswrong.com, wait 3 seconds, and extract the titles of the first 3 posts on the front page.",
+      "source": { "name": "wire-default", "task_id": "lesswrong-posts" },
+      "vertical": "knowledge-base", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["dynamic", "spa"],
+      "entry_url": "https://www.lesswrong.com",
+      "difficulty": 2, "max_steps": 8,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists exactly 3 distinct post titles that are plausible LessWrong front-page entries (long-form rationality / AI / philosophy posts). Titles must be non-empty strings, not boilerplate like 'Login' or 'About'." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "httpbin-headers",
+      "prompt": "Navigate to https://httpbin.org/headers and return the User-Agent and Accept headers from the response JSON.",
+      "source": { "name": "wire-default", "task_id": "httpbin-headers" },
+      "vertical": "infra-probe", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["smoke", "json"],
+      "entry_url": "https://httpbin.org/headers",
+      "difficulty": 1, "max_steps": 4,
+      "graders": [
+        { "type": "contains", "values": ["User-Agent"] },
+        { "type": "contains", "values": ["Accept"] }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "elgoog-2048",
+      "prompt": "Navigate to https://elgoog.im/2048/ and play one game by sending arrow-key actions, then return a JSON snapshot containing the current score and maxTile from the iframe game state.",
+      "source": { "name": "wire-default", "task_id": "elgoog-2048" },
+      "vertical": "infra-probe", "tier": "agent",
+      "capabilities": ["navigate", "iframe-interact", "extract-structured"], "infra": ["none"], "tags": ["iframe", "game"],
+      "entry_url": "https://elgoog.im/2048/",
+      "difficulty": 4, "max_steps": 25,
+      "graders": [
+        { "type": "contains", "values": ["score", "maxTile"] }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "httpbin-ip",
+      "prompt": "Open https://httpbin.org/ip and return the origin IP address from the response.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["smoke", "json"],
+      "entry_url": "https://httpbin.org/ip",
+      "difficulty": 1, "max_steps": 3,
+      "graders": [{ "type": "regex", "pattern": "\\b\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\b" }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "httpbin-user-agent",
+      "prompt": "Open https://httpbin.org/user-agent and report the user-agent string the server saw.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "scrape",
+      "capabilities": ["navigate", "extract-text"], "infra": ["none"], "tags": ["smoke", "fingerprint"],
+      "entry_url": "https://httpbin.org/user-agent",
+      "difficulty": 1, "max_steps": 3,
+      "graders": [{ "type": "contains", "values": ["user-agent"] }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "httpbin-status-200",
+      "prompt": "Visit https://httpbin.org/status/200 and confirm the response status code.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "scrape",
+      "capabilities": ["navigate", "extract-text"], "infra": ["none"], "tags": ["smoke", "http"],
+      "entry_url": "https://httpbin.org/status/200",
+      "difficulty": 1, "max_steps": 3,
+      "graders": [{ "type": "contains", "values": ["200"] }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "httpbin-status-404",
+      "prompt": "Visit https://httpbin.org/status/404 and report what status the server returned.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "scrape",
+      "capabilities": ["navigate", "extract-text"], "infra": ["none"], "tags": ["smoke", "http", "error"],
+      "entry_url": "https://httpbin.org/status/404",
+      "difficulty": 1, "max_steps": 3,
+      "graders": [{ "type": "contains", "values": ["404"] }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "httpbin-redirect-3",
+      "prompt": "Visit https://httpbin.org/redirect/3 and report the URL you eventually landed on.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "scrape",
+      "capabilities": ["navigate", "extract-text"], "infra": ["none"], "tags": ["http", "redirect"],
+      "entry_url": "https://httpbin.org/redirect/3",
+      "difficulty": 2, "max_steps": 5,
+      "graders": [{ "type": "contains", "values": ["httpbin.org/get"] }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "httpbin-cookies-set",
+      "prompt": "Visit https://httpbin.org/cookies/set?wire=hello then navigate to https://httpbin.org/cookies and report whether the cookie 'wire' is present and its value.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "session",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["http", "cookies"],
+      "entry_url": "https://httpbin.org/cookies/set?wire=hello",
+      "difficulty": 2, "max_steps": 5,
+      "graders": [{ "type": "contains", "values": ["wire", "hello"] }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "httpbin-json",
+      "prompt": "Open https://httpbin.org/json and return the title of the embedded slideshow object.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["json"],
+      "entry_url": "https://httpbin.org/json",
+      "difficulty": 1, "max_steps": 3,
+      "graders": [{ "type": "contains", "values": ["Sample Slide Show"] }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "httpbin-xml",
+      "prompt": "Open https://httpbin.org/xml and return the content of the first slide title element.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "scrape",
+      "capabilities": ["navigate", "extract-text"], "infra": ["none"], "tags": ["xml"],
+      "entry_url": "https://httpbin.org/xml",
+      "difficulty": 2, "max_steps": 4,
+      "graders": [{ "type": "contains", "values": ["Wake up"] }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "httpbin-anything-post",
+      "prompt": "Open https://httpbin.org/anything?wire=test and report the value of args.wire from the response JSON.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["json"],
+      "entry_url": "https://httpbin.org/anything?wire=test",
+      "difficulty": 1, "max_steps": 3,
+      "graders": [{ "type": "contains", "values": ["test"] }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "httpbingo-headers",
+      "prompt": "Open https://httpbingo.org/headers and return the User-Agent header value.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["smoke", "json"],
+      "entry_url": "https://httpbingo.org/headers",
+      "difficulty": 1, "max_steps": 3,
+      "graders": [{ "type": "contains", "values": ["User-Agent"] }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "nowsecure-cf-challenge",
+      "prompt": "Visit https://nowsecure.nl and report the page title once it loads past any bot challenge.",
+      "source": { "name": "wire-demo", "task_id": "steel-stealth-cloudflare", "modified": true, "notes": "Depersonalized; targets Cloudflare-protected demo page" },
+      "vertical": "infra-probe", "tier": "session",
+      "capabilities": ["navigate", "extract-text"], "infra": ["stealth"], "tags": ["cloudflare", "bot-detect", "waf"],
+      "entry_url": "https://nowsecure.nl",
+      "difficulty": 4, "max_steps": 10,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer must contain a real page title from nowsecure.nl that indicates the Cloudflare bot challenge was passed (e.g. mentions 'nowSecure', 'verified', or 'human'). Reject if it mentions 'Just a moment', 'Checking your browser', a captcha, or returns empty.", "must_not_have": ["Just a moment", "Checking your browser"] }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "browser-leaks-canvas",
+      "prompt": "Visit https://browserleaks.com/canvas and report the canvas fingerprint signature value shown on the page.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "session",
+      "capabilities": ["navigate", "extract-text"], "infra": ["stealth"], "tags": ["fingerprint", "stealth"],
+      "entry_url": "https://browserleaks.com/canvas",
+      "difficulty": 3, "max_steps": 6,
+      "graders": [{ "type": "regex", "pattern": "[a-fA-F0-9]{8,}" }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "browser-leaks-webrtc",
+      "prompt": "Visit https://browserleaks.com/webrtc and report whether any local IP addresses are leaked, and list them if so.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "session",
+      "capabilities": ["navigate", "extract-text"], "infra": ["stealth"], "tags": ["fingerprint", "webrtc", "stealth"],
+      "entry_url": "https://browserleaks.com/webrtc",
+      "difficulty": 3, "max_steps": 6,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer states clearly whether the WebRTC leak detector found local/STUN IPs and lists any present. Accept either 'no leak' or a list of IPs." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "bot-sannysoft",
+      "prompt": "Visit https://bot.sannysoft.com and list which detection checks pass and which fail.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "session",
+      "capabilities": ["navigate", "extract-table"], "infra": ["stealth"], "tags": ["bot-detect", "stealth", "fingerprint"],
+      "entry_url": "https://bot.sannysoft.com",
+      "difficulty": 3, "max_steps": 6,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer must enumerate at least 5 named detection checks (e.g., WebDriver, Chrome, Permissions, Plugins) with pass/fail status for each." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "creepjs-fingerprint",
+      "prompt": "Visit https://abrahamjuliot.github.io/creepjs/ and report the trust score / fingerprint hash that CreepJS computes for the session.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "session",
+      "capabilities": ["navigate", "extract-text"], "infra": ["stealth"], "tags": ["fingerprint", "stealth"],
+      "entry_url": "https://abrahamjuliot.github.io/creepjs/",
+      "difficulty": 4, "max_steps": 10,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer must include a CreepJS trust score (e.g., percentage or grade) and/or the fingerprint hash. Reject if only a generic page description is returned." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "recaptcha-v2-demo",
+      "prompt": "Navigate to https://www.google.com/recaptcha/api2/demo, complete the reCAPTCHA v2 challenge, submit the form, and report the success message.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "agent",
+      "capabilities": ["navigate", "click-flow", "form-fill"], "infra": ["captcha"], "tags": ["captcha", "recaptcha"],
+      "entry_url": "https://www.google.com/recaptcha/api2/demo",
+      "difficulty": 5, "max_steps": 20,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer must indicate the reCAPTCHA was solved successfully and the demo form was submitted. Look for the 'Verification Success' / 'Success!' confirmation message. Reject if captcha was not attempted or if it failed." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "hcaptcha-demo",
+      "prompt": "Navigate to https://accounts.hcaptcha.com/demo, complete the hCaptcha challenge, and report the result message.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "agent",
+      "capabilities": ["navigate", "click-flow"], "infra": ["captcha"], "tags": ["captcha", "hcaptcha"],
+      "entry_url": "https://accounts.hcaptcha.com/demo",
+      "difficulty": 5, "max_steps": 20,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer indicates hCaptcha challenge was solved and the demo confirmed success. Reject if captcha was skipped or failed." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "ja3-tls-fingerprint",
+      "prompt": "Visit https://tls.peet.ws and report the JA3 fingerprint hash for the current TLS connection.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "session",
+      "capabilities": ["navigate", "extract-text"], "infra": ["stealth"], "tags": ["tls", "fingerprint"],
+      "entry_url": "https://tls.peet.ws",
+      "difficulty": 3, "max_steps": 6,
+      "graders": [{ "type": "regex", "pattern": "[a-f0-9]{32}" }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "webdriver-detection",
+      "prompt": "Visit https://intoli.com/blog/not-possible-to-block-chrome-headless/chrome-headless-test.html and list which detection signals report 'missing' or 'failed'.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "session",
+      "capabilities": ["navigate", "extract-table"], "infra": ["stealth"], "tags": ["headless", "stealth", "detection"],
+      "entry_url": "https://intoli.com/blog/not-possible-to-block-chrome-headless/chrome-headless-test.html",
+      "difficulty": 3, "max_steps": 8,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists named detection signals with their status (e.g., User Agent, Webdriver, Chrome, Permissions). At least 4 signals must be enumerated." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "elgoog-snake",
+      "prompt": "Navigate to https://elgoog.im/snake/, play the game by issuing arrow-key actions for at least 30 seconds, then report your final score.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "agent",
+      "capabilities": ["navigate", "iframe-interact", "extract-text"], "infra": ["none"], "tags": ["iframe", "game"],
+      "entry_url": "https://elgoog.im/snake/",
+      "difficulty": 4, "max_steps": 30,
+      "graders": [
+        { "type": "regex", "pattern": "\\b\\d+\\b" },
+        { "type": "llm-judge", "rubric": "Answer reports a numeric score from the snake game. The score should be > 0, indicating the agent moved the snake." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "elgoog-tictactoe",
+      "prompt": "Navigate to https://elgoog.im/tic-tac-toe/, play one full game against the AI, and report whether you won, lost, or drew.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "agent",
+      "capabilities": ["navigate", "iframe-interact", "click-flow"], "infra": ["none"], "tags": ["iframe", "game"],
+      "entry_url": "https://elgoog.im/tic-tac-toe/",
+      "difficulty": 3, "max_steps": 20,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer reports a clear game outcome: won, lost, or drew. Must indicate the agent actually made moves and a final state was reached." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "iframe-postmessage-test",
+      "prompt": "Visit https://html5demos.com/postmessage and verify that messages can be sent into the embedded iframe; report the echoed response.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "agent",
+      "capabilities": ["navigate", "iframe-interact", "form-fill"], "infra": ["none"], "tags": ["iframe", "postmessage"],
+      "entry_url": "https://html5demos.com/postmessage",
+      "difficulty": 3, "max_steps": 8,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer demonstrates that a message was successfully posted into the iframe and an echoed response was captured." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "cookie-persistence-amazon",
+      "prompt": "Open amazon.com twice in two sequential sessions using the same browser profile. Accept the cookie banner on the first run and verify it does not appear on the second run because the profile persisted state.",
+      "source": { "name": "wire-demo", "task_id": "steel-profile-amazon-cookies", "modified": true, "notes": "Depersonalized for benchmark use" },
+      "vertical": "infra-probe", "tier": "session",
+      "capabilities": ["navigate", "click-flow"], "infra": ["profile"], "tags": ["profile", "cookies", "side-effect"],
+      "entry_url": "https://www.amazon.com",
+      "auth": { "type": "profile", "key": "amazon-cookies-test" },
+      "difficulty": 3, "max_steps": 12,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer must explicitly state that the cookie banner appeared on run 1 and was absent on run 2, demonstrating profile persistence. Reject if both runs show the banner or if profile reuse is not confirmed." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "proxy-geo-ipinfo",
+      "prompt": "Visit https://ipinfo.io and report the country and city the response associates with your IP.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "session",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["proxy"], "tags": ["geo", "proxy"],
+      "entry_url": "https://ipinfo.io",
+      "difficulty": 2, "max_steps": 5,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer reports a country and a city (or region) derived from the IP geolocation lookup." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "proxy-geo-iplocation",
+      "prompt": "Visit https://www.iplocation.net and report the country, region, and ISP it shows for the current connection.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "session",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["proxy"], "tags": ["geo", "proxy"],
+      "entry_url": "https://www.iplocation.net",
+      "difficulty": 2, "max_steps": 5,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer includes country, region/state, and ISP name from the iplocation.net lookup." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "amiunique-fingerprint",
+      "prompt": "Visit https://amiunique.org/fingerprint and report the overall uniqueness score / similarity ratio shown.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "session",
+      "capabilities": ["navigate", "extract-text"], "infra": ["stealth"], "tags": ["fingerprint", "stealth"],
+      "entry_url": "https://amiunique.org/fingerprint",
+      "difficulty": 3, "max_steps": 6,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer reports a uniqueness percentage or ratio from amiunique.org (e.g., 'X out of N browsers share this fingerprint')." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "headless-detection",
+      "prompt": "Visit https://arh.antoinevastel.com/bots/areyouheadless and report whether the page detected a headless browser.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "session",
+      "capabilities": ["navigate", "extract-text"], "infra": ["stealth"], "tags": ["headless", "stealth", "detection"],
+      "entry_url": "https://arh.antoinevastel.com/bots/areyouheadless",
+      "difficulty": 3, "max_steps": 6,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer states clearly whether headless was detected (e.g., 'You are not Chrome headless' vs 'You are Chrome headless')." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "infinite-scroll-load",
+      "prompt": "Visit https://infinite-scroll.com/demo/full-page/ and scroll until at least 4 pages of articles have loaded; return the total number of article titles visible.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "session",
+      "capabilities": ["navigate", "click-flow", "extract-structured"], "infra": ["none"], "tags": ["infinite-scroll", "spa"],
+      "entry_url": "https://infinite-scroll.com/demo/full-page/",
+      "difficulty": 3, "max_steps": 12,
+      "graders": [
+        { "type": "regex", "pattern": "\\b\\d+\\b" },
+        { "type": "llm-judge", "rubric": "Answer reports a total count of article titles after at least 4 scroll-loads. Count must be a plausible integer >= 8." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "shadow-dom-extract",
+      "prompt": "Visit https://web.dev and extract the main heading text from the homepage (note: web.dev uses shadow DOM in places).",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "scrape",
+      "capabilities": ["navigate", "extract-text"], "infra": ["none"], "tags": ["shadow-dom"],
+      "entry_url": "https://web.dev",
+      "difficulty": 2, "max_steps": 5,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer contains the actual main heading text from web.dev's homepage (a real h1/title), not boilerplate like 'Loading' or 'Skip to content'." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "hn-front-page-titles",
+      "prompt": "Navigate to https://news.ycombinator.com and return the top 5 story titles in order.",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["news"],
+      "entry_url": "https://news.ycombinator.com",
+      "difficulty": 1, "max_steps": 4,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists exactly 5 distinct Hacker News story titles in order. Titles must be plausible HN content (tech, startups, programming, etc.)." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "hn-top-comment-thread",
+      "prompt": "On https://news.ycombinator.com, click into the comments of the current top story and return the username and first sentence of the top-voted comment.",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "click-flow", "extract-structured"], "infra": ["none"], "tags": ["news", "multi-step"],
+      "entry_url": "https://news.ycombinator.com",
+      "difficulty": 2, "max_steps": 8,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer includes a real HN username and a comment fragment from the top story's discussion." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "bbc-top-headline",
+      "prompt": "Navigate to https://www.bbc.com/news and return the current top headline.",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "scrape",
+      "capabilities": ["navigate", "extract-text"], "infra": ["none"], "tags": ["news"],
+      "entry_url": "https://www.bbc.com/news",
+      "difficulty": 1, "max_steps": 4,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer is the lead headline from BBC News at the time of access. Must be a plausible news headline, not nav text." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "reuters-top-story",
+      "prompt": "Navigate to https://www.reuters.com and return the headline and dateline of the current top story.",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["stealth"], "tags": ["news"],
+      "entry_url": "https://www.reuters.com",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer includes a Reuters top-story headline and an indication of when/where it was published (date or location dateline)." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "ap-news-top",
+      "prompt": "Navigate to https://apnews.com and return the headlines of the top 3 stories.",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["news"],
+      "entry_url": "https://apnews.com",
+      "difficulty": 1, "max_steps": 4,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 3 distinct AP News headlines from the homepage." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "guardian-uk-headline",
+      "prompt": "Navigate to https://www.theguardian.com/uk and return the lead UK headline.",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "scrape",
+      "capabilities": ["navigate", "extract-text"], "infra": ["none"], "tags": ["news"],
+      "entry_url": "https://www.theguardian.com/uk",
+      "difficulty": 1, "max_steps": 4,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer contains the current Guardian UK lead headline." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "sec-edgar-google-10q",
+      "prompt": "Navigate to https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001652044&type=10-Q&dateb=&owner=include&count=5 (Alphabet) and return the most recent 10-Q filing date.",
+      "source": { "name": "wire-original" },
+      "vertical": "financial-services", "tier": "session",
+      "capabilities": ["navigate", "extract-table"], "infra": ["none"], "tags": ["gov", "table"],
+      "entry_url": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001652044&type=10-Q&dateb=&owner=include&count=5",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "contains", "values": ["10-Q"] },
+        { "type": "regex", "pattern": "\\b\\d{4}-\\d{2}-\\d{2}\\b" }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "sec-edgar-microsoft-8k",
+      "prompt": "Navigate to EDGAR and find the 5 most recent 8-K filings for Microsoft (CIK 0000789019). Return their filing dates as a list.",
+      "source": { "name": "wire-original" },
+      "vertical": "financial-services", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-table"], "infra": ["none"], "tags": ["gov", "table"],
+      "entry_url": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000789019&type=8-K&dateb=&owner=include&count=10",
+      "difficulty": 3, "max_steps": 8,
+      "graders": [
+        { "type": "contains", "values": ["8-K"] },
+        { "type": "llm-judge", "rubric": "Answer lists 5 distinct filing dates in YYYY-MM-DD form for Microsoft 8-K filings." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "usajobs-search-engineer",
+      "prompt": "Navigate to https://www.usajobs.gov and search for 'software engineer'. Return the title and agency of the first 3 results.",
+      "source": { "name": "wire-original" },
+      "vertical": "non-profit-gov", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["gov", "search"],
+      "entry_url": "https://www.usajobs.gov",
+      "difficulty": 2, "max_steps": 8,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer includes 3 USAJobs listings each with a job title and a federal agency name." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "congress-gov-bill-search",
+      "prompt": "Navigate to https://www.congress.gov and search for bills containing 'artificial intelligence' introduced in the 119th Congress. Return the title and sponsor of the first result.",
+      "source": { "name": "wire-original" },
+      "vertical": "non-profit-gov", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["gov", "search"],
+      "entry_url": "https://www.congress.gov",
+      "difficulty": 3, "max_steps": 10,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer includes a real bill title (mentions AI or artificial intelligence) and a Congress member's name as sponsor." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "fec-recent-filings",
+      "prompt": "Navigate to https://www.fec.gov and find recent campaign finance filings; return the names of 3 committees that filed in the last 30 days.",
+      "source": { "name": "wire-original" },
+      "vertical": "non-profit-gov", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["gov"],
+      "entry_url": "https://www.fec.gov",
+      "difficulty": 3, "max_steps": 10,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 3 committee names from FEC recent filings, with at least one filing date or reference to recency." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "federal-register-recent",
+      "prompt": "Navigate to https://www.federalregister.gov and return the titles of the 3 most recent rules published.",
+      "source": { "name": "wire-original" },
+      "vertical": "non-profit-gov", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["gov"],
+      "entry_url": "https://www.federalregister.gov",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 3 distinct Federal Register rule titles published recently. Titles must be plausible regulatory entries." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "github-trending-today",
+      "prompt": "Navigate to https://github.com/trending and return the top 5 trending repositories with their primary language.",
+      "source": { "name": "wire-original" },
+      "vertical": "developer-tools", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["github", "dev"],
+      "entry_url": "https://github.com/trending",
+      "difficulty": 1, "max_steps": 4,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 5 GitHub repos in 'owner/name' format, each with a primary language." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "npm-react-version",
+      "prompt": "Navigate to https://www.npmjs.com/package/react and return the latest published version and last-publish date.",
+      "source": { "name": "wire-original" },
+      "vertical": "developer-tools", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["npm", "dev"],
+      "entry_url": "https://www.npmjs.com/package/react",
+      "difficulty": 1, "max_steps": 4,
+      "graders": [
+        { "type": "regex", "pattern": "\\b\\d+\\.\\d+\\.\\d+\\b" },
+        { "type": "llm-judge", "rubric": "Answer includes a semver version string and a publish date for the react npm package." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "pypi-django-version",
+      "prompt": "Navigate to https://pypi.org/project/django/ and return the latest released version.",
+      "source": { "name": "wire-original" },
+      "vertical": "developer-tools", "tier": "scrape",
+      "capabilities": ["navigate", "extract-text"], "infra": ["none"], "tags": ["pypi", "dev"],
+      "entry_url": "https://pypi.org/project/django/",
+      "difficulty": 1, "max_steps": 4,
+      "graders": [{ "type": "regex", "pattern": "\\b\\d+\\.\\d+(\\.\\d+)?\\b" }],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "crates-io-tokio",
+      "prompt": "Navigate to https://crates.io/crates/tokio and return the latest version, total downloads, and primary maintainer.",
+      "source": { "name": "wire-original" },
+      "vertical": "developer-tools", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["dev", "spa"],
+      "entry_url": "https://crates.io/crates/tokio",
+      "difficulty": 2, "max_steps": 5,
+      "graders": [
+        { "type": "regex", "pattern": "\\b\\d+\\.\\d+\\.\\d+\\b" },
+        { "type": "llm-judge", "rubric": "Answer includes the tokio crate version, a download count, and a maintainer/owner name." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "huggingface-model-llama",
+      "prompt": "Navigate to https://huggingface.co/meta-llama and return the names of 3 model repositories listed there.",
+      "source": { "name": "wire-original" },
+      "vertical": "developer-tools", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["ai", "dev"],
+      "entry_url": "https://huggingface.co/meta-llama",
+      "difficulty": 2, "max_steps": 5,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 3 distinct model names from the meta-llama org page on Hugging Face." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "arxiv-recent-cs-cl",
+      "prompt": "Navigate to https://arxiv.org/list/cs.CL/recent and return the titles of the first 3 papers listed.",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["academic"],
+      "entry_url": "https://arxiv.org/list/cs.CL/recent",
+      "difficulty": 1, "max_steps": 4,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 3 distinct arXiv paper titles in cs.CL." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "wikipedia-claude-shannon",
+      "prompt": "Navigate to https://en.wikipedia.org/wiki/Claude_Shannon and return his birth year, death year, and the field he is best known for.",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["wiki"],
+      "entry_url": "https://en.wikipedia.org/wiki/Claude_Shannon",
+      "difficulty": 1, "max_steps": 4,
+      "graders": [
+        { "type": "contains", "values": ["1916", "2001"] },
+        { "type": "llm-judge", "rubric": "Answer includes Shannon's birth year 1916, death year 2001, and mentions information theory or related field." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "cambridge-dict-serendipity",
+      "prompt": "Navigate to https://dictionary.cambridge.org and look up the word 'serendipity'. Return the primary definition.",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-text"], "infra": ["none"], "tags": ["dictionary"],
+      "entry_url": "https://dictionary.cambridge.org",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer is the Cambridge Dictionary primary definition of 'serendipity', referencing the idea of fortunate accident/discovery." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "mdn-fetch-api",
+      "prompt": "Navigate to https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API and return the first sentence of the page summary.",
+      "source": { "name": "wire-original" },
+      "vertical": "developer-tools", "tier": "scrape",
+      "capabilities": ["navigate", "extract-text"], "infra": ["none"], "tags": ["docs", "dev"],
+      "entry_url": "https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API",
+      "difficulty": 1, "max_steps": 4,
+      "graders": [{ "type": "contains", "values": ["Fetch"] }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "stackoverflow-tag-rust",
+      "prompt": "Navigate to https://stackoverflow.com/questions/tagged/rust and return the titles of the 3 most recent questions.",
+      "source": { "name": "wire-original" },
+      "vertical": "developer-tools", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["dev"],
+      "entry_url": "https://stackoverflow.com/questions/tagged/rust",
+      "difficulty": 2, "max_steps": 5,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 3 plausible Rust-tagged Stack Overflow question titles." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "wolfram-alpha-pi",
+      "prompt": "Navigate to https://www.wolframalpha.com and query 'pi to 50 digits'. Return the first 50 decimal digits of pi.",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-text"], "infra": ["none"], "tags": ["search", "math"],
+      "entry_url": "https://www.wolframalpha.com",
+      "difficulty": 3, "max_steps": 8,
+      "graders": [
+        { "type": "contains", "values": ["3.14159"] },
+        { "type": "regex", "pattern": "3\\.14159265358979" }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "weather-gov-nyc",
+      "prompt": "Navigate to https://forecast.weather.gov and search for the 'New York, NY' forecast. Return tonight's forecast text.",
+      "source": { "name": "wire-original" },
+      "vertical": "non-profit-gov", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-text"], "infra": ["none"], "tags": ["gov", "weather"],
+      "entry_url": "https://forecast.weather.gov",
+      "difficulty": 3, "max_steps": 10,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer is a weather.gov forecast string for the NYC area mentioning conditions like clouds, rain, temperature, etc." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "openstreetmap-eiffel",
+      "prompt": "Navigate to https://www.openstreetmap.org and search for 'Eiffel Tower'. Return the displayed coordinates (lat, lon).",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["maps"],
+      "entry_url": "https://www.openstreetmap.org",
+      "difficulty": 3, "max_steps": 8,
+      "graders": [
+        { "type": "regex", "pattern": "48\\.\\d+" },
+        { "type": "regex", "pattern": "2\\.\\d+" }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "espn-nba-scores",
+      "prompt": "Navigate to https://www.espn.com/nba/scoreboard and return the 3 most recently completed game results with scores.",
+      "source": { "name": "wire-original" },
+      "vertical": "sports-entertainment", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["sports"],
+      "entry_url": "https://www.espn.com/nba/scoreboard",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 3 NBA games with two team names and a numeric score for each." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "nfl-standings-current",
+      "prompt": "Navigate to https://www.espn.com/nfl/standings and return the team currently leading the AFC East with its win-loss record.",
+      "source": { "name": "wire-original" },
+      "vertical": "sports-entertainment", "tier": "scrape",
+      "capabilities": ["navigate", "extract-table"], "infra": ["none"], "tags": ["sports", "table"],
+      "entry_url": "https://www.espn.com/nfl/standings",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer names an AFC East team (Bills, Dolphins, Patriots, or Jets) with a numeric W-L record." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "mlb-leaderboard",
+      "prompt": "Navigate to https://www.mlb.com/stats and return the current MLB batting average leader's name and average.",
+      "source": { "name": "wire-original" },
+      "vertical": "sports-entertainment", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["sports", "table"],
+      "entry_url": "https://www.mlb.com/stats",
+      "difficulty": 3, "max_steps": 8,
+      "graders": [
+        { "type": "regex", "pattern": "0?\\.\\d{3}" },
+        { "type": "llm-judge", "rubric": "Answer includes a batter's name and a 3-digit batting average." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "wikipedia-recent-changes",
+      "prompt": "Navigate to https://en.wikipedia.org/wiki/Special:RecentChanges and return the titles of the 3 most recently edited articles.",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["wiki"],
+      "entry_url": "https://en.wikipedia.org/wiki/Special:RecentChanges",
+      "difficulty": 2, "max_steps": 5,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 3 distinct Wikipedia article titles from the recent changes feed." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "github-stars-comparison",
+      "prompt": "Compare the star counts of https://github.com/facebook/react and https://github.com/vuejs/vue. Return both star counts and which has more.",
+      "source": { "name": "wire-original" },
+      "vertical": "developer-tools", "tier": "session",
+      "capabilities": ["navigate", "compare", "extract-structured"], "infra": ["none"], "tags": ["github", "compare"],
+      "entry_url": "https://github.com/facebook/react",
+      "difficulty": 2, "max_steps": 8,
+      "graders": [
+        { "type": "regex", "pattern": "\\d+(\\.\\d+)?[kKmM]" },
+        { "type": "llm-judge", "rubric": "Answer includes star counts for both react and vue, and a clear statement of which has more." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "github-star-test-repo",
+      "prompt": "Log into GitHub with the configured benchmark account and star the repository steel-dev/steel.",
+      "source": { "name": "wire-demo", "task_id": "steel-credentials-github-star", "modified": true, "notes": "Depersonalized; uses bench test account, not personal" },
+      "vertical": "developer-tools", "tier": "agent",
+      "capabilities": ["login", "click-flow"], "infra": ["credentials"], "tags": ["github", "side-effect", "auth"],
+      "entry_url": "https://github.com/steel-dev/steel",
+      "auth": { "type": "credentials", "key": "github-bench" },
+      "difficulty": 3, "max_steps": 12,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer confirms the repo was successfully starred — agent must observe and report the 'Starred' state on the button. Reject if it only navigated, or claims success without evidence." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "github-follow-user",
+      "prompt": "Log into GitHub with the configured benchmark account and follow the user 'torvalds'.",
+      "source": { "name": "wire-original" },
+      "vertical": "developer-tools", "tier": "agent",
+      "capabilities": ["login", "click-flow"], "infra": ["credentials"], "tags": ["github", "side-effect", "auth"],
+      "entry_url": "https://github.com/torvalds",
+      "auth": { "type": "credentials", "key": "github-bench" },
+      "difficulty": 3, "max_steps": 12,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer confirms the follow action succeeded — the 'Follow' button should now read 'Unfollow' or similar." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "github-create-issue-test",
+      "prompt": "Log into GitHub with the bench account and create an issue titled 'wire-bench: smoke test' on the repo wire-bench/sandbox with a one-line body.",
+      "source": { "name": "wire-original" },
+      "vertical": "developer-tools", "tier": "agent",
+      "capabilities": ["login", "form-fill", "click-flow"], "infra": ["credentials"], "tags": ["github", "side-effect", "auth", "form"],
+      "entry_url": "https://github.com/wire-bench/sandbox/issues/new",
+      "auth": { "type": "credentials", "key": "github-bench" },
+      "difficulty": 4, "max_steps": 15,
+      "graders": [
+        { "type": "url-match", "pattern": "github\\.com/wire-bench/sandbox/issues/\\d+" },
+        { "type": "llm-judge", "rubric": "Answer confirms a new issue was created and posts the resulting issue URL." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "reddit-saved-list",
+      "prompt": "Using the configured Reddit profile, open https://www.reddit.com/user/me/saved and return the titles of the 5 most recently saved posts.",
+      "source": { "name": "wire-demo", "task_id": "steel-profile-reddit-saved", "modified": true, "notes": "Depersonalized to bench profile" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["profile"], "tags": ["reddit", "auth", "profile", "side-effect"],
+      "entry_url": "https://www.reddit.com/user/me/saved",
+      "auth": { "type": "profile", "key": "reddit-bench" },
+      "difficulty": 3, "max_steps": 8,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 5 saved-post titles from the bench Reddit profile." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "reddit-view-profile",
+      "prompt": "Using the configured Reddit profile, open https://www.reddit.com and report the username currently logged in (top-right indicator).",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "extract-text"], "infra": ["profile"], "tags": ["reddit", "auth", "profile"],
+      "entry_url": "https://www.reddit.com",
+      "auth": { "type": "profile", "key": "reddit-bench" },
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer reports a Reddit username (string of letters/digits) that the session is logged in as." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "x-post-tweet",
+      "prompt": "Log into x.com with bench credentials and post a tweet with text 'wire-bench smoke ' followed by the current ISO timestamp.",
+      "source": { "name": "wire-original" },
+      "vertical": "sales-intel", "tier": "agent",
+      "capabilities": ["login", "form-fill", "click-flow"], "infra": ["credentials", "stealth"], "tags": ["x", "twitter", "side-effect", "auth"],
+      "entry_url": "https://x.com/compose/post",
+      "auth": { "type": "credentials", "key": "x-bench" },
+      "difficulty": 4, "max_steps": 15,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer confirms a tweet was posted — the agent should observe the post in its own timeline or get a confirmation toast. Reject if it claims success without evidence or composed but did not click Post." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "x-view-timeline",
+      "prompt": "Log into x.com with the bench profile and return the text of the 3 most recent posts in the home timeline.",
+      "source": { "name": "wire-demo", "task_id": "steel-credentials-twitter-fetch", "modified": true, "notes": "Depersonalized; bench account" },
+      "vertical": "sales-intel", "tier": "session",
+      "capabilities": ["login", "extract-structured"], "infra": ["profile", "stealth"], "tags": ["x", "twitter", "auth"],
+      "entry_url": "https://x.com/home",
+      "auth": { "type": "profile", "key": "x-bench" },
+      "difficulty": 3, "max_steps": 10,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer includes 3 distinct post bodies from the X timeline." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "linkedin-view-profile",
+      "prompt": "Log into LinkedIn with the bench profile, open the logged-in user's profile, and return the headline and connection count.",
+      "source": { "name": "wire-demo", "task_id": "steel-credentials-linkedin-headline", "modified": true, "notes": "Depersonalized; bench account" },
+      "vertical": "hr-recruiting", "tier": "session",
+      "capabilities": ["login", "navigate", "extract-structured"], "infra": ["profile", "stealth"], "tags": ["linkedin", "auth"],
+      "entry_url": "https://www.linkedin.com/feed/",
+      "auth": { "type": "profile", "key": "linkedin-bench" },
+      "difficulty": 3, "max_steps": 10,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer includes the bench account's LinkedIn headline string and a connection count (numeric or '500+')." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "linkedin-search-people",
+      "prompt": "On LinkedIn (logged in via bench profile), search for people with title 'AI Researcher' at OpenAI; return the first 3 result names and headlines.",
+      "source": { "name": "wire-original" },
+      "vertical": "hr-recruiting", "tier": "session",
+      "capabilities": ["login", "search", "extract-structured"], "infra": ["profile", "stealth"], "tags": ["linkedin", "auth", "search"],
+      "entry_url": "https://www.linkedin.com/search/results/people/?keywords=AI%20Researcher%20OpenAI",
+      "auth": { "type": "profile", "key": "linkedin-bench" },
+      "difficulty": 4, "max_steps": 12,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 3 LinkedIn member names and headlines matching 'AI Researcher' at OpenAI." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "hn-view-profile",
+      "prompt": "Log into Hacker News with bench credentials and report the karma score shown on your profile page.",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["login", "navigate", "extract-text"], "infra": ["credentials"], "tags": ["hn", "auth"],
+      "entry_url": "https://news.ycombinator.com/login",
+      "auth": { "type": "credentials", "key": "hn-bench" },
+      "difficulty": 2, "max_steps": 8,
+      "graders": [
+        { "type": "regex", "pattern": "\\b\\d+\\b" },
+        { "type": "llm-judge", "rubric": "Answer reports a numeric karma score from the bench HN account profile." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "wire-bench-form-submit",
+      "prompt": "Visit https://httpbin.org/forms/post, fill out the pizza order form (customer 'wire-bench', size medium, topping bacon), and submit. Report the echoed form data.",
+      "source": { "name": "wire-original" },
+      "vertical": "rpa-workflow", "tier": "session",
+      "capabilities": ["navigate", "form-fill", "click-flow", "extract-structured"], "infra": ["none"], "tags": ["form", "smoke"],
+      "entry_url": "https://httpbin.org/forms/post",
+      "difficulty": 2, "max_steps": 10,
+      "graders": [
+        { "type": "contains", "values": ["wire-bench", "medium", "bacon"] }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "newsletter-signup-test",
+      "prompt": "Visit https://html5-tutorial.net/forms-validation-html5/ and submit the demo signup form with email 'wire-bench@example.com'. Report any validation messages or success indicators.",
+      "source": { "name": "wire-original" },
+      "vertical": "rpa-workflow", "tier": "session",
+      "capabilities": ["navigate", "form-fill", "click-flow"], "infra": ["none"], "tags": ["form"],
+      "entry_url": "https://html5-tutorial.net/forms-validation-html5/",
+      "difficulty": 2, "max_steps": 8,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer describes whether the form was successfully submitted or what validation/error messages were shown." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "steel-dashboard-login",
+      "prompt": "Log into https://app.steel.dev with bench credentials and return the number of sessions visible on the dashboard.",
+      "source": { "name": "wire-original" },
+      "vertical": "developer-tools", "tier": "session",
+      "capabilities": ["login", "navigate", "extract-structured"], "infra": ["credentials"], "tags": ["auth", "dashboard"],
+      "entry_url": "https://app.steel.dev",
+      "auth": { "type": "credentials", "key": "steel-bench" },
+      "difficulty": 3, "max_steps": 10,
+      "graders": [
+        { "type": "regex", "pattern": "\\b\\d+\\b" },
+        { "type": "llm-judge", "rubric": "Answer reports the session count visible on the Steel dashboard after logging in." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "medium-clap-article",
+      "prompt": "Log into Medium with bench credentials, open https://medium.com/topic/programming, click into the top article, and clap once. Report the clap count after.",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "agent",
+      "capabilities": ["login", "navigate", "click-flow", "extract-structured"], "infra": ["credentials"], "tags": ["medium", "side-effect", "auth"],
+      "entry_url": "https://medium.com/topic/programming",
+      "auth": { "type": "credentials", "key": "medium-bench" },
+      "difficulty": 3, "max_steps": 12,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer confirms the clap action succeeded and reports the new clap count for the article." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "multi-session-hero-copy",
+      "prompt": "In sequence (or in parallel), open steel.dev, browserbase.com, and kernel.sh. Return each homepage's main hero headline as a 3-row table.",
+      "source": { "name": "wire-demo", "task_id": "steel-multi-session-parallel", "modified": true, "notes": "Depersonalized; reduced from 'parallel' to 'sequence-or-parallel'" },
+      "vertical": "sales-intel", "tier": "session",
+      "capabilities": ["navigate", "extract-text", "compare"], "infra": ["none"], "tags": ["compare", "multi-site"],
+      "entry_url": "https://steel.dev",
+      "difficulty": 3, "max_steps": 12,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer is a table with 3 rows (steel.dev, browserbase.com, kernel.sh), each showing the homepage hero headline." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "llms-txt-audit",
+      "prompt": "For each of steel.dev, browserbase.com, kernel.sh, firecrawl.dev, parallel.ai: check whether /llms.txt exists and capture the robots.txt directives for GPTBot, ClaudeBot, and PerplexityBot. Return a comparison table.",
+      "source": { "name": "wire-demo", "task_id": "sales-llms-txt-audit", "modified": true, "notes": "Depersonalized" },
+      "vertical": "sales-intel", "tier": "session",
+      "capabilities": ["navigate", "extract-structured", "compare"], "infra": ["none"], "tags": ["compare", "multi-site", "audit"],
+      "entry_url": "https://steel.dev/llms.txt",
+      "difficulty": 4, "max_steps": 25,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer is a 5-row table (one per domain) showing /llms.txt presence and the robots.txt rules for GPTBot, ClaudeBot, PerplexityBot." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "ai-search-visibility-compare",
+      "prompt": "Submit the query 'best browser infrastructure for AI agents' to chatgpt.com, perplexity.ai, and google.com (looking for the AI Overview). Produce a markdown table of which companies are cited in each engine's answer.",
+      "source": { "name": "wire-demo", "task_id": "sales-ai-search-visibility", "modified": true, "notes": "Depersonalized" },
+      "vertical": "sales-intel", "tier": "research",
+      "capabilities": ["navigate", "search", "extract-structured", "synthesize", "compare"], "infra": ["stealth"], "tags": ["compare", "multi-site", "ai"],
+      "entry_url": "https://www.perplexity.ai",
+      "difficulty": 5, "max_steps": 30,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer is a markdown table with rows for each search engine (ChatGPT, Perplexity, Google AI Overview) and columns of cited companies. At least one company must appear in each row." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "apple-iphone-price-us-uk",
+      "prompt": "Visit https://www.apple.com/shop/buy-iphone/iphone-16-pro from a US proxy and a UK proxy. Report the displayed price and currency from each.",
+      "source": { "name": "wire-demo", "task_id": "steel-proxy-geo-pricing", "modified": true, "notes": "Depersonalized" },
+      "vertical": "ecommerce", "tier": "session",
+      "capabilities": ["navigate", "extract-structured", "compare"], "infra": ["proxy"], "tags": ["geo", "compare", "pricing"],
+      "entry_url": "https://www.apple.com/shop/buy-iphone/iphone-16-pro",
+      "difficulty": 4, "max_steps": 15,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer reports two prices for iPhone 16 Pro: one in USD and one in GBP, each from the appropriate locale page." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "github-issue-search-bug",
+      "prompt": "Navigate to https://github.com/microsoft/vscode/issues and filter for issues labeled 'bug' that are open. Return the title and number of the most recent.",
+      "source": { "name": "wire-original" },
+      "vertical": "developer-tools", "tier": "session",
+      "capabilities": ["navigate", "filter", "extract-structured"], "infra": ["none"], "tags": ["github", "filter"],
+      "entry_url": "https://github.com/microsoft/vscode/issues?q=is%3Aopen+is%3Aissue+label%3Abug",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "regex", "pattern": "#\\d+" },
+        { "type": "llm-judge", "rubric": "Answer includes a real VS Code issue title and a #-prefixed issue number." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "saas-pricing-compare",
+      "prompt": "Compare pricing pages of vercel.com/pricing, netlify.com/pricing, and railway.app/pricing. Return a 3x3 table of (provider, free-tier limit, lowest paid plan price/month).",
+      "source": { "name": "wire-original" },
+      "vertical": "sales-intel", "tier": "session",
+      "capabilities": ["navigate", "extract-structured", "compare"], "infra": ["none"], "tags": ["compare", "pricing", "multi-site"],
+      "entry_url": "https://vercel.com/pricing",
+      "difficulty": 4, "max_steps": 15,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer is a 3-row pricing-comparison table covering Vercel, Netlify, and Railway with concrete free-tier and paid-plan info." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "yc-companies-batch-2025",
+      "prompt": "Navigate to https://www.ycombinator.com/companies and filter by batch 'W25'. Return the names and one-line descriptions of the first 5 companies.",
+      "source": { "name": "wire-original" },
+      "vertical": "sales-intel", "tier": "session",
+      "capabilities": ["navigate", "filter", "extract-structured"], "infra": ["none"], "tags": ["filter", "search"],
+      "entry_url": "https://www.ycombinator.com/companies",
+      "difficulty": 3, "max_steps": 10,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 5 YC W25-batch companies, each with a name and a short description." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "crunchbase-company-lookup",
+      "prompt": "Navigate to https://www.crunchbase.com and search for 'Anthropic'. Return the company's headquarters location and most recent funding round (round + amount).",
+      "source": { "name": "wire-original" },
+      "vertical": "sales-intel", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["stealth"], "tags": ["search"],
+      "entry_url": "https://www.crunchbase.com",
+      "difficulty": 4, "max_steps": 12,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer includes Anthropic's HQ city and a funding round with a stage label and dollar amount." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "linkedin-job-listings-search",
+      "prompt": "On LinkedIn (logged in via bench profile), search for jobs with title 'Browser Automation Engineer' in San Francisco. Return the first 3 job titles, companies, and posted dates.",
+      "source": { "name": "wire-original" },
+      "vertical": "hr-recruiting", "tier": "session",
+      "capabilities": ["login", "search", "filter", "extract-structured"], "infra": ["profile", "stealth"], "tags": ["linkedin", "auth", "search"],
+      "entry_url": "https://www.linkedin.com/jobs/search/?keywords=Browser%20Automation%20Engineer&location=San%20Francisco",
+      "auth": { "type": "profile", "key": "linkedin-bench" },
+      "difficulty": 4, "max_steps": 12,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 3 LinkedIn job postings each with a title, company, and posting date or 'X days ago' indicator." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "eventbrite-events-nyc",
+      "prompt": "Navigate to https://www.eventbrite.com/d/ny--new-york/events/ and return the names and dates of the next 3 upcoming events.",
+      "source": { "name": "wire-original" },
+      "vertical": "sports-entertainment", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["events"],
+      "entry_url": "https://www.eventbrite.com/d/ny--new-york/events/",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 3 NYC events with name and date each." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "zillow-listings-sf",
+      "prompt": "Navigate to https://www.zillow.com/san-francisco-ca/ and return the first 3 listing addresses with prices.",
+      "source": { "name": "wire-original" },
+      "vertical": "ecommerce", "tier": "session",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["stealth"], "tags": ["listings"],
+      "entry_url": "https://www.zillow.com/san-francisco-ca/",
+      "difficulty": 4, "max_steps": 10,
+      "graders": [
+        { "type": "regex", "pattern": "\\$[\\d,]+" },
+        { "type": "llm-judge", "rubric": "Answer lists 3 SF property listings each with a street address and dollar price." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "redfin-property",
+      "prompt": "Navigate to https://www.redfin.com and search for homes for sale in '94110' (Mission, San Francisco). Return the first listing's price and bedroom count.",
+      "source": { "name": "wire-original" },
+      "vertical": "ecommerce", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["stealth"], "tags": ["listings", "search"],
+      "entry_url": "https://www.redfin.com",
+      "difficulty": 4, "max_steps": 12,
+      "graders": [
+        { "type": "regex", "pattern": "\\$[\\d,]+" },
+        { "type": "llm-judge", "rubric": "Answer includes a listing price and bedroom count from a Redfin 94110 search result." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "doordash-restaurants-area",
+      "prompt": "Navigate to https://www.doordash.com and enter '10001' as the address. Return the names of 3 restaurants shown.",
+      "source": { "name": "wire-original" },
+      "vertical": "ecommerce", "tier": "session",
+      "capabilities": ["navigate", "form-fill", "extract-structured"], "infra": ["stealth"], "tags": ["food", "form"],
+      "entry_url": "https://www.doordash.com",
+      "difficulty": 3, "max_steps": 10,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 3 restaurant names from DoorDash NYC 10001 listings." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "opentable-reservation-search",
+      "prompt": "Navigate to https://www.opentable.com and search for restaurants in 'Brooklyn, NY' for 2 people tomorrow at 7pm. Return the names of the first 3 results.",
+      "source": { "name": "wire-original" },
+      "vertical": "ecommerce", "tier": "session",
+      "capabilities": ["navigate", "search", "form-fill", "extract-structured"], "infra": ["none"], "tags": ["food", "search"],
+      "entry_url": "https://www.opentable.com",
+      "difficulty": 4, "max_steps": 12,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 3 Brooklyn restaurant names from OpenTable's reservation search results." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "airbnb-listings-paris",
+      "prompt": "Navigate to https://www.airbnb.com and search for stays in Paris for 2 guests, June 1-3, 2026. Return the first 3 listing titles with nightly prices.",
+      "source": { "name": "wire-original" },
+      "vertical": "travel", "tier": "session",
+      "capabilities": ["navigate", "search", "filter", "extract-structured"], "infra": ["stealth"], "tags": ["travel", "search"],
+      "entry_url": "https://www.airbnb.com",
+      "difficulty": 4, "max_steps": 12,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 3 Airbnb Paris listings with title and nightly price each." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "yelp-restaurant-reviews",
+      "prompt": "Navigate to https://www.yelp.com and search for 'pizza' in '94110'. Return the top result's name, star rating, and review count.",
+      "source": { "name": "wire-original" },
+      "vertical": "ecommerce", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["stealth"], "tags": ["search", "reviews"],
+      "entry_url": "https://www.yelp.com",
+      "difficulty": 3, "max_steps": 10,
+      "graders": [
+        { "type": "regex", "pattern": "\\b\\d(\\.\\d)?\\b" },
+        { "type": "llm-judge", "rubric": "Answer includes a pizza restaurant name, star rating, and review count from Yelp 94110 results." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "tripadvisor-attractions",
+      "prompt": "Navigate to https://www.tripadvisor.com and find attractions in Tokyo. Return the names of the top 3 attractions.",
+      "source": { "name": "wire-original" },
+      "vertical": "travel", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["stealth"], "tags": ["travel"],
+      "entry_url": "https://www.tripadvisor.com",
+      "difficulty": 3, "max_steps": 10,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 3 Tokyo attractions from TripAdvisor (e.g., Sensoji, Tokyo Skytree, Meiji Shrine, etc.)." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "weather-com-forecast",
+      "prompt": "Navigate to https://weather.com and search for 'London, UK'. Return today's high and low temperature.",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["weather"],
+      "entry_url": "https://weather.com",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "regex", "pattern": "\\d+°" },
+        { "type": "llm-judge", "rubric": "Answer reports a high and low temperature for London with units." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "accuweather-forecast",
+      "prompt": "Navigate to https://www.accuweather.com and search for 'Berlin, Germany'. Return the current temperature and conditions.",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["weather"],
+      "entry_url": "https://www.accuweather.com",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer includes a current temperature for Berlin and a weather condition (sunny, cloudy, rain, etc.)." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "coingecko-btc-price",
+      "prompt": "Navigate to https://www.coingecko.com/en/coins/bitcoin and return the current Bitcoin price in USD.",
+      "source": { "name": "wire-original" },
+      "vertical": "financial-services", "tier": "scrape",
+      "capabilities": ["navigate", "extract-text"], "infra": ["none"], "tags": ["crypto", "price"],
+      "entry_url": "https://www.coingecko.com/en/coins/bitcoin",
+      "difficulty": 1, "max_steps": 4,
+      "graders": [
+        { "type": "regex", "pattern": "\\$[\\d,]+" }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "yahoo-finance-aapl",
+      "prompt": "Navigate to https://finance.yahoo.com/quote/AAPL and return the current price and day's change percentage.",
+      "source": { "name": "wire-original" },
+      "vertical": "financial-services", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["stealth"], "tags": ["stocks", "price"],
+      "entry_url": "https://finance.yahoo.com/quote/AAPL",
+      "difficulty": 2, "max_steps": 5,
+      "graders": [
+        { "type": "regex", "pattern": "[+-]?\\d+\\.\\d+%" },
+        { "type": "llm-judge", "rubric": "Answer includes AAPL stock price and a percentage day-change." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "fred-econ-cpi",
+      "prompt": "Navigate to https://fred.stlouisfed.org/series/CPIAUCSL and return the most recent CPI value and its date.",
+      "source": { "name": "wire-original" },
+      "vertical": "financial-services", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["gov", "stats"],
+      "entry_url": "https://fred.stlouisfed.org/series/CPIAUCSL",
+      "difficulty": 3, "max_steps": 8,
+      "graders": [
+        { "type": "regex", "pattern": "\\b\\d{4}-\\d{2}-\\d{2}\\b" },
+        { "type": "llm-judge", "rubric": "Answer includes the latest CPI numeric value and the corresponding date from FRED." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "cnbc-market-news",
+      "prompt": "Navigate to https://www.cnbc.com/markets/ and return the lead market headline of the day.",
+      "source": { "name": "wire-original" },
+      "vertical": "financial-services", "tier": "scrape",
+      "capabilities": ["navigate", "extract-text"], "infra": ["stealth"], "tags": ["news", "finance"],
+      "entry_url": "https://www.cnbc.com/markets/",
+      "difficulty": 2, "max_steps": 5,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer is a CNBC market-page headline (mentions stocks, bonds, fed, market, etc.)." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "bloomberg-headlines",
+      "prompt": "Navigate to https://www.bloomberg.com and return the top 3 lead headlines.",
+      "source": { "name": "wire-original" },
+      "vertical": "financial-services", "tier": "session",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["stealth"], "tags": ["news", "finance"],
+      "entry_url": "https://www.bloomberg.com",
+      "difficulty": 3, "max_steps": 8,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 3 distinct Bloomberg homepage headlines about markets, finance, or business." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "allrecipes-chocolate-cake",
+      "prompt": "Navigate to https://www.allrecipes.com and search for 'chocolate cake'. Return the name, rating, and total time of the top result.",
+      "source": { "name": "webvoyager", "task_id": "Allrecipes--1", "license": "research-only", "modified": true, "notes": "wire reformulation; site/style match WebVoyager corpus" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["recipe", "search"],
+      "entry_url": "https://www.allrecipes.com",
+      "difficulty": 2, "max_steps": 8,
+      "graders": [
+        { "type": "regex", "pattern": "\\b\\d(\\.\\d)?\\b" },
+        { "type": "llm-judge", "rubric": "Answer includes a chocolate-cake recipe name, a numeric rating, and a total time (minutes/hours)." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "allrecipes-vegan-pasta",
+      "prompt": "On https://www.allrecipes.com, search for 'vegan pasta' and return the names of the first 3 recipes.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation; site/style match WebVoyager corpus" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["recipe", "search"],
+      "entry_url": "https://www.allrecipes.com",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer lists 3 vegan pasta recipe names from Allrecipes search results." }],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "amazon-airpods-pro-price",
+      "prompt": "Navigate to https://www.amazon.com and search for 'AirPods Pro 2'. Return the price of the top result.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation; site/style match WebVoyager corpus" },
+      "vertical": "ecommerce", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-text"], "infra": ["stealth"], "tags": ["search", "price"],
+      "entry_url": "https://www.amazon.com",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [{ "type": "regex", "pattern": "\\$\\d+(\\.\\d{2})?" }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "amazon-best-seller-books",
+      "prompt": "Navigate to https://www.amazon.com/Best-Sellers-Books/zgbs/books and return the top 5 best-selling books with their authors.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "ecommerce", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["stealth"], "tags": ["bestseller"],
+      "entry_url": "https://www.amazon.com/Best-Sellers-Books/zgbs/books",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer lists 5 distinct book titles with author names from Amazon's best sellers." }],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "amazon-laptop-search-filter",
+      "prompt": "On amazon.com, search for 'laptop', filter to under $500 and 4-stars-and-up, then return the title and price of the first result.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "ecommerce", "tier": "session",
+      "capabilities": ["navigate", "search", "filter", "extract-structured"], "infra": ["stealth"], "tags": ["filter", "search"],
+      "entry_url": "https://www.amazon.com",
+      "difficulty": 4, "max_steps": 12,
+      "graders": [
+        { "type": "regex", "pattern": "\\$\\d+" },
+        { "type": "llm-judge", "rubric": "Answer includes a laptop title and price under $500 from a 4-star-filtered Amazon result." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "amazon-product-rating",
+      "prompt": "Navigate to https://www.amazon.com/dp/B0BDHWDR12 and return the star rating and number of reviews.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "ecommerce", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["stealth"], "tags": ["reviews"],
+      "entry_url": "https://www.amazon.com/dp/B0BDHWDR12",
+      "difficulty": 2, "max_steps": 5,
+      "graders": [
+        { "type": "regex", "pattern": "\\d(\\.\\d)?\\s*(out of|stars)" },
+        { "type": "llm-judge", "rubric": "Answer includes a star rating and a count of reviews for the Amazon product." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "apple-iphone-15-pro-specs",
+      "prompt": "Navigate to https://www.apple.com/shop/buy-iphone/iphone-16-pro and return the available storage options and their prices.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation; updated to current model" },
+      "vertical": "ecommerce", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["price"],
+      "entry_url": "https://www.apple.com/shop/buy-iphone/iphone-16-pro",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "regex", "pattern": "\\$\\d+" },
+        { "type": "llm-judge", "rubric": "Answer enumerates iPhone 16 Pro storage tiers (e.g., 128GB, 256GB, 512GB, 1TB) with associated prices." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "apple-macbook-air-price",
+      "prompt": "Navigate to https://www.apple.com/shop/buy-mac/macbook-air and return the starting price of the M-series MacBook Air.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "ecommerce", "tier": "scrape",
+      "capabilities": ["navigate", "extract-text"], "infra": ["none"], "tags": ["price"],
+      "entry_url": "https://www.apple.com/shop/buy-mac/macbook-air",
+      "difficulty": 1, "max_steps": 4,
+      "graders": [{ "type": "regex", "pattern": "\\$\\d+" }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "apple-store-locator",
+      "prompt": "Navigate to https://www.apple.com/retail and find the address of the Apple Store nearest to '10001'. Return the store name and street address.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "ecommerce", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["search", "geo"],
+      "entry_url": "https://www.apple.com/retail",
+      "difficulty": 3, "max_steps": 8,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer includes an Apple Store name and a NYC street address." }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "arxiv-paper-attention",
+      "prompt": "Navigate to https://arxiv.org and search for 'Attention Is All You Need'. Return the paper's authors and submission year.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["academic", "search"],
+      "entry_url": "https://arxiv.org",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "contains", "values": ["Vaswani"] },
+        { "type": "contains", "values": ["2017"] }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "arxiv-recent-cs-lg",
+      "prompt": "Navigate to https://arxiv.org/list/cs.LG/recent and return the title and arXiv id of the first paper.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "knowledge-base", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["academic"],
+      "entry_url": "https://arxiv.org/list/cs.LG/recent",
+      "difficulty": 1, "max_steps": 4,
+      "graders": [
+        { "type": "regex", "pattern": "\\d{4}\\.\\d{4,5}" },
+        { "type": "llm-judge", "rubric": "Answer includes a paper title and an arXiv id of the form NNNN.NNNNN." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "arxiv-author-search",
+      "prompt": "Navigate to https://arxiv.org and search for papers by 'Yann LeCun'. Return the title of the most recent paper.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-text"], "infra": ["none"], "tags": ["academic", "search"],
+      "entry_url": "https://arxiv.org",
+      "difficulty": 2, "max_steps": 8,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer is a real arXiv paper title with Yann LeCun as an author." }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "bbc-sports-football",
+      "prompt": "Navigate to https://www.bbc.com/sport/football and return the lead football headline.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "sports-entertainment", "tier": "scrape",
+      "capabilities": ["navigate", "extract-text"], "infra": ["none"], "tags": ["sports", "news"],
+      "entry_url": "https://www.bbc.com/sport/football",
+      "difficulty": 1, "max_steps": 4,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer is the lead BBC football headline at time of access." }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "bbc-tech-news",
+      "prompt": "Navigate to https://www.bbc.com/news/technology and return the titles of the top 3 stories.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "knowledge-base", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["news"],
+      "entry_url": "https://www.bbc.com/news/technology",
+      "difficulty": 1, "max_steps": 4,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer lists 3 BBC tech-news story titles." }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "bbc-weather-london",
+      "prompt": "Navigate to https://www.bbc.com/weather and find London. Return today's high and low.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["weather"],
+      "entry_url": "https://www.bbc.com/weather",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "regex", "pattern": "\\d+°" },
+        { "type": "llm-judge", "rubric": "Answer reports a high and low temperature for London with units." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "booking-paris-hotels",
+      "prompt": "Navigate to booking.com and search for hotels in Paris for 2 adults, June 1-3, 2026. Return the names and prices of the first 3 listings.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "travel", "tier": "session",
+      "capabilities": ["navigate", "search", "form-fill", "extract-structured"], "infra": ["stealth"], "tags": ["travel", "search"],
+      "entry_url": "https://www.booking.com",
+      "difficulty": 4, "max_steps": 12,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer lists 3 Paris hotels with name and price." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "booking-london-jul",
+      "prompt": "Search booking.com for stays in London, July 14-16 2026, 1 adult. Filter to only 'Entire homes & apartments'. Return the first listing's name and price.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "travel", "tier": "session",
+      "capabilities": ["navigate", "search", "filter", "extract-structured"], "infra": ["stealth"], "tags": ["travel", "filter"],
+      "entry_url": "https://www.booking.com",
+      "difficulty": 4, "max_steps": 14,
+      "graders": [
+        { "type": "regex", "pattern": "[\\$£€]\\s*\\d+" },
+        { "type": "llm-judge", "rubric": "Answer is a 'Entire home/apartment' London listing with name and price." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "booking-cancellation-policy",
+      "prompt": "On booking.com, open any London hotel listing and report whether free cancellation is available.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "travel", "tier": "session",
+      "capabilities": ["navigate", "extract-text"], "infra": ["stealth"], "tags": ["travel"],
+      "entry_url": "https://www.booking.com/searchresults.html?ss=London",
+      "difficulty": 3, "max_steps": 10,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer states whether free cancellation is offered for the chosen London listing." }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "cambridge-pronunciation-tomato",
+      "prompt": "On dictionary.cambridge.org, look up 'tomato' and report the UK and US IPA pronunciations.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["dictionary"],
+      "entry_url": "https://dictionary.cambridge.org",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "contains", "values": ["/"] },
+        { "type": "llm-judge", "rubric": "Answer includes both UK and US IPA pronunciations for 'tomato' in slash-delimited form." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "cambridge-translate-english-spanish",
+      "prompt": "On dictionary.cambridge.org, find the English-to-Spanish translation of 'kindness'.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-text"], "infra": ["none"], "tags": ["dictionary"],
+      "entry_url": "https://dictionary.cambridge.org/dictionary/english-spanish/",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [{ "type": "contains", "values": ["bondad", "amabilidad"] }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "coursera-ml-courses",
+      "prompt": "Navigate to https://www.coursera.org and search 'machine learning'. Return the names of the top 3 courses with their providers.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["search"],
+      "entry_url": "https://www.coursera.org",
+      "difficulty": 2, "max_steps": 8,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer lists 3 ML course titles with their hosting institutions." }],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "coursera-stanford-courses",
+      "prompt": "On coursera.org, filter courses by Stanford University. Return the names of 3 Stanford courses available.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "filter", "extract-structured"], "infra": ["none"], "tags": ["filter"],
+      "entry_url": "https://www.coursera.org/partners/stanford",
+      "difficulty": 3, "max_steps": 8,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer lists 3 Coursera courses partnered with Stanford." }],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "coursera-free-python",
+      "prompt": "On coursera.org, find a free Python course. Return its name and provider.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "filter", "extract-structured"], "infra": ["none"], "tags": ["filter", "search"],
+      "entry_url": "https://www.coursera.org/courses?query=python&price=1",
+      "difficulty": 3, "max_steps": 8,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer names a free Python Coursera course and its provider." }],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "espn-nba-team-roster",
+      "prompt": "Navigate to https://www.espn.com/nba/teams and find the Boston Celtics roster. Return 3 player names from the roster.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "sports-entertainment", "tier": "session",
+      "capabilities": ["navigate", "click-flow", "extract-structured"], "infra": ["none"], "tags": ["sports"],
+      "entry_url": "https://www.espn.com/nba/teams",
+      "difficulty": 3, "max_steps": 8,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer lists 3 plausible Celtics players (e.g., Tatum, Brown, etc.)." }],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "espn-soccer-premier-league",
+      "prompt": "Navigate to https://www.espn.com/soccer/standings/_/league/eng.1 and return the team currently in 1st place.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "sports-entertainment", "tier": "scrape",
+      "capabilities": ["navigate", "extract-table"], "infra": ["none"], "tags": ["sports", "table"],
+      "entry_url": "https://www.espn.com/soccer/standings/_/league/eng.1",
+      "difficulty": 2, "max_steps": 5,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer is a Premier League team name currently leading the table (e.g., Liverpool, Arsenal, City)." }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "espn-mlb-standings",
+      "prompt": "On espn.com/mlb/standings, return the team leading the AL East division with its W-L record.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "sports-entertainment", "tier": "scrape",
+      "capabilities": ["navigate", "extract-table"], "infra": ["none"], "tags": ["sports", "table"],
+      "entry_url": "https://www.espn.com/mlb/standings",
+      "difficulty": 2, "max_steps": 5,
+      "graders": [
+        { "type": "regex", "pattern": "\\d+-\\d+" },
+        { "type": "llm-judge", "rubric": "Answer names an AL East team (Yankees, Orioles, Rays, Red Sox, Blue Jays) and gives its W-L record." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "github-search-repos-react",
+      "prompt": "Navigate to https://github.com/search?q=react+state+management and return the names of the top 3 repositories.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "developer-tools", "tier": "scrape",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["github", "search"],
+      "entry_url": "https://github.com/search?q=react+state+management&type=repositories",
+      "difficulty": 2, "max_steps": 5,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer lists 3 GitHub repos in 'owner/name' form related to React state management." }],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "github-trending-python",
+      "prompt": "Navigate to https://github.com/trending/python and return the top 3 trending Python repositories.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "developer-tools", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["github"],
+      "entry_url": "https://github.com/trending/python",
+      "difficulty": 1, "max_steps": 4,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer lists 3 Python GitHub repos in 'owner/name' format." }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "github-issue-bug",
+      "prompt": "On https://github.com/nodejs/node/issues, filter to issues labeled 'bug' that are still open and return the title and number of the most recent.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "developer-tools", "tier": "session",
+      "capabilities": ["navigate", "filter", "extract-structured"], "infra": ["none"], "tags": ["github", "filter"],
+      "entry_url": "https://github.com/nodejs/node/issues?q=is%3Aopen+is%3Aissue+label%3Abug",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [{ "type": "regex", "pattern": "#\\d+" }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "google-flights-nyc-london",
+      "prompt": "Navigate to https://www.google.com/travel/flights and search for flights from New York (JFK) to London (LHR), departing 2026-07-15 and returning 2026-07-22, 1 adult, economy. Return the cheapest flight's airline and price.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "travel", "tier": "session",
+      "capabilities": ["navigate", "search", "form-fill", "extract-structured"], "infra": ["stealth"], "tags": ["travel", "search"],
+      "entry_url": "https://www.google.com/travel/flights",
+      "difficulty": 4, "max_steps": 15,
+      "graders": [
+        { "type": "regex", "pattern": "\\$\\d+" },
+        { "type": "llm-judge", "rubric": "Answer includes an airline name and a price for a JFK-LHR flight." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "google-flights-direct-only",
+      "prompt": "On google.com/travel/flights, search SFO to NRT for 2026-09-10 (one-way), filter to nonstop only, and return the lowest price shown.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "travel", "tier": "session",
+      "capabilities": ["navigate", "search", "filter", "extract-text"], "infra": ["stealth"], "tags": ["travel", "filter"],
+      "entry_url": "https://www.google.com/travel/flights",
+      "difficulty": 4, "max_steps": 15,
+      "graders": [{ "type": "regex", "pattern": "\\$\\d+" }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "google-flights-roundtrip-tokyo",
+      "prompt": "On google.com/travel/flights, find a round-trip from LAX to Tokyo (any Tokyo airport), departing 2026-08-01, returning 2026-08-14, 1 adult. Return the cheapest itinerary's price and airlines.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "travel", "tier": "session",
+      "capabilities": ["navigate", "search", "form-fill", "extract-structured"], "infra": ["stealth"], "tags": ["travel", "search"],
+      "entry_url": "https://www.google.com/travel/flights",
+      "difficulty": 4, "max_steps": 15,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer includes a price (in USD) and airline names for an LAX-Tokyo round-trip." }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "google-maps-restaurant-near",
+      "prompt": "On https://www.google.com/maps, search for 'sushi near Times Square'. Return the top 3 restaurant names with their star ratings.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["stealth"], "tags": ["maps", "search"],
+      "entry_url": "https://www.google.com/maps",
+      "difficulty": 3, "max_steps": 10,
+      "graders": [
+        { "type": "regex", "pattern": "\\d(\\.\\d)?" },
+        { "type": "llm-judge", "rubric": "Answer lists 3 sushi restaurants near Times Square with star ratings." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "google-maps-driving-time",
+      "prompt": "On https://www.google.com/maps, get driving directions from 'San Francisco, CA' to 'Los Angeles, CA'. Return the estimated drive time.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "form-fill", "extract-text"], "infra": ["stealth"], "tags": ["maps"],
+      "entry_url": "https://www.google.com/maps",
+      "difficulty": 3, "max_steps": 10,
+      "graders": [
+        { "type": "regex", "pattern": "\\b\\d+\\s*hr|\\d+\\s*hours" },
+        { "type": "llm-judge", "rubric": "Answer reports a driving time (e.g., '5 hr 45 min') for SF to LA." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "google-maps-public-transport",
+      "prompt": "On google.com/maps, get public-transit directions from Penn Station NYC to Newark Liberty Airport (EWR). Return the recommended transit time and primary mode.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "form-fill", "extract-structured"], "infra": ["stealth"], "tags": ["maps"],
+      "entry_url": "https://www.google.com/maps",
+      "difficulty": 4, "max_steps": 12,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer includes a transit duration and identifies the primary mode (train, bus, AirTrain, etc.) from Penn Station to EWR." }],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "google-search-news",
+      "prompt": "Navigate to https://www.google.com and search for 'AI safety news'. Click 'News' tab and return the top 3 article headlines with publishers.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "click-flow", "extract-structured"], "infra": ["stealth"], "tags": ["search", "news"],
+      "entry_url": "https://www.google.com",
+      "difficulty": 2, "max_steps": 8,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer lists 3 news headlines about AI safety with publisher names." }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "google-search-images",
+      "prompt": "Navigate to https://www.google.com, search 'Saturn rings', click Images, and return the alt text or caption of the first 3 results.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "click-flow", "extract-structured"], "infra": ["stealth"], "tags": ["search", "images"],
+      "entry_url": "https://www.google.com",
+      "difficulty": 3, "max_steps": 10,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer lists 3 image captions or alt-texts from a Google Images search for 'Saturn rings'." }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "huggingface-text-gen-models",
+      "prompt": "Navigate to https://huggingface.co/models and filter to Task: 'Text Generation'. Return the top 3 model repository names.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "developer-tools", "tier": "session",
+      "capabilities": ["navigate", "filter", "extract-structured"], "infra": ["none"], "tags": ["ai", "filter"],
+      "entry_url": "https://huggingface.co/models?pipeline_tag=text-generation",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer lists 3 Hugging Face text-generation model ids (e.g., 'meta-llama/Llama-3.1-8B')." }],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "huggingface-stable-diffusion",
+      "prompt": "Navigate to https://huggingface.co/stabilityai/stable-diffusion-2-1 and return the model size (in parameters or GB) and license.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "developer-tools", "tier": "scrape",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["ai"],
+      "entry_url": "https://huggingface.co/stabilityai/stable-diffusion-2-1",
+      "difficulty": 2, "max_steps": 5,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer includes Stable Diffusion 2.1 model-card info: size and license." }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "wolfram-integral-x-squared",
+      "prompt": "On https://www.wolframalpha.com, evaluate 'integral of x^2 dx'. Return the result.",
+      "source": { "name": "webvoyager", "license": "research-only", "modified": true, "notes": "wire reformulation" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-text"], "infra": ["none"], "tags": ["math"],
+      "entry_url": "https://www.wolframalpha.com",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [{ "type": "regex", "pattern": "x\\^?3\\s*/?\\s*3" }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "delta-flight-search",
+      "prompt": "Navigate to https://www.delta.com and search for one-way flights from ATL to LAX on 2026-07-04 for 1 passenger. Return the cheapest fare and its cabin class.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation; date updated" },
+      "vertical": "travel", "tier": "session",
+      "capabilities": ["navigate", "search", "form-fill", "extract-structured"], "infra": ["stealth"], "tags": ["travel"],
+      "entry_url": "https://www.delta.com",
+      "difficulty": 4, "max_steps": 15,
+      "graders": [{ "type": "regex", "pattern": "\\$\\d+" }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "united-flight-status",
+      "prompt": "On https://www.united.com, look up the status of flight UA100 for today. Return the scheduled departure and arrival times and the current status.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "travel", "tier": "session",
+      "capabilities": ["navigate", "search", "form-fill", "extract-structured"], "infra": ["stealth"], "tags": ["travel"],
+      "entry_url": "https://www.united.com",
+      "difficulty": 3, "max_steps": 10,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer reports UA100 scheduled times and status (On time, Delayed, Cancelled, Arrived, etc.)." }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "southwest-baggage-policy",
+      "prompt": "Navigate to https://www.southwest.com and find the baggage policy page. Return the carry-on and checked bag allowance for a standard fare.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "travel", "tier": "session",
+      "capabilities": ["navigate", "extract-text"], "infra": ["none"], "tags": ["travel"],
+      "entry_url": "https://www.southwest.com",
+      "difficulty": 2, "max_steps": 8,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer includes Southwest's carry-on and checked-bag policy with specific limits." }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "hertz-car-rental-search",
+      "prompt": "On https://www.hertz.com, search for an SUV rental at JFK from 2026-07-10 to 2026-07-14. Return the cheapest available SUV and its daily rate.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "travel", "tier": "session",
+      "capabilities": ["navigate", "search", "filter", "extract-structured"], "infra": ["stealth"], "tags": ["travel"],
+      "entry_url": "https://www.hertz.com",
+      "difficulty": 4, "max_steps": 15,
+      "graders": [{ "type": "regex", "pattern": "\\$\\d+" }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "enterprise-pickup-location",
+      "prompt": "On https://www.enterprise.com, find the Enterprise rental location nearest to '94110'. Return the location name and address.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "travel", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["travel", "geo"],
+      "entry_url": "https://www.enterprise.com",
+      "difficulty": 3, "max_steps": 10,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer includes an Enterprise location name and SF-area address." }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "costco-membership-info",
+      "prompt": "Navigate to https://www.costco.com/membership and return the annual price of the basic Gold Star membership.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "ecommerce", "tier": "scrape",
+      "capabilities": ["navigate", "extract-text"], "infra": ["none"], "tags": ["price"],
+      "entry_url": "https://www.costco.com/membership",
+      "difficulty": 1, "max_steps": 4,
+      "graders": [{ "type": "regex", "pattern": "\\$\\d+" }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "target-store-locator",
+      "prompt": "Navigate to https://www.target.com/store-locator and find the Target store nearest to '90001'. Return the store name and hours for today.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "ecommerce", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["geo"],
+      "entry_url": "https://www.target.com/store-locator",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer includes a Target store name (LA-area) and today's open-close hours." }],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "bestbuy-laptop-deals",
+      "prompt": "Navigate to https://www.bestbuy.com and find current laptop deals under $800. Return 3 product titles with prices.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "ecommerce", "tier": "session",
+      "capabilities": ["navigate", "search", "filter", "extract-structured"], "infra": ["stealth"], "tags": ["price", "filter"],
+      "entry_url": "https://www.bestbuy.com",
+      "difficulty": 3, "max_steps": 10,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer lists 3 laptops under $800 from Best Buy with title and price each." }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "homedepot-product",
+      "prompt": "Navigate to https://www.homedepot.com and search for 'Dewalt drill'. Return the title and price of the top result.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "ecommerce", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["price", "search"],
+      "entry_url": "https://www.homedepot.com",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [{ "type": "regex", "pattern": "\\$\\d+" }],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "lowes-store-hours",
+      "prompt": "On https://www.lowes.com, find the store nearest to '60601' (Chicago) and report the closing time today.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "ecommerce", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-text"], "infra": ["none"], "tags": ["geo"],
+      "entry_url": "https://www.lowes.com",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [{ "type": "regex", "pattern": "\\d+:\\d+\\s*(am|pm|AM|PM)" }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "walgreens-store-locator",
+      "prompt": "On https://www.walgreens.com, find the 24-hour Walgreens nearest to '90210'. Return the address.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "healthcare", "tier": "session",
+      "capabilities": ["navigate", "search", "filter", "extract-text"], "infra": ["none"], "tags": ["geo", "filter"],
+      "entry_url": "https://www.walgreens.com/storelocator/find.jsp",
+      "difficulty": 3, "max_steps": 8,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer is a Walgreens 24-hour store address near 90210." }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "cvs-pharmacy-hours",
+      "prompt": "On https://www.cvs.com, find the CVS Pharmacy nearest to '02108' (Boston) and report today's pharmacy hours.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "healthcare", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-text"], "infra": ["none"], "tags": ["geo"],
+      "entry_url": "https://www.cvs.com/store-locator/landing",
+      "difficulty": 3, "max_steps": 8,
+      "graders": [{ "type": "regex", "pattern": "\\d+:\\d+\\s*(am|pm|AM|PM)" }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "mcdonalds-menu-item",
+      "prompt": "Navigate to https://www.mcdonalds.com and find the calorie count for a Big Mac on the menu page.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "ecommerce", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-text"], "infra": ["none"], "tags": ["nutrition"],
+      "entry_url": "https://www.mcdonalds.com/us/en-us/full-menu.html",
+      "difficulty": 3, "max_steps": 8,
+      "graders": [
+        { "type": "regex", "pattern": "\\b\\d{3,4}\\b" },
+        { "type": "llm-judge", "rubric": "Answer includes a calorie count for the Big Mac (typically ~550-600)." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "starbucks-store-finder",
+      "prompt": "On https://www.starbucks.com/store-locator, find the closest Starbucks to '98101' (Seattle) that has mobile order. Return the store name and address.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "ecommerce", "tier": "session",
+      "capabilities": ["navigate", "search", "filter", "extract-structured"], "infra": ["none"], "tags": ["geo", "filter"],
+      "entry_url": "https://www.starbucks.com/store-locator",
+      "difficulty": 3, "max_steps": 10,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer includes a Starbucks store name and Seattle address with mobile-order capability." }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "dominos-pizza-deals",
+      "prompt": "Navigate to https://www.dominos.com and find current online deals or coupons. Return 2 deal names and prices.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "ecommerce", "tier": "session",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["price"],
+      "entry_url": "https://www.dominos.com/en/coupons",
+      "difficulty": 3, "max_steps": 8,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer lists 2 Domino's deal/coupon names with associated prices." }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "ups-tracking-info",
+      "prompt": "Navigate to https://www.ups.com/track and look up tracking number '1Z12345E0205271688'. Return the current status and most recent location.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "logistics", "tier": "session",
+      "capabilities": ["navigate", "form-fill", "extract-structured"], "infra": ["none"], "tags": ["tracking"],
+      "entry_url": "https://www.ups.com/track",
+      "difficulty": 3, "max_steps": 8,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer reports the UPS tracking lookup result — even if 'not found' that's a valid answer; otherwise status + location." }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "fedex-shipping-cost",
+      "prompt": "On https://www.fedex.com, get a shipping rate quote for a 5-pound package from '10001' to '90001' going FedEx Ground. Return the price.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "logistics", "tier": "session",
+      "capabilities": ["navigate", "form-fill", "extract-text"], "infra": ["none"], "tags": ["pricing"],
+      "entry_url": "https://www.fedex.com/ratefinder/home",
+      "difficulty": 4, "max_steps": 15,
+      "graders": [{ "type": "regex", "pattern": "\\$\\d+" }],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "usps-track-package",
+      "prompt": "Navigate to https://tools.usps.com/go/TrackConfirmAction and look up tracking number '9400111899223197428490'. Report status.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "logistics", "tier": "session",
+      "capabilities": ["navigate", "form-fill", "extract-text"], "infra": ["none"], "tags": ["tracking"],
+      "entry_url": "https://tools.usps.com/go/TrackConfirmAction",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer reports USPS tracking status (delivered / in transit / not found, etc.)." }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "dmv-renewal-info",
+      "prompt": "Navigate to https://www.dmv.ca.gov and find the page about driver license renewal. Return the renewal fee amount.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "non-profit-gov", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-text"], "infra": ["none"], "tags": ["gov"],
+      "entry_url": "https://www.dmv.ca.gov",
+      "difficulty": 3, "max_steps": 10,
+      "graders": [{ "type": "regex", "pattern": "\\$\\d+" }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "amtrak-route-search",
+      "prompt": "On https://www.amtrak.com, search for trains from New York Penn Station to Boston South Station on 2026-07-15. Return the cheapest fare and total trip duration.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "travel", "tier": "session",
+      "capabilities": ["navigate", "search", "form-fill", "extract-structured"], "infra": ["stealth"], "tags": ["travel"],
+      "entry_url": "https://www.amtrak.com",
+      "difficulty": 4, "max_steps": 15,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer includes Amtrak NYP-BOS fare in dollars and trip duration in hours/minutes." }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "greyhound-bus-schedule",
+      "prompt": "On https://www.greyhound.com, search for buses from Philadelphia to Washington DC on 2026-07-15 for 1 adult. Return the earliest departure time and price.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "travel", "tier": "session",
+      "capabilities": ["navigate", "search", "form-fill", "extract-structured"], "infra": ["none"], "tags": ["travel"],
+      "entry_url": "https://www.greyhound.com",
+      "difficulty": 4, "max_steps": 15,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer includes earliest Philly-DC Greyhound departure time and ticket price." }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "uber-fare-estimate",
+      "prompt": "Navigate to https://www.uber.com/global/en/price-estimate and get a fare estimate from 'Times Square, New York' to 'JFK Airport'. Return the estimated UberX price range.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "travel", "tier": "session",
+      "capabilities": ["navigate", "form-fill", "extract-structured"], "infra": ["stealth"], "tags": ["travel"],
+      "entry_url": "https://www.uber.com/global/en/price-estimate",
+      "difficulty": 4, "max_steps": 12,
+      "graders": [{ "type": "regex", "pattern": "\\$\\d+" }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "doordash-delivery-fee",
+      "prompt": "On https://www.doordash.com, enter '10001' as delivery address and find the lowest delivery fee currently shown. Return the restaurant name and fee.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "ecommerce", "tier": "session",
+      "capabilities": ["navigate", "form-fill", "filter", "extract-structured"], "infra": ["stealth"], "tags": ["food", "filter"],
+      "entry_url": "https://www.doordash.com",
+      "difficulty": 4, "max_steps": 12,
+      "graders": [{ "type": "regex", "pattern": "\\$\\d+(\\.\\d{2})?" }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "instacart-grocery-search",
+      "prompt": "On https://www.instacart.com, enter zip '94103' and search for 'organic milk'. Return the first 3 product names with prices.",
+      "source": { "name": "mind2web", "license": "CC-BY-NC-4.0", "modified": true, "notes": "wire reformulation" },
+      "vertical": "ecommerce", "tier": "session",
+      "capabilities": ["navigate", "search", "form-fill", "extract-structured"], "infra": ["none"], "tags": ["search", "food"],
+      "entry_url": "https://www.instacart.com",
+      "difficulty": 4, "max_steps": 12,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer lists 3 organic milk products on Instacart with names and prices." }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "gaia-research-paper-trace",
+      "prompt": "Find the title of the original 'BERT' paper, its first author, and the conference at which it was first published. Return all three.",
+      "source": { "name": "gaia", "license": "Apache-2.0", "modified": true, "notes": "wire-style multi-step retrieval" },
+      "vertical": "knowledge-base", "tier": "research",
+      "capabilities": ["navigate", "search", "synthesize"], "infra": ["none"], "tags": ["academic", "multi-hop"],
+      "difficulty": 3, "max_steps": 12,
+      "graders": [
+        { "type": "contains", "values": ["Devlin"] },
+        { "type": "llm-judge", "rubric": "Answer includes the BERT paper title, Jacob Devlin as first author, and NAACL (or arXiv preprint year) as venue." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "gaia-cross-page-fact",
+      "prompt": "What year did the company that makes the iPhone first release a smartphone? Search the web to find the answer.",
+      "source": { "name": "gaia", "license": "Apache-2.0", "modified": true, "notes": "wire-style multi-hop retrieval" },
+      "vertical": "knowledge-base", "tier": "research",
+      "capabilities": ["search", "synthesize"], "infra": ["none"], "tags": ["multi-hop"],
+      "difficulty": 2, "max_steps": 8,
+      "graders": [
+        { "type": "contains", "values": ["2007"] }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "gaia-image-on-website",
+      "prompt": "Navigate to https://en.wikipedia.org/wiki/Eiffel_Tower and find the image caption that mentions the height in meters. Return the caption.",
+      "source": { "name": "gaia", "license": "Apache-2.0", "modified": true, "notes": "wire-style image-grounded retrieval" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "extract-text"], "infra": ["none"], "tags": ["wiki"],
+      "entry_url": "https://en.wikipedia.org/wiki/Eiffel_Tower",
+      "difficulty": 3, "max_steps": 8,
+      "graders": [
+        { "type": "regex", "pattern": "330\\s*m|324\\s*m|300\\s*m" },
+        { "type": "llm-judge", "rubric": "Answer is an image caption from the Eiffel Tower Wikipedia page that mentions the tower's height in meters." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "gaia-document-extraction",
+      "prompt": "Find the most recent annual letter to shareholders published by Berkshire Hathaway. Return the year and the first sentence of the letter.",
+      "source": { "name": "gaia", "license": "Apache-2.0", "modified": true, "notes": "wire-style document task" },
+      "vertical": "financial-services", "tier": "research",
+      "capabilities": ["navigate", "search", "extract-text"], "infra": ["none"], "tags": ["pdf", "finance"],
+      "entry_url": "https://www.berkshirehathaway.com/letters/letters.html",
+      "difficulty": 4, "max_steps": 15,
+      "graders": [
+        { "type": "regex", "pattern": "20\\d{2}" },
+        { "type": "llm-judge", "rubric": "Answer includes the year of the most recent Berkshire annual letter and a verbatim first sentence." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "gaia-numerical-reasoning",
+      "prompt": "If you sum the populations of New York City, Los Angeles, and Chicago (using current Wikipedia figures), what is the result? Return the sum and the source figures.",
+      "source": { "name": "gaia", "license": "Apache-2.0", "modified": true, "notes": "wire-style numerical synthesis" },
+      "vertical": "knowledge-base", "tier": "research",
+      "capabilities": ["navigate", "search", "synthesize"], "infra": ["none"], "tags": ["multi-hop", "wiki"],
+      "difficulty": 3, "max_steps": 12,
+      "graders": [
+        { "type": "regex", "pattern": "1[34]\\,?\\d{3}\\,?\\d{3}|1[34],\\d{3},\\d{3}" },
+        { "type": "llm-judge", "rubric": "Answer includes 3 city populations from Wikipedia and a numeric sum, with arithmetic that's consistent." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "gaia-list-aggregation",
+      "prompt": "List all U.S. presidents who served between 1900 and 1945. Return their names in chronological order.",
+      "source": { "name": "gaia", "license": "Apache-2.0", "modified": true, "notes": "wire-style list aggregation" },
+      "vertical": "knowledge-base", "tier": "research",
+      "capabilities": ["search", "extract-structured", "synthesize"], "infra": ["none"], "tags": ["history", "list"],
+      "difficulty": 3, "max_steps": 10,
+      "graders": [
+        { "type": "contains", "values": ["McKinley", "Roosevelt", "Taft", "Wilson", "Harding", "Coolidge", "Hoover"] }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "gaia-temporal-reasoning",
+      "prompt": "Find the date that Apollo 11 landed on the Moon and report what day of the week it was.",
+      "source": { "name": "gaia", "license": "Apache-2.0", "modified": true, "notes": "wire-style temporal reasoning" },
+      "vertical": "knowledge-base", "tier": "research",
+      "capabilities": ["search", "synthesize"], "infra": ["none"], "tags": ["history"],
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "contains", "values": ["1969"] },
+        { "type": "contains", "values": ["Sunday"] }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "gaia-comparison-task",
+      "prompt": "Which is taller: the Burj Khalifa or the Shanghai Tower? Return both heights and the difference in meters.",
+      "source": { "name": "gaia", "license": "Apache-2.0", "modified": true, "notes": "wire-style comparison" },
+      "vertical": "knowledge-base", "tier": "research",
+      "capabilities": ["search", "compare", "synthesize"], "infra": ["none"], "tags": ["compare"],
+      "difficulty": 2, "max_steps": 8,
+      "graders": [
+        { "type": "contains", "values": ["Burj"] },
+        { "type": "regex", "pattern": "\\d{3}\\s*m" }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "gaia-form-extraction",
+      "prompt": "Find IRS Form W-9. Return its full title and the URL of the official PDF on irs.gov.",
+      "source": { "name": "gaia", "license": "Apache-2.0", "modified": true, "notes": "wire-style document lookup" },
+      "vertical": "non-profit-gov", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["gov", "pdf"],
+      "entry_url": "https://www.irs.gov",
+      "difficulty": 3, "max_steps": 10,
+      "graders": [
+        { "type": "url-match", "pattern": "irs\\.gov.*\\.pdf" },
+        { "type": "llm-judge", "rubric": "Answer includes IRS Form W-9's full title (mentioning 'Request for Taxpayer Identification Number') and the official PDF URL on irs.gov." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "gaia-pdf-content",
+      "prompt": "Open the latest 10-K filed by Tesla on EDGAR. Find the line item 'Total revenues' for the most recent fiscal year and return the dollar amount.",
+      "source": { "name": "gaia", "license": "Apache-2.0", "modified": true, "notes": "wire-style document extraction" },
+      "vertical": "financial-services", "tier": "research",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["finance", "pdf", "multi-hop"],
+      "entry_url": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001318605&type=10-K",
+      "difficulty": 5, "max_steps": 25,
+      "graders": [
+        { "type": "regex", "pattern": "\\$?\\d{2,3}(,\\d{3})+" },
+        { "type": "llm-judge", "rubric": "Answer cites Tesla's most recent 10-K total revenue figure with units in millions or billions of dollars." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "ab-job-listings-aggregate",
+      "prompt": "Across LinkedIn Jobs, Indeed, and the Anthropic careers page, find current openings titled 'Research Engineer'. Return a deduplicated list of unique posting locations.",
+      "source": { "name": "assistantbench", "license": "MIT", "modified": true, "notes": "wire-style aggregation" },
+      "vertical": "hr-recruiting", "tier": "research",
+      "capabilities": ["navigate", "search", "extract-structured", "synthesize", "compare"], "infra": ["stealth"], "tags": ["multi-site", "search"],
+      "difficulty": 5, "max_steps": 30,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer includes a deduplicated list of locations from at least 3 'Research Engineer' postings sourced from LinkedIn, Indeed, and Anthropic's careers page." }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "ab-research-citation-trace",
+      "prompt": "Find the most-cited paper on arXiv from 2024 that uses 'Constitutional AI' in its title or abstract. Return the title, authors, and citation count.",
+      "source": { "name": "assistantbench", "license": "MIT", "modified": true, "notes": "wire-style multi-source synthesis" },
+      "vertical": "knowledge-base", "tier": "research",
+      "capabilities": ["navigate", "search", "extract-structured", "synthesize"], "infra": ["none"], "tags": ["academic"],
+      "difficulty": 4, "max_steps": 20,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer cites a real Constitutional-AI-related paper from 2024 with title, authors, and a citation count from a credible source." }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "ab-product-spec-comparison",
+      "prompt": "Compare the latest M-series MacBook Air and the latest Dell XPS 13: list the CPU, RAM, storage, weight, and starting price for each. Return as a side-by-side table.",
+      "source": { "name": "assistantbench", "license": "MIT", "modified": true, "notes": "wire-style comparison" },
+      "vertical": "ecommerce", "tier": "research",
+      "capabilities": ["navigate", "compare", "extract-structured", "synthesize"], "infra": ["none"], "tags": ["compare", "multi-site"],
+      "difficulty": 4, "max_steps": 18,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer is a 2-column comparison table with CPU, RAM, storage, weight, and price for the latest MacBook Air and Dell XPS 13." }],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "ab-author-bibliography",
+      "prompt": "List the 5 most recent papers (2024-2026) by Yoshua Bengio on Google Scholar. Return titles and venues.",
+      "source": { "name": "assistantbench", "license": "MIT", "modified": true, "notes": "wire-style bibliography" },
+      "vertical": "knowledge-base", "tier": "research",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["stealth"], "tags": ["academic"],
+      "entry_url": "https://scholar.google.com",
+      "difficulty": 4, "max_steps": 15,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer lists 5 distinct Bengio papers from 2024-2026 with title and publication venue each." }],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "ab-conference-schedule",
+      "prompt": "Find the dates and host city of the next NeurIPS conference. Return both.",
+      "source": { "name": "assistantbench", "license": "MIT", "modified": true, "notes": "wire-style event lookup" },
+      "vertical": "knowledge-base", "tier": "research",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["academic", "events"],
+      "entry_url": "https://neurips.cc",
+      "difficulty": 2, "max_steps": 8,
+      "graders": [
+        { "type": "regex", "pattern": "20\\d{2}" },
+        { "type": "llm-judge", "rubric": "Answer includes the upcoming NeurIPS dates (year + month/day range) and host city." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "ab-academic-paper-search",
+      "prompt": "On https://scholar.google.com, find the paper 'Deep Residual Learning for Image Recognition'. Return its citation count and first author.",
+      "source": { "name": "assistantbench", "license": "MIT", "modified": true, "notes": "wire-style academic lookup" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["stealth"], "tags": ["academic", "search"],
+      "entry_url": "https://scholar.google.com",
+      "difficulty": 3, "max_steps": 8,
+      "graders": [
+        { "type": "contains", "values": ["He"] },
+        { "type": "regex", "pattern": "\\b\\d{5,}\\b" }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "ab-company-leadership",
+      "prompt": "Find the current CEO and CFO of Stripe. Return both names and the source page where you found them.",
+      "source": { "name": "assistantbench", "license": "MIT", "modified": true, "notes": "wire-style leadership lookup" },
+      "vertical": "sales-intel", "tier": "research",
+      "capabilities": ["navigate", "search", "extract-structured", "synthesize"], "infra": ["none"], "tags": ["multi-hop"],
+      "difficulty": 3, "max_steps": 12,
+      "graders": [
+        { "type": "contains", "values": ["Collison"] },
+        { "type": "llm-judge", "rubric": "Answer names Stripe's CEO (Patrick Collison) and current CFO with a credible source URL." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "ab-government-data-lookup",
+      "prompt": "Find the most recent monthly U.S. unemployment rate from the Bureau of Labor Statistics. Return the rate, the month/year it covers, and the BLS URL.",
+      "source": { "name": "assistantbench", "license": "MIT", "modified": true, "notes": "wire-style gov data" },
+      "vertical": "non-profit-gov", "tier": "research",
+      "capabilities": ["navigate", "extract-structured"], "infra": ["none"], "tags": ["gov", "stats"],
+      "entry_url": "https://www.bls.gov/news.release/empsit.toc.htm",
+      "difficulty": 3, "max_steps": 10,
+      "graders": [
+        { "type": "regex", "pattern": "\\d\\.\\d\\s*%|\\d\\.\\d\\s*percent" },
+        { "type": "url-match", "pattern": "bls\\.gov" }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "ab-historical-fact",
+      "prompt": "What was the closing price of the S&P 500 on the day of the 2008 Lehman Brothers bankruptcy filing? Return the date and the closing index value.",
+      "source": { "name": "assistantbench", "license": "MIT", "modified": true, "notes": "wire-style historical fact" },
+      "vertical": "financial-services", "tier": "research",
+      "capabilities": ["navigate", "search", "synthesize"], "infra": ["none"], "tags": ["history", "finance"],
+      "difficulty": 4, "max_steps": 15,
+      "graders": [
+        { "type": "contains", "values": ["2008-09-15"] },
+        { "type": "llm-judge", "rubric": "Answer cites the date 2008-09-15 (or September 15, 2008) and an S&P 500 closing value near 1192." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "ab-recipe-aggregation",
+      "prompt": "Across allrecipes.com, seriouseats.com, and bonappetit.com, find a 'beef stew' recipe on each. Return a 3-row table of (site, recipe name, total time).",
+      "source": { "name": "assistantbench", "license": "MIT", "modified": true, "notes": "wire-style aggregation" },
+      "vertical": "knowledge-base", "tier": "research",
+      "capabilities": ["navigate", "search", "extract-structured", "compare"], "infra": ["none"], "tags": ["multi-site", "recipe"],
+      "difficulty": 4, "max_steps": 20,
+      "graders": [{ "type": "llm-judge", "rubric": "Answer is a 3-row table covering allrecipes.com, seriouseats.com, and bonappetit.com with one beef stew recipe and total time per row." }],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "bc-rare-fact-lookup",
+      "prompt": "What was the original name of the company now known as Google, when it was first incorporated? Return the original name and incorporation year.",
+      "source": { "name": "browsecomp", "license": "research-only", "modified": true, "notes": "wire-style trivia" },
+      "vertical": "knowledge-base", "tier": "research",
+      "capabilities": ["search", "synthesize"], "infra": ["none"], "tags": ["trivia"],
+      "difficulty": 3, "max_steps": 10,
+      "graders": [
+        { "type": "contains", "values": ["1998"] },
+        { "type": "llm-judge", "rubric": "Answer cites Google's incorporation year (1998) and either confirms 'Google Inc.' as the original name or notes the prior 'BackRub' research project." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "bc-multi-hop-trivia",
+      "prompt": "Who directed the highest-grossing film of 2019, and what was that director's previous feature film?",
+      "source": { "name": "browsecomp", "license": "research-only", "modified": true, "notes": "wire-style multi-hop" },
+      "vertical": "knowledge-base", "tier": "research",
+      "capabilities": ["search", "synthesize"], "infra": ["none"], "tags": ["multi-hop", "trivia"],
+      "difficulty": 4, "max_steps": 15,
+      "graders": [
+        { "type": "contains", "values": ["Russo"] },
+        { "type": "llm-judge", "rubric": "Answer identifies the Russo Brothers as directors of Avengers: Endgame (2019's top film) and names a prior feature like Avengers: Infinity War or Captain America: Civil War." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "bc-historical-event",
+      "prompt": "On what date did the Berlin Wall fall, and which sitting U.S. president made a televised remark about the event that same day?",
+      "source": { "name": "browsecomp", "license": "research-only", "modified": true, "notes": "wire-style historical multi-hop" },
+      "vertical": "knowledge-base", "tier": "research",
+      "capabilities": ["search", "synthesize"], "infra": ["none"], "tags": ["history", "multi-hop"],
+      "difficulty": 3, "max_steps": 12,
+      "graders": [
+        { "type": "contains", "values": ["1989-11-09", "George H.W. Bush"] }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "bc-scientific-discovery",
+      "prompt": "Who was awarded the Nobel Prize in Physiology or Medicine in 2023, and for what discovery?",
+      "source": { "name": "browsecomp", "license": "research-only", "modified": true, "notes": "wire-style scientific fact" },
+      "vertical": "knowledge-base", "tier": "research",
+      "capabilities": ["search", "synthesize"], "infra": ["none"], "tags": ["science"],
+      "difficulty": 2, "max_steps": 8,
+      "graders": [
+        { "type": "contains", "values": ["Karikó", "Weissman"] },
+        { "type": "llm-judge", "rubric": "Answer names Katalin Karikó and Drew Weissman and mentions mRNA / nucleoside-base modifications relevant to COVID-19 vaccines." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "bc-cultural-reference",
+      "prompt": "In the film 'The Matrix' (1999), what color is the pill that Morpheus offers Neo to learn the truth?",
+      "source": { "name": "browsecomp", "license": "research-only", "modified": true, "notes": "wire-style trivia" },
+      "vertical": "sports-entertainment", "tier": "research",
+      "capabilities": ["search"], "infra": ["none"], "tags": ["trivia"],
+      "difficulty": 1, "max_steps": 4,
+      "graders": [{ "type": "contains", "values": ["red"] }],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "bc-geographic-fact",
+      "prompt": "Which African country has the largest population, and what is that population (latest available figure)?",
+      "source": { "name": "browsecomp", "license": "research-only", "modified": true, "notes": "wire-style geo fact" },
+      "vertical": "knowledge-base", "tier": "research",
+      "capabilities": ["search", "extract-structured"], "infra": ["none"], "tags": ["geo"],
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "contains", "values": ["Nigeria"] },
+        { "type": "regex", "pattern": "2\\d{2}\\s*million|2\\d{2},\\d{3},\\d{3}" }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "bc-biographical-detail",
+      "prompt": "What is the birthplace of Marie Curie (city and country at the time), and where did she conduct most of her Nobel-winning research?",
+      "source": { "name": "browsecomp", "license": "research-only", "modified": true, "notes": "wire-style biographical fact" },
+      "vertical": "knowledge-base", "tier": "research",
+      "capabilities": ["search", "synthesize"], "infra": ["none"], "tags": ["history"],
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "contains", "values": ["Warsaw"] },
+        { "type": "contains", "values": ["Paris"] }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "bc-statistical-record",
+      "prompt": "Who holds the all-time NBA career points record, and what is the exact total?",
+      "source": { "name": "browsecomp", "license": "research-only", "modified": true, "notes": "wire-style sports record" },
+      "vertical": "sports-entertainment", "tier": "research",
+      "capabilities": ["search", "extract-structured"], "infra": ["none"], "tags": ["sports", "records"],
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "contains", "values": ["LeBron"] },
+        { "type": "regex", "pattern": "4[0-9],\\d{3}|4\\d{4}" }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "bc-technical-spec",
+      "prompt": "What is the wavelength range (in nanometers) of visible light as commonly defined, and which color sits at the longer end of that range?",
+      "source": { "name": "browsecomp", "license": "research-only", "modified": true, "notes": "wire-style science fact" },
+      "vertical": "knowledge-base", "tier": "research",
+      "capabilities": ["search"], "infra": ["none"], "tags": ["science"],
+      "difficulty": 1, "max_steps": 4,
+      "graders": [
+        { "type": "regex", "pattern": "380.*?700|400.*?700|400.*?750" },
+        { "type": "contains", "values": ["red"] }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "bc-cross-reference",
+      "prompt": "Find the author of 'The Pragmatic Programmer' and a different book they wrote in the last 10 years. Return both book titles.",
+      "source": { "name": "browsecomp", "license": "research-only", "modified": true, "notes": "wire-style cross-reference" },
+      "vertical": "developer-tools", "tier": "research",
+      "capabilities": ["search", "synthesize"], "infra": ["none"], "tags": ["books", "multi-hop"],
+      "difficulty": 3, "max_steps": 10,
+      "graders": [
+        { "type": "contains", "values": ["Pragmatic Programmer"] },
+        { "type": "llm-judge", "rubric": "Answer names Andy Hunt or Dave Thomas as co-author and cites another book by either author published since 2015 (e.g., 'Programming Elixir' by Dave Thomas)." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "wikipedia-search-feynman",
+      "prompt": "Use the Wikipedia search to find the article on Richard Feynman. Return his birth year, death year, and the institution where he won the Nobel Prize.",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["none"], "tags": ["wiki", "search"],
+      "entry_url": "https://en.wikipedia.org",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "contains", "values": ["1918", "1988"] },
+        { "type": "llm-judge", "rubric": "Answer includes Feynman's birth year 1918, death year 1988, and Caltech as the institution at his Nobel-winning period." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "pdf-download-grants-form",
+      "prompt": "Navigate to https://www.grants.gov/forms/forms-repository/sf-424-family and download the SF-424 (Application for Federal Assistance) PDF. Report the file name and approximate size.",
+      "source": { "name": "wire-original" },
+      "vertical": "non-profit-gov", "tier": "session",
+      "capabilities": ["navigate", "click-flow", "file-download"], "infra": ["none"], "tags": ["gov", "pdf", "download"],
+      "entry_url": "https://www.grants.gov/forms/forms-repository/sf-424-family",
+      "difficulty": 4, "max_steps": 12,
+      "graders": [
+        { "type": "regex", "pattern": "SF-?424.*\\.pdf" },
+        { "type": "llm-judge", "rubric": "Answer confirms an SF-424 PDF was downloaded and reports the file name and size (KB or MB)." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "google-translate-ja-en",
+      "prompt": "Navigate to https://translate.google.com and translate 'こんにちは、世界' from Japanese to English. Return the English translation.",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "session",
+      "capabilities": ["navigate", "form-fill", "extract-text"], "infra": ["none"], "tags": ["translate"],
+      "entry_url": "https://translate.google.com",
+      "difficulty": 2, "max_steps": 6,
+      "graders": [
+        { "type": "contains", "values": ["Hello"] },
+        { "type": "llm-judge", "rubric": "Answer is the English translation of 'Hello, world' (or near-equivalent like 'Hi, world')." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "wikipedia-getting-to-philosophy",
+      "prompt": "Starting from https://en.wikipedia.org/wiki/Special:Random, follow the first non-italicized, non-parenthesized link in the article body, repeating until you reach the 'Philosophy' article or detect a loop. Return the ordered chain of article titles you visited.",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "agent",
+      "capabilities": ["navigate", "click-flow", "extract-structured"], "infra": ["none"], "tags": ["wiki", "long-chain", "iterative"],
+      "entry_url": "https://en.wikipedia.org/wiki/Special:Random",
+      "difficulty": 5, "max_steps": 35,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer is an ordered list of >= 5 distinct Wikipedia article titles forming a click chain. The chain ends at 'Philosophy' or a detected loop. Reject if the list is fewer than 5 entries, contains obviously fabricated titles, or never advances past a single article." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "walmart-search-akamai",
+      "prompt": "Navigate to https://www.walmart.com and search for 'instant pot duo'. Past Walmart's bot detection, return the title and price of the top organic result.",
+      "source": { "name": "wire-original" },
+      "vertical": "ecommerce", "tier": "session",
+      "capabilities": ["navigate", "search", "extract-structured"], "infra": ["stealth"], "tags": ["akamai", "waf", "search"],
+      "entry_url": "https://www.walmart.com",
+      "difficulty": 5, "max_steps": 15,
+      "graders": [
+        { "type": "regex", "pattern": "\\$\\d+" },
+        { "type": "llm-judge", "rubric": "Answer includes a Walmart Instant Pot product title and price with no indication that the bot challenge blocked the page. Reject if the answer references 'Robot or human?', 'Press & Hold', or any Akamai challenge text.", "must_not_have": ["Robot or human", "Press & Hold"] }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "kayak-flight-deep-filter",
+      "prompt": "On https://www.kayak.com, search round-trip flights JFK to CDG, departing 2026-08-01 and returning 2026-08-08, 1 adult. Apply filters: nonstop only, departure after 6pm. Return the cheapest matching itinerary's price and airline.",
+      "source": { "name": "wire-original" },
+      "vertical": "travel", "tier": "agent",
+      "capabilities": ["navigate", "search", "form-fill", "filter", "extract-structured"], "infra": ["stealth"], "tags": ["datadome", "waf", "filter", "travel"],
+      "entry_url": "https://www.kayak.com",
+      "difficulty": 5, "max_steps": 22,
+      "graders": [
+        { "type": "regex", "pattern": "\\$\\d+" },
+        { "type": "llm-judge", "rubric": "Answer is a real Kayak JFK-CDG round-trip itinerary that satisfies nonstop and after-6pm departure filters, with price and airline name. Reject if filters were not applied or if the page was blocked by DataDome." }
+      ],
+      "dynamic_content": "high", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "cloudflare-turnstile-demo",
+      "prompt": "Navigate to https://2captcha.com/demo/cloudflare-turnstile, complete the Cloudflare Turnstile challenge, submit the form, and report the result message.",
+      "source": { "name": "wire-original" },
+      "vertical": "infra-probe", "tier": "agent",
+      "capabilities": ["navigate", "click-flow", "form-fill"], "infra": ["captcha", "stealth"], "tags": ["captcha", "turnstile", "cloudflare"],
+      "entry_url": "https://2captcha.com/demo/cloudflare-turnstile",
+      "difficulty": 5, "max_steps": 20,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer indicates the Turnstile challenge was solved and the demo confirmed success. Reject if the challenge was skipped, remained unsolved, or the agent claimed success without evidence." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "pdf-extract-msft-segment-revenue",
+      "prompt": "On EDGAR, find Microsoft's most recent 10-K filing, open the full PDF, and extract the segment revenue table (Productivity & Business Processes, Intelligent Cloud, More Personal Computing). Return each segment's revenue for the most recent fiscal year.",
+      "source": { "name": "wire-original" },
+      "vertical": "financial-services", "tier": "research",
+      "capabilities": ["navigate", "search", "file-download", "extract-table", "synthesize"], "infra": ["none"], "tags": ["pdf", "finance", "table", "multi-hop"],
+      "entry_url": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000789019&type=10-K&dateb=&owner=include&count=5",
+      "difficulty": 5, "max_steps": 28,
+      "graders": [
+        { "type": "contains", "values": ["Productivity", "Cloud"] },
+        { "type": "regex", "pattern": "\\$?\\d{2,3}(,\\d{3})+" },
+        { "type": "llm-judge", "rubric": "Answer reports three segment revenue figures from Microsoft's most recent 10-K with units (millions or billions). Reject if numbers are fabricated or if any segment is missing." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "arxiv-citation-four-hop",
+      "prompt": "Find the paper 'Attention Is All You Need' on arXiv. Find one paper that cites it (use Semantic Scholar or Google Scholar). From that citing paper, find one of its authors' most recent (2024+) paper on arXiv. Return the three paper titles in citation order plus each paper's primary author affiliation.",
+      "source": { "name": "wire-original" },
+      "vertical": "knowledge-base", "tier": "research",
+      "capabilities": ["navigate", "search", "synthesize", "compare"], "infra": ["stealth"], "tags": ["academic", "multi-hop", "deep-research"],
+      "difficulty": 5, "max_steps": 25,
+      "graders": [
+        { "type": "contains", "values": ["Vaswani"] },
+        { "type": "llm-judge", "rubric": "Answer is a citation chain of >= 3 real papers starting at 'Attention Is All You Need', each with a primary author affiliation. The 3rd paper must be authored by someone from paper #2 and dated 2024 or later. Reject any link that's fabricated or unverifiable." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "github-pr-comment-flow",
+      "prompt": "Log into GitHub with the bench account, navigate to the wire-bench/sandbox repository, open the most recent open pull request, leave a review comment with the text 'wire-bench: smoke', and return the resulting comment URL (with #issuecomment- anchor).",
+      "source": { "name": "wire-original" },
+      "vertical": "developer-tools", "tier": "agent",
+      "capabilities": ["login", "navigate", "click-flow", "form-fill"], "infra": ["credentials"], "tags": ["github", "side-effect", "auth", "multi-step"],
+      "entry_url": "https://github.com/wire-bench/sandbox/pulls",
+      "auth": { "type": "credentials", "key": "github-bench" },
+      "difficulty": 5, "max_steps": 22,
+      "graders": [
+        { "type": "url-match", "pattern": "github\\.com/wire-bench/sandbox/pull/\\d+#issuecomment-\\d+" },
+        { "type": "llm-judge", "rubric": "Answer is a deep-link URL to the posted comment. Reject if the comment was drafted but not submitted, or if the URL lacks an issuecomment anchor." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "file-upload-form-test",
+      "prompt": "Navigate to https://the-internet.herokuapp.com/upload, upload a small text file named 'wire-bench.txt' (any text content), and report the success message and uploaded file name displayed by the page.",
+      "source": { "name": "wire-original" },
+      "vertical": "rpa-workflow", "tier": "agent",
+      "capabilities": ["navigate", "file-upload", "extract-text"], "infra": ["none"], "tags": ["form", "upload"],
+      "entry_url": "https://the-internet.herokuapp.com/upload",
+      "difficulty": 5, "max_steps": 12,
+      "graders": [
+        { "type": "contains", "values": ["wire-bench.txt"] },
+        { "type": "llm-judge", "rubric": "Answer confirms the file upload completed and reports the uploaded file name as displayed on the success page. Reject if the agent only navigated to the upload page without completing the upload." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "imdb-six-degrees-cross-ref",
+      "prompt": "On https://www.imdb.com, find the lead actor of 'Inception' (2010). Then find a different feature film in which that same actor appeared alongside Brad Pitt. Return the lead actor's name, the cross-over film title, and its year.",
+      "source": { "name": "wire-original" },
+      "vertical": "sports-entertainment", "tier": "research",
+      "capabilities": ["navigate", "search", "synthesize", "compare"], "infra": ["stealth"], "tags": ["multi-hop", "movies", "cross-ref"],
+      "entry_url": "https://www.imdb.com",
+      "difficulty": 5, "max_steps": 18,
+      "graders": [
+        { "type": "contains", "values": ["DiCaprio"] },
+        { "type": "regex", "pattern": "\\b(19|20)\\d{2}\\b" },
+        { "type": "llm-judge", "rubric": "Answer identifies Leonardo DiCaprio as Inception's lead and names a film featuring both DiCaprio and Brad Pitt with its release year (e.g., 'Once Upon a Time in Hollywood', 2019). Reject if the cross-over film is fabricated." }
+      ],
+      "dynamic_content": "low", "last_verified": "2026-05-04"
+    },
+    {
+      "id": "multi-tab-saas-pricing-matrix",
+      "prompt": "Build a comparison matrix of starter-tier monthly prices and bandwidth (or equivalent quota) limits for: Vercel, Netlify, Cloudflare Pages, Render, Railway, and Fly.io. Visit each pricing page and produce a single 6-row markdown table with columns: provider, starter price/month, bandwidth or primary quota.",
+      "source": { "name": "wire-original" },
+      "vertical": "sales-intel", "tier": "research",
+      "capabilities": ["navigate", "extract-structured", "compare", "synthesize"], "infra": ["none"], "tags": ["compare", "multi-site", "pricing", "deep-research"],
+      "entry_url": "https://vercel.com/pricing",
+      "difficulty": 5, "max_steps": 35,
+      "graders": [
+        { "type": "llm-judge", "rubric": "Answer is a 6-row markdown table covering Vercel, Netlify, Cloudflare Pages, Render, Railway, and Fly.io, each with a starter-tier price and a bandwidth or primary quota limit. Reject if any row is missing, prices are fabricated, or the table has fewer than 6 vendors." }
+      ],
+      "dynamic_content": "medium", "last_verified": "2026-05-04"
+    }
+  ]
+}

@@ -120,14 +120,14 @@ If both API keys are present, you must specify which provider to use. Wire rejec
 src/
   shared/       Types, schemas, IDs, boundary validators
   storage/      File-backed JSON persistence
-  browser/      Provider contract, observation, exec, helpers
+  browser/      Provider contract, observation, exec, raw browser actions
   providers/    Steel browser provider, OpenAI/Anthropic LLM providers
   policy/       Rules engine, baseline rules, approval flow
   skills/       Markdown parser, hostname/tag matcher, loader, promotion
   agent/        Loop state, step execution, classification, planning, runtime
-  trace/        Event creators, artifact registry, compare, replay
-  experiments/  Hypotheses, ablations, experiment summaries
-  profiles/     Profile selection, auth wall detection
+  trace/        Replay utilities for persisted run events
+  experiments/  Hypotheses and experiment summaries
+  profiles/     Auth wall detection
   cli/          Argument parsing, task runner, main entry
   eval/         Evaluation metrics, benchmark runner with persistence
   ui/           Terminal output formatting, review display

@@ -1,0 +1,368 @@
+{
+  "$id": "https://wire.dev/benchmarks/benchmark_tasks.schema.json",
+  "title": "Wire Benchmark Tasks",
+  "description": "Auto-emitted from benchmarks/schema.ts. Do not hand-edit.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "type": "number",
+      "const": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 10
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": [
+                  "wire-original",
+                  "wire-default",
+                  "wire-demo",
+                  "webvoyager",
+                  "mind2web",
+                  "webarena",
+                  "visualwebarena",
+                  "gaia",
+                  "assistantbench",
+                  "browsecomp",
+                  "miniwob",
+                  "webshop",
+                  "osworld",
+                  "agentbench"
+                ]
+              },
+              "task_id": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string",
+                "format": "uri"
+              },
+              "license": {
+                "type": "string"
+              },
+              "modified": {
+                "default": false,
+                "type": "boolean"
+              },
+              "notes": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          "vertical": {
+            "type": "string",
+            "enum": [
+              "ecommerce",
+              "travel",
+              "financial-services",
+              "healthcare",
+              "legal",
+              "sales-intel",
+              "developer-tools",
+              "knowledge-base",
+              "logistics",
+              "non-profit-gov",
+              "sports-entertainment",
+              "hr-recruiting",
+              "customer-service",
+              "rpa-workflow",
+              "accounting-ops",
+              "infra-probe",
+              "misc"
+            ]
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "scrape",
+              "session",
+              "research",
+              "agent"
+            ]
+          },
+          "capabilities": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "extract-text",
+                "extract-structured",
+                "extract-table",
+                "navigate",
+                "multi-step-nav",
+                "search",
+                "filter",
+                "form-fill",
+                "login",
+                "click-flow",
+                "iframe-interact",
+                "file-download",
+                "file-upload",
+                "compare",
+                "synthesize"
+              ]
+            }
+          },
+          "infra": {
+            "default": [
+              "none"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "none",
+                "proxy",
+                "profile",
+                "credentials",
+                "captcha",
+                "stealth",
+                "recording"
+              ]
+            }
+          },
+          "tags": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "entry_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "auth": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "credentials",
+                  "profile"
+                ]
+              },
+              "key": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "key"
+            ],
+            "additionalProperties": false
+          },
+          "difficulty": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "max_steps": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "graders": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "contains"
+                    },
+                    "values": {
+                      "minItems": 1,
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "case_sensitive": {
+                      "default": false,
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "values"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "regex"
+                    },
+                    "pattern": {
+                      "type": "string"
+                    },
+                    "flags": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "pattern"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "json-schema"
+                    },
+                    "schema": {}
+                  },
+                  "required": [
+                    "type",
+                    "schema"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "url-match"
+                    },
+                    "pattern": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "pattern"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "llm-judge"
+                    },
+                    "rubric": {
+                      "type": "string"
+                    },
+                    "must_have": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "must_not_have": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "reference": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "default": "gpt-5.4-mini",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "rubric"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "dynamic_content": {
+            "default": "low",
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "last_verified": {
+            "type": "string",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+          },
+          "disabled": {
+            "type": "object",
+            "properties": {
+              "reason": {
+                "type": "string"
+              },
+              "since": {
+                "type": "string",
+                "format": "date",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+              }
+            },
+            "required": [
+              "reason",
+              "since"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "prompt",
+          "source",
+          "vertical",
+          "tier",
+          "capabilities",
+          "difficulty",
+          "max_steps",
+          "graders",
+          "last_verified"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "version",
+    "generated_at",
+    "tasks"
+  ],
+  "additionalProperties": false
+}

@@ -63,6 +63,11 @@ import {
 } from "./state-helpers.js";
 import { ActionRegistry, type ActionHandler } from "./actions.js";
 
+export interface PauseToken {
+  isPaused(): boolean;
+  waitWhilePaused(): Promise<void>;
+}
+
 export interface RuntimeConfig {
   provider: BrowserProvider;
   policyEngine: PolicyEngine;
@@ -77,11 +82,39 @@ export interface RuntimeConfig {
   traceSink?: TraceSink;
   actionHandlers?: ActionHandler[];
   keepSessionOpen?: boolean;
+  cancelSignal?: AbortSignal;
+  pauseToken?: PauseToken;
+  existingSession?: BrowserSession;
+  releaseExistingSessionOnExit?: boolean;
 }
 
 export interface TraceSink {
   onEvent?: (event: TraceEvent) => Promise<void> | void;
   onArtifactEvent?: (event: TraceEvent) => Promise<void> | void;
+}
+
+function isCancelled(config: RuntimeConfig): boolean {
+  return config.cancelSignal?.aborted ?? false;
+}
+
+function createCancelledState(task: Task, config: RuntimeConfig): LoopState {
+  const session = config.existingSession;
+  const loopOptions: { sessionConfig?: SessionConfig; profileId?: ProfileId } = {};
+  if (config.sessionInput?.sessionConfig) {
+    loopOptions.sessionConfig = config.sessionInput.sessionConfig;
+  }
+  if (session?.profileId) {
+    loopOptions.profileId = session.profileId;
+  } else if (config.sessionInput?.profileId) {
+    loopOptions.profileId = config.sessionInput.profileId;
+  }
+
+  return createLoopState(
+    task,
+    session?.id ?? createId("session"),
+    session?.debugUrl ?? session?.liveUrl,
+    loopOptions,
+  );
 }
 
 function hostnameFromState(state: LoopState): string | undefined {
@@ -330,6 +363,20 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number, a
 
       const response = await llmProvider.chat(messages);
 
+      if (response.usage) {
+        state.events.push({
+          id: createId("event"),
+          runId: state.run.id,
+          ts: nowIsoUtc(),
+          kind: "llm-usage",
+          payload: {
+            callIndex: state.stepCount + 1,
+            model: response.model,
+            usage: response.usage,
+          },
+        });
+      }
+
       // Parse the LLM response as a proposed action
       return parseActionFromLlm(response.content, state);
     }
@@ -411,9 +458,17 @@ export async function executeTask(
   const registry = buildActionRegistry(config);
   const turn = agentTurn ?? defaultAgentTurn(config.llmProvider, config.maxSteps, registry);
 
-  // Create a browser session for this task
-  const session = await createBrowserSession(config.provider, config.sessionInput);
-  await config.onSessionCreated?.(session);
+  if (isCancelled(config)) {
+    return executeWithState(task, config, turn, undefined, createCancelledState(task, config), undefined, registry);
+  }
+
+  let session: BrowserSession;
+  if (config.existingSession) {
+    session = config.existingSession;
+  } else {
+    session = await createBrowserSession(config.provider, config.sessionInput);
+    await config.onSessionCreated?.(session);
+  }
 
   return executeWithState(task, config, turn, session, undefined, undefined, registry);
 }
@@ -497,6 +552,10 @@ async function initializeState(
     pendingAction: undefined,
     flushedEvents: 0,
   };
+
+  if (isCancelled(config)) {
+    return signals;
+  }
 
   if (approvedPendingAction) {
     const resumeOpts: {
@@ -602,13 +661,41 @@ async function runMainLoop(
   const NO_PROGRESS_THRESHOLD = 4;
 
   while (true) {
+    if (config.pauseToken?.isPaused()) {
+      state.events.push({
+        id: createId("event"),
+        runId: state.run.id,
+        ts: nowIsoUtc(),
+        kind: "thought-summary",
+        payload: { reason: "Paused for user takeover" },
+      });
+      await flushTraceSink(state, config, signals);
+      await Promise.race([
+        config.pauseToken.waitWhilePaused(),
+        new Promise<void>((resolve) => {
+          if (isCancelled(config)) return resolve();
+          config.cancelSignal?.addEventListener("abort", () => resolve(), { once: true });
+        }),
+      ]);
+      if (!isCancelled(config)) {
+        state.events.push({
+          id: createId("event"),
+          runId: state.run.id,
+          ts: nowIsoUtc(),
+          kind: "thought-summary",
+          payload: { reason: "Resumed after user takeover" },
+        });
+        await flushTraceSink(state, config, signals);
+      }
+    }
+
     // Check stopping conditions
     const stopResult = shouldStop(state, {
       maxSteps: config.maxSteps,
       budgetExhausted: false,
       policyDenied: signals.policyDenied,
       authWallHit: signals.authWallHit,
-      userCancelled: false,
+      userCancelled: isCancelled(config),
     });
 
     if (stopResult.stop) {
@@ -845,6 +932,17 @@ async function runMainLoop(
         break;
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        state.events.push({
+          id: createId("event"),
+          runId: state.run.id,
+          ts: new Date().toISOString(),
+          kind: "thought-summary",
+          payload: { reason: "User cancelled" },
+        });
+        await flushTraceSink(state, config, signals);
+        break;
+      }
       const message = err instanceof Error ? err.message : String(err);
       const code = /network|timeout|ECONN|ETIMEDOUT|ENOTFOUND|fetch/iu.test(message)
         ? "ENETWORK"
@@ -970,6 +1068,9 @@ async function executeWithState(
   approvedPendingAction?: ProposedAction,
   actionRegistry?: ActionRegistry,
 ): Promise<LoopResult> {
+  const callerOwnedSessionId = config.existingSession && !config.releaseExistingSessionOnExit
+    ? config.existingSession.id
+    : undefined;
   const loopOptions: { sessionConfig?: SessionConfig; profileId?: ProfileId } = {};
   if (config.sessionInput?.sessionConfig) {
     loopOptions.sessionConfig = config.sessionInput.sessionConfig;
@@ -992,8 +1093,8 @@ async function executeWithState(
   try {
     await runMainLoop(state, config, turn, signals, actionRegistry);
   } finally {
-    // Always clean up the browser session
-    if (!signals.awaitingApproval && !config.keepSessionOpen) {
+    const callerOwnsSession = callerOwnedSessionId !== undefined && state.sessionId === callerOwnedSessionId;
+    if (!signals.awaitingApproval && !config.keepSessionOpen && !callerOwnsSession) {
       try {
         await stopBrowserSession(config.provider, state.sessionId);
       } catch {

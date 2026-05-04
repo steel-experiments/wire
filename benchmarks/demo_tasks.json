@@ -1,0 +1,577 @@
+{
+  "$schema": "./demo_tasks.schema.json",
+  "version": 1,
+  "description": "Curated demo prompts for the Claude Code + Steel browser demo recorder. Each entry is a single natural-language instruction tagged with vertical (from the GTM doc), Steel product tier (scrape | session | research | agent), and an optional Steel feature being showcased.",
+  "tasks": [
+    {
+      "id": "steel-credentials-github-star",
+      "prompt": "Log into GitHub using my saved credentials and star the steel-dev/steel repository.",
+      "vertical": "steel-feature",
+      "tier": "agent",
+      "feature": "credentials",
+      "duration": "short"
+    },
+    {
+      "id": "steel-credentials-linkedin-headline",
+      "prompt": "Log into LinkedIn using my saved credentials, open my profile, and report my current headline and number of connections.",
+      "vertical": "steel-feature",
+      "tier": "agent",
+      "feature": "credentials",
+      "duration": "short"
+    },
+    {
+      "id": "steel-credentials-twitter-fetch",
+      "prompt": "Log into x.com with my saved credentials and return the text of my last 5 posts.",
+      "vertical": "steel-feature",
+      "tier": "agent",
+      "feature": "credentials",
+      "duration": "short"
+    },
+    {
+      "id": "steel-profile-amazon-cookies",
+      "prompt": "Open amazon.com twice in two separate Steel sessions using the same browser profile. On the first run, accept the cookie banner; on the second, confirm the banner does not appear because the profile persisted state.",
+      "vertical": "steel-feature",
+      "tier": "session",
+      "feature": "profile",
+      "duration": "short"
+    },
+    {
+      "id": "steel-profile-reddit-saved",
+      "prompt": "Using my pre-authenticated profile, open reddit.com/user/me/saved and return the titles of my 10 most recently saved posts.",
+      "vertical": "steel-feature",
+      "tier": "session",
+      "feature": "profile",
+      "duration": "short"
+    },
+    {
+      "id": "steel-stealth-cloudflare",
+      "prompt": "Visit a Cloudflare-protected site such as nowsecure.nl and confirm the page loads past the bot challenge, then return the page title.",
+      "vertical": "steel-feature",
+      "tier": "session",
+      "feature": "stealth",
+      "duration": "short"
+    },
+    {
+      "id": "steel-captcha-signup",
+      "prompt": "Navigate to a public form that includes a reCAPTCHA challenge (e.g. 2captcha.com/demo/recaptcha-v2) and complete it successfully.",
+      "vertical": "steel-feature",
+      "tier": "agent",
+      "feature": "captcha",
+      "duration": "short"
+    },
+    {
+      "id": "steel-proxy-geo-pricing",
+      "prompt": "Open apple.com/shop/buy-iphone/iphone-16-pro twice \u2014 once via a US proxy and once via a UK proxy \u2014 and report the displayed price and currency from each run.",
+      "vertical": "steel-feature",
+      "tier": "session",
+      "feature": "proxy",
+      "duration": "short"
+    },
+    {
+      "id": "steel-recording-multi-step",
+      "prompt": "Walk through a 5-step demo journey on steel.dev (home \u2192 docs \u2192 pricing \u2192 blog \u2192 contact) so the resulting Steel session recording can be replayed end-to-end.",
+      "vertical": "steel-feature",
+      "tier": "session",
+      "feature": "recording",
+      "duration": "short"
+    },
+    {
+      "id": "steel-multi-session-parallel",
+      "prompt": "In parallel, spin up 3 Steel sessions and have each one fetch the homepage hero copy of steel.dev, browserbase.com, and kernel.sh respectively. Return the three headlines in a single table.",
+      "vertical": "steel-feature",
+      "tier": "session",
+      "duration": "medium"
+    },
+    {
+      "id": "sales-ai-search-visibility",
+      "prompt": "Check how chatgpt.com, perplexity.ai, and google.com (AI Overview) answer the query 'best browser infrastructure for AI agents'. Produce a markdown table of which companies get cited in each engine.",
+      "vertical": "sales-intel",
+      "tier": "agent",
+      "duration": "short"
+    },
+    {
+      "id": "sales-llms-txt-audit",
+      "prompt": "Visit steel.dev, browserbase.com, kernel.sh, firecrawl.dev, and parallel.ai. For each, check whether an /llms.txt file exists and capture their robots.txt directives for GPTBot, ClaudeBot, and PerplexityBot. Return a comparison table.",
+      "vertical": "sales-intel",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "sales-g2-review-mining",
+      "prompt": "Open G2's category page for 'AI Sales Assistant'. For the top 5 products, extract the star rating, number of reviews, starting price, and a one-sentence summary of the most recent critical review.",
+      "vertical": "sales-intel",
+      "tier": "session",
+      "duration": "medium"
+    },
+    {
+      "id": "sales-conference-speakers",
+      "prompt": "Visit the speakers page of the AI Engineer World's Fair (https://www.ai.engineer/) and extract a CSV of every speaker's name, company, and talk title.",
+      "vertical": "sales-intel",
+      "tier": "agent",
+      "duration": "long"
+    },
+    {
+      "id": "sales-company-research-brief",
+      "prompt": "Research Clay (clay.com): pull their funding stage from Crunchbase, latest blog post, current open engineering roles, and the headline of their most recent press coverage. Return a one-page markdown brief.",
+      "vertical": "sales-intel",
+      "tier": "research",
+      "duration": "short"
+    },
+    {
+      "id": "sales-tech-stack-detect",
+      "prompt": "For each of stripe.com, vercel.com, and linear.app, detect the JavaScript framework, CDN, analytics platform, and any visible CMS. Return a markdown table of findings derived from the rendered DOM and network requests.",
+      "vertical": "sales-intel",
+      "tier": "session",
+      "duration": "medium"
+    },
+    {
+      "id": "sales-job-board-signal",
+      "prompt": "Visit the careers pages of Anthropic, OpenAI, Cohere, and Mistral. Count the number of open roles that contain 'AI Engineer' or 'ML Engineer' in the title and list the locations.",
+      "vertical": "sales-intel",
+      "tier": "session",
+      "duration": "medium"
+    },
+    {
+      "id": "sales-reddit-sentiment",
+      "prompt": "Search reddit.com/r/MachineLearning for the latest 20 posts mentioning 'browser agents'. Summarize the recurring themes and pull 3 representative quotes.",
+      "vertical": "sales-intel",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "sales-hn-yc-startups",
+      "prompt": "Open news.ycombinator.com, scan the front page, and identify which submissions are launched by current YC companies. Return a list with title, link, and current point count.",
+      "vertical": "sales-intel",
+      "tier": "scrape",
+      "duration": "short"
+    },
+    {
+      "id": "sales-pricing-comparison",
+      "prompt": "Open the pricing pages of vercel.com, netlify.com, and railway.app. Extract the published tiers, monthly cost, and headline limits (build minutes, bandwidth, seats) into a comparison table.",
+      "vertical": "sales-intel",
+      "tier": "scrape",
+      "duration": "medium"
+    },
+    {
+      "id": "sales-schema-jsonld",
+      "prompt": "For 5 SaaS company homepages of your choice, extract any JSON-LD structured data blocks from the rendered HTML and report which Schema.org types each site exposes.",
+      "vertical": "sales-intel",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "sales-personalized-search-demo",
+      "prompt": "Open chatgpt.com and ask 'who makes the best AI sales SDR platform?' as a guest user. Capture the cited companies, then immediately re-run the same query on perplexity.ai and compare the citation lists side by side.",
+      "vertical": "sales-intel",
+      "tier": "agent",
+      "duration": "medium"
+    },
+    {
+      "id": "fin-sec-edgar-10k",
+      "prompt": "Open SEC EDGAR (sec.gov/edgar) and find Cloudflare's most recent 10-K filing. Extract the top 3 risk factors and summarize each in plain English.",
+      "vertical": "financial-services",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "fin-earnings-transcript",
+      "prompt": "Find the most recent earnings call transcript for NVIDIA on a public source like fool.com or seekingalpha.com and pull the CFO's three forward-looking statements about data center revenue.",
+      "vertical": "financial-services",
+      "tier": "research",
+      "duration": "long"
+    },
+    {
+      "id": "fin-ipo-calendar",
+      "prompt": "Visit the Nasdaq IPO calendar (nasdaq.com/market-activity/ipos) and list every company expected to price this week, including ticker, expected price range, and lead underwriter.",
+      "vertical": "financial-services",
+      "tier": "scrape",
+      "duration": "long"
+    },
+    {
+      "id": "fin-sec-litigation",
+      "prompt": "Open sec.gov/litigation/litreleases.shtml and return the 5 most recent litigation releases with their case names and one-sentence summaries.",
+      "vertical": "financial-services",
+      "tier": "scrape",
+      "duration": "short"
+    },
+    {
+      "id": "fin-crypto-market-cap",
+      "prompt": "Open coinmarketcap.com and return the current market cap, 24h volume, and 7d % change for the top 10 cryptocurrencies in a markdown table.",
+      "vertical": "financial-services",
+      "tier": "scrape",
+      "duration": "short"
+    },
+    {
+      "id": "fin-state-business-registry",
+      "prompt": "Open the Delaware Division of Corporations entity search (icis.corp.delaware.gov), look up 'Anthropic, PBC', and return the registered agent, file number, and incorporation date.",
+      "vertical": "financial-services",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "acct-state-tax-deadlines",
+      "prompt": "Find the 2026 sales-tax filing deadlines for California, New York, and Texas by visiting each state's department of revenue website. Return a markdown calendar.",
+      "vertical": "accounting-ops",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "acct-irs-form-w9",
+      "prompt": "Open irs.gov, navigate to forms, and download the latest Form W-9 PDF. Report the form's revision date and where it was downloaded to.",
+      "vertical": "accounting-ops",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "acct-city-budget",
+      "prompt": "Visit sf.gov, locate the most recent annual budget document, and extract the total budget amount and the 3 largest spending categories.",
+      "vertical": "accounting-ops",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "legal-ftc-enforcement",
+      "prompt": "Open ftc.gov/news-events/news/press-releases and list every enforcement action filed in the past 30 days, with company name, alleged violation, and link to the complaint.",
+      "vertical": "legal-compliance",
+      "tier": "scrape",
+      "duration": "medium"
+    },
+    {
+      "id": "legal-uspto-patent-search",
+      "prompt": "Open the USPTO patent full-text search at ppubs.uspto.gov and find the 5 most recent patents containing the phrase 'browser automation agent'. Return assignee, filing date, and abstract.",
+      "vertical": "legal-compliance",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "legal-trademark-search",
+      "prompt": "Search the USPTO trademark database (tmsearch.uspto.gov) for active trademarks containing 'Steel' in the technology class (Class 9). Return the top 10 results with status and owner.",
+      "vertical": "legal-compliance",
+      "tier": "session",
+      "duration": "long"
+    },
+    {
+      "id": "legal-pacer-public-docket",
+      "prompt": "Open the free CourtListener docket search (courtlistener.com/recap) and pull the 5 most recent filings in any antitrust case involving 'Google'. Return docket number, filing type, and date.",
+      "vertical": "legal-compliance",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "legal-sos-entity-lookup",
+      "prompt": "Open the California Secretary of State business search (bizfileonline.sos.ca.gov), look up 'OpenAI, OpCo, LLC', and return its entity number, status, formation date, and filed agent.",
+      "vertical": "legal-compliance",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "logistics-usps-tracking",
+      "prompt": "Open tools.usps.com/go/TrackConfirmAction, enter the tracking number 9400111899223197428490, and return every scan event in the timeline.",
+      "vertical": "logistics-supply-chain",
+      "tier": "session",
+      "duration": "long"
+    },
+    {
+      "id": "logistics-diesel-index",
+      "prompt": "Open the EIA weekly diesel price index (eia.gov/petroleum/gasdiesel) and return this week's national average and the change vs. the prior week.",
+      "vertical": "logistics-supply-chain",
+      "tier": "scrape",
+      "duration": "short"
+    },
+    {
+      "id": "logistics-port-congestion",
+      "prompt": "Visit the Port of Los Angeles signal dashboard (signal.portoptimizer.com) and return the current vessel count at anchor, average dwell time, and number of vessels berthed.",
+      "vertical": "logistics-supply-chain",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "logistics-freight-rates",
+      "prompt": "Open the FreightWaves SONAR public charts (freightwaves.com/news/tag/freight-rates) and capture this week's national outbound tender volume index value with a screenshot of the chart.",
+      "vertical": "logistics-supply-chain",
+      "tier": "session",
+      "duration": "long"
+    },
+    {
+      "id": "cs-docs-knowledge-base",
+      "prompt": "Crawl docs.steel.dev top-to-bottom and produce a markdown table of contents grouped by section, with one-line summaries for each page.",
+      "vertical": "customer-service",
+      "tier": "scrape",
+      "duration": "long"
+    },
+    {
+      "id": "cs-stripe-faq-extract",
+      "prompt": "Open support.stripe.com, navigate to the 'Disputes and fraud' section, and extract every FAQ question with its first-paragraph answer.",
+      "vertical": "customer-service",
+      "tier": "scrape",
+      "duration": "long"
+    },
+    {
+      "id": "cs-saas-help-center-summary",
+      "prompt": "Visit Notion's help center and produce a structured summary of the 'Getting Started' category \u2014 every article title plus a one-sentence summary.",
+      "vertical": "customer-service",
+      "tier": "scrape",
+      "duration": "medium"
+    },
+    {
+      "id": "devtools-tech-stack",
+      "prompt": "For shopify.com, hashnode.com, and posthog.com, identify the JS framework, hosting provider, font CDN, and analytics provider from network requests and rendered HTML. Return a comparison table.",
+      "vertical": "developer-tools",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "devtools-openai-docs-crawl",
+      "prompt": "Crawl platform.openai.com/docs/api-reference and return a markdown table of every endpoint, HTTP method, and a one-line description.",
+      "vertical": "developer-tools",
+      "tier": "scrape",
+      "feature": "stealth",
+      "duration": "long"
+    },
+    {
+      "id": "devtools-github-repo-analysis",
+      "prompt": "Visit github.com/anthropics/anthropic-sdk-python and report stars, total commits, top 5 contributors by commits, last release version, and last release date.",
+      "vertical": "developer-tools",
+      "tier": "session",
+      "duration": "medium"
+    },
+    {
+      "id": "devtools-npm-package-compare",
+      "prompt": "On npmjs.com, compare playwright, puppeteer, and selenium-webdriver. Return latest version, weekly downloads, last publish date, and dependency count for each in a table.",
+      "vertical": "developer-tools",
+      "tier": "scrape",
+      "duration": "short"
+    },
+    {
+      "id": "devtools-perf-audit",
+      "prompt": "Open pagespeed.web.dev, run a Lighthouse audit on steel.dev, and return the four category scores (Performance, Accessibility, Best Practices, SEO) for both Mobile and Desktop.",
+      "vertical": "developer-tools",
+      "tier": "agent",
+      "duration": "short"
+    },
+    {
+      "id": "ecom-airpods-price-compare",
+      "prompt": "Find the current price, shipping cost, and earliest delivery date for AirPods Pro 2 on apple.com, amazon.com, and bestbuy.com to a 94103 ZIP code. Return a markdown comparison table.",
+      "vertical": "ecommerce",
+      "tier": "agent",
+      "duration": "short"
+    },
+    {
+      "id": "ecom-lululemon-shorts",
+      "prompt": "Open shop.lululemon.com/c/men/shorts. Sort by price low-to-high and return the top 10 products with name, price, original price (if discounted), and main color options.",
+      "vertical": "ecommerce",
+      "tier": "session",
+      "duration": "long"
+    },
+    {
+      "id": "ecom-amazon-bestsellers",
+      "prompt": "Open amazon.com Best Sellers in 'Electronics' and return the top 10 products with rank, title, average rating, and review count.",
+      "vertical": "ecommerce",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "ecom-ebay-sold-listings",
+      "prompt": "Search ebay.com for 'Game Boy Color' completed/sold listings in the last 30 days. Return the average sold price, lowest, and highest, plus the count of listings.",
+      "vertical": "ecommerce",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "ecom-checkout-audit",
+      "prompt": "Add a basic t-shirt to cart on three DTC apparel sites of your choice and walk through to the final checkout step (do not submit payment). Capture the breakdown of subtotal, shipping, tax, and any upsell offers shown on each.",
+      "vertical": "ecommerce",
+      "tier": "agent",
+      "duration": "medium"
+    },
+    {
+      "id": "kb-docs-markdown-export",
+      "prompt": "Crawl docs.anthropic.com and export every page in the 'Build with Claude' section as a single concatenated markdown file with section headers.",
+      "vertical": "knowledge-base",
+      "tier": "scrape",
+      "duration": "long"
+    },
+    {
+      "id": "kb-openapi-extract",
+      "prompt": "Open docs.steel.dev, locate the OpenAPI/Swagger spec, and produce a summary listing each path and method with a one-line description.",
+      "vertical": "knowledge-base",
+      "tier": "scrape",
+      "duration": "short"
+    },
+    {
+      "id": "kb-multipage-summary",
+      "prompt": "Visit playwright.dev/docs/intro and crawl forward through 'Writing tests'. Produce a single 5-bullet executive summary of the entire onboarding flow.",
+      "vertical": "knowledge-base",
+      "tier": "scrape",
+      "duration": "long"
+    },
+    {
+      "id": "gov-grants-ai-research",
+      "prompt": "Open grants.gov, search for active funding opportunities containing 'artificial intelligence', and return the top 5 by award ceiling with agency, deadline, and CFDA number.",
+      "vertical": "non-profit-gov",
+      "tier": "session",
+      "duration": "medium"
+    },
+    {
+      "id": "gov-snap-eligibility",
+      "prompt": "Open fns.usda.gov/snap/recipient/eligibility and report the current gross monthly income limit for a household of 4 in the 48 contiguous states.",
+      "vertical": "non-profit-gov",
+      "tier": "scrape",
+      "duration": "short"
+    },
+    {
+      "id": "gov-data-gov-search",
+      "prompt": "Open data.gov, search for 'broadband adoption', and return the 5 most recently updated datasets with title, agency, and last-modified date.",
+      "vertical": "non-profit-gov",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "gov-fcc-filings",
+      "prompt": "Open the FCC ECFS filings search (fcc.gov/ecfs) and return all comments filed in the past 7 days on Docket 17-108. Include filer name, type, and date.",
+      "vertical": "non-profit-gov",
+      "tier": "session",
+      "duration": "long"
+    },
+    {
+      "id": "gov-census-city-data",
+      "prompt": "Open census.gov, navigate to QuickFacts, and return the 2020 population, median household income, and percent broadband subscription for San Francisco, CA.",
+      "vertical": "non-profit-gov",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "health-fda-approvals",
+      "prompt": "Open fda.gov/drugs/development-approval-process-drugs/novel-drug-approvals-fda and list every novel drug approved this calendar year with name, sponsor, and approval date.",
+      "vertical": "healthcare",
+      "tier": "scrape",
+      "duration": "long"
+    },
+    {
+      "id": "health-clinicaltrials-search",
+      "prompt": "Open clinicaltrials.gov and search for 'GLP-1 obesity'. Return the 5 most recently posted active trials with NCT ID, sponsor, phase, and primary endpoint.",
+      "vertical": "healthcare",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "health-cms-hospital-rating",
+      "prompt": "Open the CMS Hospital Compare tool (medicare.gov/care-compare) and return the overall star rating and patient survey score for UCSF Medical Center.",
+      "vertical": "healthcare",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "health-goodrx-drug-price",
+      "prompt": "Open goodrx.com, search for 'atorvastatin 20mg', enter ZIP 94110, and return the 3 cheapest pharmacies with price and required coupon details.",
+      "vertical": "healthcare",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "travel-flight-compare",
+      "prompt": "Search for the cheapest non-stop flight from SFO to JFK departing 30 days from today on google.com/flights, kayak.com, and skyscanner.com. Return airline, depart/arrive times, and total price for each.",
+      "vertical": "travel-hospitality",
+      "tier": "agent",
+      "duration": "short"
+    },
+    {
+      "id": "travel-hotel-rate-compare",
+      "prompt": "Compare the average nightly rate for a 4-star hotel in Tokyo for the first weekend of next month on booking.com and expedia.com. Return the 5 lowest results from each with hotel name and total stay cost.",
+      "vertical": "travel-hospitality",
+      "tier": "session",
+      "duration": "medium"
+    },
+    {
+      "id": "travel-tripadvisor-restaurants",
+      "prompt": "Open tripadvisor.com, navigate to 'Things to do in Lisbon', and return the top 10 restaurants by rating with cuisine type, price tier, and review count.",
+      "vertical": "travel-hospitality",
+      "tier": "session",
+      "duration": "long"
+    },
+    {
+      "id": "travel-airbnb-listings",
+      "prompt": "Search airbnb.com for stays in Mexico City for 2 guests next weekend. Return the top 10 listings with title, nightly price, total price, and host superhost status.",
+      "vertical": "travel-hospitality",
+      "tier": "session",
+      "duration": "medium"
+    },
+    {
+      "id": "hr-careers-pages-aggregate",
+      "prompt": "Visit the careers pages of Anthropic, OpenAI, Cohere, and Mistral. Aggregate every open Senior or Staff Engineer role into a single CSV with company, title, location, and posting date.",
+      "vertical": "hr-recruiting",
+      "tier": "session",
+      "duration": "long"
+    },
+    {
+      "id": "hr-glassdoor-reviews",
+      "prompt": "Open glassdoor.com and find the company page for Stripe. Return the overall rating, CEO approval, and the most-helpful pro and con review of the past year.",
+      "vertical": "hr-recruiting",
+      "tier": "session",
+      "duration": "long"
+    },
+    {
+      "id": "hr-yc-jobs-search",
+      "prompt": "Open workatastartup.com, filter to AI/ML roles in San Francisco, and return the top 10 listings with company, title, salary range (if posted), and YC batch.",
+      "vertical": "hr-recruiting",
+      "tier": "session",
+      "duration": "long"
+    },
+    {
+      "id": "sports-epl-standings",
+      "prompt": "Open premierleague.com, return the current league table (rank, team, played, GD, points), and the top 5 scorers with goals and assists.",
+      "vertical": "sports-entertainment",
+      "tier": "scrape",
+      "duration": "medium"
+    },
+    {
+      "id": "sports-nba-schedule",
+      "prompt": "Open nba.com/schedule, find this week's games for the Golden State Warriors, and return tipoff time, opponent, venue, and broadcaster for each.",
+      "vertical": "sports-entertainment",
+      "tier": "scrape",
+      "duration": "medium"
+    },
+    {
+      "id": "sports-concert-availability",
+      "prompt": "Open ticketmaster.com and search for an upcoming Taylor Swift show in any city. For the first event listed, report the cheapest available seat tier and price.",
+      "vertical": "sports-entertainment",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "misc-arxiv-recent-papers",
+      "prompt": "Open arxiv.org/list/cs.AI/recent and return the 10 most recent papers with title, authors, abstract first sentence, and submission date.",
+      "vertical": "misc",
+      "tier": "scrape",
+      "duration": "short"
+    },
+    {
+      "id": "misc-wikipedia-fact-extract",
+      "prompt": "Open the Wikipedia article for 'Web browser', and return its lead-paragraph summary, the founding year of the first web browser mentioned, and the names of the first 3 browsers listed in the history section.",
+      "vertical": "misc",
+      "tier": "scrape",
+      "duration": "short"
+    },
+    {
+      "id": "misc-youtube-video-meta",
+      "prompt": "Open youtube.com, search for 'Anthropic Claude demo', and return the title, channel, publish date, and view count of the top 5 results.",
+      "vertical": "misc",
+      "tier": "session",
+      "duration": "short"
+    },
+    {
+      "id": "rpa-cross-app-report",
+      "prompt": "Open both linear.app/changelog and github.com/anthropics/claude-code/releases. Compile a single markdown changelog covering the past 14 days from each source, sorted by date.",
+      "vertical": "rpa-workflow",
+      "tier": "agent",
+      "duration": "short"
+    },
+    {
+      "id": "rpa-scheduled-report-download",
+      "prompt": "Open data.bls.gov, locate the most recent monthly Employment Situation report, download the PDF, and return the headline unemployment rate from the first page.",
+      "vertical": "rpa-workflow",
+      "tier": "session",
+      "duration": "short"
+    }
+  ]
+}

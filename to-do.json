@@ -200,7 +200,7 @@
       "title": "Create the thin helper module system for forms, clicks, uploads, and tables",
       "priority": 2,
       "status": "done",
-      "details": "Completed browser helpers task. Implemented thin code-generation helpers for forms (fill, select, check), clicks (by text, by selector), file uploads, and table extraction. All helpers return JS code strings for browser.exec(), keeping the code-first action language intact. 28 tests covering escaping, events, selectors, and edge cases.",
+      "details": "A helper-module spike was completed, but the helpers stayed test-only and were later removed during dead-code cleanup to keep the runtime surface code-first and minimal.",
       "steps": [
         "Before coding, reread MANIFESTO.md and SPECS.md sections 10-12, 15, 21, 26, and 28; reject helper designs that hide causality or become a DSL.",
         "Implement minimal helpers for visible-text clicks, label-based form filling, file uploads, table extraction, dialogs, downloads, and common wait patterns only where repeated noise is real.",
@@ -212,12 +212,7 @@
         "browser",
         "helpers"
       ],
-      "files": [
-        "src/browser/helpers/forms.ts",
-        "src/browser/helpers/clicks.ts",
-        "src/browser/helpers/uploads.ts",
-        "src/browser/helpers/tables.ts"
-      ],
+      "files": [],
       "depends_on": [
         "T006"
       ],
@@ -273,10 +268,7 @@
         "artifacts",
         "observability"
       ],
-      "files": [
-        "src/trace/events.ts",
-        "src/trace/artifacts.ts"
-      ],
+      "files": [],
       "depends_on": [
         "T003",
         "T005",
@@ -431,7 +423,6 @@
       "files": [
         "src/agent/branching.ts",
         "src/experiments/hypotheses.ts",
-        "src/experiments/ablations.ts",
         "src/experiments/summaries.ts"
       ],
       "depends_on": [
@@ -443,10 +434,10 @@
     },
     {
       "id": "T015",
-      "title": "Implement compare-view data generation across runs",
+      "title": "Explore compare-view data generation across runs",
       "priority": 2,
       "status": "done",
-      "details": "Completed compare-view task. compareRuns generates normalized RunComparison data with status, classification, step count, duration, and artifact counts across two runs. ComparisonSpec dimensions drive the comparison axes.",
+      "details": "A compare-view prototype was explored, but no CLI or UI consumer shipped. The dead prototype was removed during cleanup to keep the surface aligned with live features.",
       "steps": [
         "Before coding, reread MANIFESTO.md and SPECS.md sections 13, 15, 20, 23-24, 27, and 28; list the dimensions required to compare runs meaningfully.",
         "Define comparison specs for end state, step count, latency, artifacts, profile used, helper version, path taken, policy/approval events, and hypothesis association.",
@@ -459,9 +450,7 @@
         "compare",
         "experiments"
       ],
-      "files": [
-        "src/trace/compare.ts"
-      ],
+      "files": [],
       "depends_on": [
         "T009",
         "T013",

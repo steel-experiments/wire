@@ -3,6 +3,7 @@ import type {
   ActionId,
   ApprovalRequest,
   JsonObject,
+  LlmUsage,
   ProposedAction,
   ProposedActionDetail,
   Run,
@@ -137,6 +138,7 @@ export interface LoopResult {
   startedAt: string;
   pendingApproval?: ApprovalRequest;
   pendingAction?: ProposedAction;
+  usage?: LlmUsage;
 }
 
 export { type ProposedAction } from "../shared/types.js";
@@ -781,6 +783,25 @@ export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): Lo
   }
   if (options.pendingAction) {
     result.pendingAction = options.pendingAction;
+  }
+
+  // Aggregate LLM usage from trace events
+  const usageEvents = state.events.filter((e) => e.kind === "llm-usage");
+  if (usageEvents.length > 0) {
+    let promptTokens = 0;
+    let completionTokens = 0;
+    for (const e of usageEvents) {
+      const u = e.payload.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+      if (u) {
+        promptTokens += u.inputTokens ?? 0;
+        completionTokens += u.outputTokens ?? 0;
+      }
+    }
+    result.usage = {
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+    };
   }
 
   return result;

@@ -33,6 +33,7 @@ export type TraceEventKind =
   | "approval-result"
   | "skill-load"
   | "skill-proposal"
+  | "llm-usage"
   | "error";
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired";
 export type PolicyDecisionResult = "allow" | "deny" | "require-approval";
@@ -64,6 +65,13 @@ export type ActionKind =
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
 export type JsonObject = { [key: string]: JsonValue };
+
+export interface LlmUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  extras?: Record<string, number>;
+}
 
 export type IdPrefix =
   | "action"

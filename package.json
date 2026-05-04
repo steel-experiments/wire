@@ -14,6 +14,15 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./runtime": "./dist/agent/runtime.js",
+    "./types": "./dist/shared/types.js",
+    "./browser": "./dist/browser/bridge.js",
+    "./providers/steel": "./dist/providers/browser/steel.js",
+    "./providers/openai": "./dist/providers/llm/openai.js",
+    "./policy": "./dist/policy/engine.js"
+  },
   "files": [
     "dist"
   ],
@@ -23,7 +32,8 @@
     "check": "pnpm run typecheck && pnpm run test",
     "lint": "pnpm run typecheck",
     "test": "node --import tsx --test 'src/**/*.test.ts'",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "emit-schema": "tsx benchmarks/emit-schema.ts"
   },
   "dependencies": {
     "zod": "^4.1.12"

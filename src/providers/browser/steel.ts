@@ -20,6 +20,7 @@ export interface SteelProviderConfig {
   webSocketFactory?: (url: string) => WebSocketLike;
   cdpCommandTimeoutMs?: number;
   onRetry?: (event: SteelRetryEvent) => void | Promise<void>;
+  logger?: SteelLogger;
 }
 
 export interface SteelRetryEvent {
@@ -29,6 +30,11 @@ export interface SteelRetryEvent {
   delayMs: number;
   status: number;
   message: string;
+}
+
+export interface SteelLogger {
+  error?(message: string, context?: Record<string, unknown>): void;
+  warn?(message: string, context?: Record<string, unknown>): void;
 }
 
 const DEFAULT_BASE_URL = "https://api.steel.dev/v1";
@@ -243,6 +249,7 @@ export class SteelProvider implements BrowserProvider {
   private readonly webSocketFactory: (url: string) => WebSocketLike;
   private readonly cdpCommandTimeoutMs: number;
   private readonly onRetry: ((event: SteelRetryEvent) => void | Promise<void>) | undefined;
+  private readonly logger: SteelLogger | undefined;
 
   constructor(config: SteelProviderConfig) {
     this.apiKey = config.apiKey;
@@ -250,6 +257,7 @@ export class SteelProvider implements BrowserProvider {
     this.webSocketFactory = config.webSocketFactory ?? ((url) => new WebSocket(url) as unknown as WebSocketLike);
     this.cdpCommandTimeoutMs = config.cdpCommandTimeoutMs ?? DEFAULT_CDP_COMMAND_TIMEOUT_MS;
     this.onRetry = config.onRetry;
+    this.logger = config.logger;
   }
 
   async createSession(input: CreateSessionInput = {}): Promise<BrowserSession> {
@@ -322,7 +330,7 @@ export class SteelProvider implements BrowserProvider {
   async observe(input: BrowserObserveInput): Promise<BrowserObservation> {
     const session = this.withAuth(await this.getSession(input.sessionId));
 
-    return withConnection(this.webSocketFactory, session, this.cdpCommandTimeoutMs, async (cdp) => {
+    return withConnection(this.webSocketFactory, session, this.cdpCommandTimeoutMs, this.logger, async (cdp) => {
       const targets = await listPageTargets(cdp);
       const target = pickTarget(targets, input.targetId);
       const sessionId = await attachToTarget(cdp, target.targetId);
@@ -374,7 +382,7 @@ export class SteelProvider implements BrowserProvider {
   async exec(input: BrowserExecRequest): Promise<BrowserExecResult> {
     const session = this.withAuth(await this.getSession(input.sessionId));
 
-    return withConnection(this.webSocketFactory, session, this.cdpCommandTimeoutMs, async (cdp) => {
+    return withConnection(this.webSocketFactory, session, this.cdpCommandTimeoutMs, this.logger, async (cdp) => {
       const startedAt = Date.now();
       const targets = await listPageTargets(cdp);
       const selected = pickExecTargets(targets, input.target);
@@ -417,7 +425,7 @@ export class SteelProvider implements BrowserProvider {
 
   async raw(input: BrowserRawRequest): Promise<unknown> {
     const session = this.withAuth(await this.getSession(input.sessionId));
-    return withConnection(this.webSocketFactory, session, this.cdpCommandTimeoutMs, async (cdp) => {
+    return withConnection(this.webSocketFactory, session, this.cdpCommandTimeoutMs, this.logger, async (cdp) => {
       const needsTargetSession = cdpMethodNeedsTargetSession(input.method);
       if (needsTargetSession) {
         const targets = await listPageTargets(cdp);
@@ -441,7 +449,7 @@ export class SteelProvider implements BrowserProvider {
     commands: Array<{ method: string; params?: Record<string, unknown> }>,
   ): Promise<unknown> {
     const session = this.withAuth(await this.getSession(sessionId));
-    return withConnection(this.webSocketFactory, session, this.cdpCommandTimeoutMs, async (cdp) => {
+    return withConnection(this.webSocketFactory, session, this.cdpCommandTimeoutMs, this.logger, async (cdp) => {
       const needsTarget = commands.some((c) => cdpMethodNeedsTargetSession(c.method));
       let targetSessionId: string | undefined;
       if (needsTarget) {
@@ -720,18 +728,21 @@ class CdpConnection {
   constructor(
     private readonly socket: WebSocketLike,
     private readonly commandTimeoutMs: number,
+    private readonly logger?: SteelLogger,
   ) {
     this.ready = new Promise((resolve, reject) => {
       this.socket.onopen = () => resolve();
       this.socket.onerror = (event) => {
-        const detail = event && typeof event === "object"
-          ? (event.message || event.error?.message || event.code || event.type || "")
-          : "";
-        const message = detail
-          ? `Steel CDP WebSocket error: ${detail}`
-          : "Steel CDP WebSocket error (no detail from event)";
+        const parts: string[] = [];
+        if (event && typeof event === "object") {
+          if (event.message) parts.push(`message=${event.message}`);
+          if (event.error?.message) parts.push(`error=${event.error.message}`);
+          if (event.code) parts.push(`code=${event.code}`);
+        }
+        const detail = parts.length > 0 ? parts.join(" ") : "no detail (likely session expired)";
+        const message = `Steel CDP WebSocket error: ${detail}`;
         const error = new Error(message);
-        console.error(`[steel:ws] ${message}`);
+        this.logger?.error?.(`steel:ws ${message}`);
         this.rejectPending(error);
         reject(error);
       };
@@ -746,7 +757,7 @@ class CdpConnection {
         ].filter(Boolean).join(" ");
         const message = `Steel CDP socket closed${detail ? ` (${detail})` : ""}`;
         if (this.pending.size > 0) {
-          console.error(`[steel:ws] ${message} — ${this.pending.size} pending command(s) aborted`);
+          this.logger?.error?.(`steel:ws ${message} — ${this.pending.size} pending command(s) aborted`);
         }
         this.rejectPending(new Error(message));
       };
@@ -826,13 +837,14 @@ async function withConnection<T>(
   webSocketFactory: (url: string) => WebSocketLike,
   session: BrowserSession,
   commandTimeoutMs: number,
+  logger: SteelLogger | undefined,
   run: (cdp: CdpConnection) => Promise<T>,
 ): Promise<T> {
   if (!session.wsUrl) {
     throw new Error("Steel session missing wsUrl");
   }
 
-  const cdp = new CdpConnection(webSocketFactory(session.wsUrl), commandTimeoutMs);
+  const cdp = new CdpConnection(webSocketFactory(session.wsUrl), commandTimeoutMs, logger);
   try {
     return await run(cdp);
   } finally {

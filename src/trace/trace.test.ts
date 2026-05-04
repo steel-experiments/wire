@@ -2,131 +2,9 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import { createId, nowIsoUtc } from "../shared/ids.js";
-import type { ArtifactKind, ComparisonSpec, Run, TraceEvent } from "../shared/types.js";
-
-import {
-  artifactEvent,
-  checkMinimumTraceCoverage,
-  codeExecEvent,
-  codeResultEvent,
-  errorEvent,
-  observationEvent,
-  policyCheckEvent,
-  skillLoadEvent,
-  thoughtSummaryEvent,
-} from "./events.js";
+import type { TraceEvent } from "../shared/types.js";
 import { createArtifactRegistry } from "../storage/artifact-registry.js";
-import { compareRuns } from "./compare.js";
 import { buildTimeline, filterByKind, summarizeTimeline } from "./replay.js";
-
-// ---------------------------------------------------------------------------
-// Events
-// ---------------------------------------------------------------------------
-
-test("thoughtSummaryEvent creates a thought-summary trace event", () => {
-  const runId = createId("run");
-  const event = thoughtSummaryEvent(runId, "Planning next step");
-
-  assert.equal(event.kind, "thought-summary");
-  assert.equal(event.runId, runId);
-  assert.equal(event.payload.summary, "Planning next step");
-});
-
-test("observationEvent creates observation with URL and title", () => {
-  const runId = createId("run");
-  const event = observationEvent(runId, "https://example.com", "Example");
-
-  assert.equal(event.kind, "observation");
-  assert.equal(event.payload.url, "https://example.com");
-  assert.equal(event.payload.title, "Example");
-});
-
-test("observationEvent includes artifact IDs when provided", () => {
-  const runId = createId("run");
-  const aId = createId("artifact");
-  const event = observationEvent(runId, "https://example.com", "Page", [aId]);
-
-  assert.deepEqual(event.payload.artifactIds, [aId]);
-});
-
-test("codeExecEvent captures code and language", () => {
-  const runId = createId("run");
-  const event = codeExecEvent(runId, "return document.title;");
-
-  assert.equal(event.kind, "code-exec");
-  assert.equal(event.payload.code, "return document.title;");
-  assert.equal(event.payload.language, "typescript");
-});
-
-test("codeResultEvent captures success and output", () => {
-  const runId = createId("run");
-  const event = codeResultEvent(runId, true, "Invoice page", undefined, 250);
-
-  assert.equal(event.kind, "code-result");
-  assert.equal(event.payload.ok, true);
-  assert.equal(event.payload.stdout, "Invoice page");
-  assert.equal(event.payload.durationMs, 250);
-});
-
-test("errorEvent captures message and optional code", () => {
-  const runId = createId("run");
-  const event = errorEvent(runId, "Network timeout", "ETIMEDOUT");
-
-  assert.equal(event.kind, "error");
-  assert.equal(event.payload.message, "Network timeout");
-  assert.equal(event.payload.code, "ETIMEDOUT");
-});
-
-test("skillLoadEvent captures skill metadata", () => {
-  const runId = createId("run");
-  const skillId = createId("skill");
-  const event = skillLoadEvent(runId, skillId, "domain", "hostname match");
-
-  assert.equal(event.kind, "skill-load");
-  assert.equal(event.payload.skillId, skillId);
-  assert.equal(event.payload.scope, "domain");
-  assert.equal(event.payload.matchReason, "hostname match");
-});
-
-test("policyCheckEvent captures action and result", () => {
-  const runId = createId("run");
-  const event = policyCheckEvent(runId, "submit-form", "require-approval", "Form submission");
-
-  assert.equal(event.kind, "policy-check");
-  assert.equal(event.payload.actionKind, "submit-form");
-  assert.equal(event.payload.result, "require-approval");
-  assert.equal(event.payload.reason, "Form submission");
-});
-
-// ---------------------------------------------------------------------------
-// Minimum trace coverage
-// ---------------------------------------------------------------------------
-
-test("checkMinimumTraceCoverage passes with required events", () => {
-  const runId = createId("run");
-  const events: TraceEvent[] = [
-    codeExecEvent(runId, "1+1"),
-    observationEvent(runId, "https://example.com", "Example"),
-    policyCheckEvent(runId, "observe", "allow"),
-  ];
-
-  const result = checkMinimumTraceCoverage(events, runId);
-  assert.equal(result.valid, true);
-  assert.deepEqual(result.missing, []);
-});
-
-test("checkMinimumTraceCoverage reports missing event kinds", () => {
-  const runId = createId("run");
-  const events: TraceEvent[] = [
-    thoughtSummaryEvent(runId, "No code or policy"),
-  ];
-
-  const result = checkMinimumTraceCoverage(events, runId);
-  assert.equal(result.valid, false);
-  assert.ok(result.missing.includes("code-exec"));
-  assert.ok(result.missing.includes("observation"));
-  assert.ok(result.missing.includes("policy-check"));
-});
 
 // ---------------------------------------------------------------------------
 // Artifact registry
@@ -174,61 +52,15 @@ test("ArtifactRegistry register without mimeType", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Compare
-// ---------------------------------------------------------------------------
-
-test("compareRuns produces comparison between two runs", () => {
-  const runId1 = createId("run");
-  const runId2 = createId("run");
-
-  const spec: ComparisonSpec = {
-    id: createId("comparison"),
-    lhsRunId: runId1,
-    rhsRunId: runId2,
-    dimensions: ["latency", "outcome"],
-  };
-
-  const run1: Run = {
-    id: runId1,
-    taskId: createId("task"),
-    status: "succeeded",
-    classification: { kind: "task-complete", confidence: 0.9 },
-  };
-
-  const run2: Run = {
-    id: runId2,
-    taskId: createId("task"),
-    status: "failed",
-    classification: { kind: "site-error", confidence: 0.8 },
-  };
-
-  const events1 = [codeExecEvent(runId1, "1")];
-  const events2 = [codeExecEvent(runId2, "2"), codeExecEvent(runId2, "3")];
-
-  const comparison = compareRuns(
-    spec,
-    run1, run2,
-    events1, events2,
-    [], [],
-  );
-
-  assert.equal(comparison.lhs.status, "succeeded");
-  assert.equal(comparison.rhs.status, "failed");
-  assert.equal(comparison.lhs.stepCount, 1);
-  assert.equal(comparison.rhs.stepCount, 2);
-  assert.deepEqual(comparison.dimensions, ["latency", "outcome"]);
-});
-
-// ---------------------------------------------------------------------------
 // Replay
 // ---------------------------------------------------------------------------
 
 test("buildTimeline creates replay timeline from events", () => {
   const runId = createId("run");
   const events: TraceEvent[] = [
-    observationEvent(runId, "https://a.com", "A"),
-    codeExecEvent(runId, "1+1"),
-    observationEvent(runId, "https://b.com", "B"),
+    makeEvent(runId, "observation", { url: "https://a.com", title: "A" }, "2026-01-01T00:00:00.000Z"),
+    makeEvent(runId, "code-exec", { code: "1+1" }, "2026-01-01T00:00:01.000Z"),
+    makeEvent(runId, "observation", { url: "https://b.com", title: "B" }, "2026-01-01T00:00:02.000Z"),
   ];
 
   const timeline = buildTimeline(events, runId);
@@ -243,8 +75,8 @@ test("buildTimeline filters to specific runId", () => {
   const run1 = createId("run");
   const run2 = createId("run");
   const events: TraceEvent[] = [
-    observationEvent(run1, "https://a.com", "A"),
-    codeExecEvent(run2, "1+1"),
+    makeEvent(run1, "observation", { url: "https://a.com", title: "A" }, "2026-01-01T00:00:00.000Z"),
+    makeEvent(run2, "code-exec", { code: "1+1" }, "2026-01-01T00:00:01.000Z"),
   ];
 
   const timeline = buildTimeline(events, run1);
@@ -254,9 +86,9 @@ test("buildTimeline filters to specific runId", () => {
 test("filterByKind returns events of specific type", () => {
   const runId = createId("run");
   const events: TraceEvent[] = [
-    observationEvent(runId, "https://a.com", "A"),
-    codeExecEvent(runId, "1+1"),
-    observationEvent(runId, "https://b.com", "B"),
+    makeEvent(runId, "observation", { url: "https://a.com", title: "A" }, "2026-01-01T00:00:00.000Z"),
+    makeEvent(runId, "code-exec", { code: "1+1" }, "2026-01-01T00:00:01.000Z"),
+    makeEvent(runId, "observation", { url: "https://b.com", title: "B" }, "2026-01-01T00:00:02.000Z"),
   ];
 
   const filtered = filterByKind(events, "observation");
@@ -266,8 +98,8 @@ test("filterByKind returns events of specific type", () => {
 test("summarizeTimeline produces readable summary", () => {
   const runId = createId("run");
   const events: TraceEvent[] = [
-    observationEvent(runId, "https://a.com", "A"),
-    codeExecEvent(runId, "1+1"),
+    makeEvent(runId, "observation", { url: "https://a.com", title: "A" }, "2026-01-01T00:00:00.000Z"),
+    makeEvent(runId, "code-exec", { code: "1+1" }, "2026-01-01T00:00:01.000Z"),
   ];
 
   const timeline = buildTimeline(events, runId);
@@ -277,3 +109,18 @@ test("summarizeTimeline produces readable summary", () => {
   assert.ok(summary.includes("code-exec: 1"));
   assert.ok(summary.includes("Events: 2"));
 });
+
+function makeEvent(
+  runId: TraceEvent["runId"],
+  kind: TraceEvent["kind"],
+  payload: TraceEvent["payload"],
+  ts = nowIsoUtc(),
+): TraceEvent {
+  return {
+    id: createId("event"),
+    runId,
+    ts,
+    kind,
+    payload,
+  };
+}
