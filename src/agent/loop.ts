@@ -564,6 +564,7 @@ export async function executeStep(
           payload: {
             ok,
             durationMs: Date.now() - startedAt,
+            source: "raw",
             commandsRequested,
             truncated: commandsRequested > commandsToRun.length,
             ...(ok ? { commandsExecuted: commandsToRun.length } : {}),
@@ -643,25 +644,25 @@ function hasMeaningfulPayload(payload: TraceEvent["payload"]): boolean {
   return true;
 }
 
-// Wire's internal control envelopes — not final answers. Catches both the
-// pre-dispatch wireActions shape {wireActions:[...]} and the post-dispatch
-// CDP nav ack {frameId, loaderId} that comes back from Page.navigate.
+// Pre-dispatch wireActions envelope returned BY THE AGENT'S OWN CODE
+// (e.g. `return {wireActions: [...]}`). Distinct from the post-dispatch
+// CDP ack — those are filtered upstream via payload.source ∈ {"wireActions","raw"}.
 function looksLikeWireCommand(returnValue: unknown): boolean {
   if (!returnValue || typeof returnValue !== "object" || Array.isArray(returnValue)) {
     return false;
   }
-  const obj = returnValue as Record<string, unknown>;
-  if (Array.isArray(obj["wireActions"])) return true;
-  const keys = Object.keys(obj);
-  if (keys.length === 0 || keys.length > 3) return false;
-  const navAckKeys = new Set(["frameId", "loaderId", "errorText"]);
-  return keys.every((k) => navAckKeys.has(k));
+  return Array.isArray((returnValue as Record<string, unknown>)["wireActions"]);
 }
 
 export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | undefined {
+  // Exclude wire's CDP-dispatch code-results entirely — those are control-plane
+  // events ({frameId, loaderId} etc.), never the agent's answer. The source tag
+  // is set by both the wireActions branch and the raw-action branch in executeStep.
   const candidates = [...events].reverse().filter((event) =>
     event.kind === "code-result" &&
     event.payload.ok === true &&
+    event.payload.source !== "wireActions" &&
+    event.payload.source !== "raw" &&
     (
       typeof event.payload.stdout === "string" ||
       event.payload.returnValue !== undefined
@@ -670,7 +671,7 @@ export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | 
 
   // Three-tier preference: meaningful + not-error-shaped + not-a-wire-command,
   // then merely meaningful, then anything. Empty payloads ({}, [], "") and
-  // wireActions envelopes don't answer the task.
+  // agent-emitted wireActions envelopes don't answer the task.
   const latestAnswerEvent =
     candidates.find((event) =>
       hasMeaningfulPayload(event.payload) &&

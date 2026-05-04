@@ -2788,6 +2788,34 @@ test("finalizeRun falls back to wireActions envelope when nothing else is meanin
   assert.ok(result.run.result?.includes("wireActions"), "expected fallback to envelope when nothing better exists");
 });
 
+test("finalizeRun skips raw-action CDP results when picking final result", () => {
+  // The `raw` action emits code-results with source: "raw" — these are
+  // control-plane (CDP method dispatch) events, not the agent's answer.
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+
+  state.events.push(
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, durationMs: 10, returnValue: { extracted: "real answer" } },
+    },
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, durationMs: 5, source: "raw", returnValue: { frameId: "X", loaderId: "Y" } },
+    },
+  );
+
+  const result = finalizeRun(state);
+  assert.ok(result.run.result?.includes("real answer"), `expected to skip raw CDP result: ${result.run.result}`);
+  assert.ok(!result.run.result?.includes("frameId"));
+});
+
 test("finalizeRun skips bare CDP nav-ack {frameId, loaderId} when picking final result", () => {
   // Repro of the Amazon run: the agent extracted real product data, then
   // wireActions-navigated to the review page. The nav ack returned
@@ -2810,7 +2838,7 @@ test("finalizeRun skips bare CDP nav-ack {frameId, loaderId} when picking final 
       runId: state.run.id,
       ts: new Date().toISOString(),
       kind: "code-result",
-      payload: { ok: true, durationMs: 5, returnValue: { frameId: "ABC123", loaderId: "DEF456" } },
+      payload: { ok: true, durationMs: 5, source: "wireActions", returnValue: { frameId: "ABC123", loaderId: "DEF456" } },
     },
   );
 
