@@ -3,11 +3,11 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { executeTask } from "./runtime.js";
-import type { RuntimeConfig } from "./runtime.js";
+import type { RuntimeConfig, UserMessageInbox } from "./runtime.js";
 import type { BrowserProvider, BrowserObserveInput } from "../browser/bridge.js";
 import type { ActionHandler } from "./actions.js";
 import type { PolicyEngine } from "../policy/engine.js";
-import type { LLMProvider, ChatResponse } from "../providers/llm/openai.js";
+import type { LLMProvider, ChatMessage, ChatResponse } from "../providers/llm/openai.js";
 import { createId } from "../shared/ids.js";
 import type { Task, BrowserSession, BrowserObservation } from "../shared/types.js";
 
@@ -186,6 +186,54 @@ test("executeTask does not emit a resume event when cancellation ends a pause", 
   assert.ok(reasons.includes("Paused for user takeover"), "should emit a pause event");
   assert.ok(reasons.includes("User cancelled"), "should emit a cancel event");
   assert.ok(!reasons.includes("Resumed after user takeover"), "should not emit a resume event after cancellation");
+});
+
+// ---------------------------------------------------------------------------
+// userMessageInbox
+// ---------------------------------------------------------------------------
+
+test("executeTask drains userMessageInbox into 'user-message' trace events", async () => {
+  const queued = ["Use my work email", "skip the second result"];
+  const inbox: UserMessageInbox = { pop: () => queued.shift() ?? null };
+  const config = makeConfig({ userMessageInbox: inbox });
+
+  const result = await executeTask(makeTask(), config);
+
+  const userMsgEvents = result.events.filter((e) => e.kind === "user-message");
+  assert.equal(userMsgEvents.length, 2);
+  assert.equal(userMsgEvents[0]!.payload.message, "Use my work email");
+  assert.equal(userMsgEvents[1]!.payload.message, "skip the second result");
+});
+
+test("user-message events appear in recentTraces summary with 'user said:' prefix", async () => {
+  const queued = ["Use my work email"];
+  const inbox: UserMessageInbox = { pop: () => queued.shift() ?? null };
+  const promptsReceived: string[] = [];
+  let callCount = 0;
+
+  const mockLlm: LLMProvider = {
+    model: "test-model",
+    async chat(messages: ChatMessage[]): Promise<ChatResponse> {
+      callCount++;
+      const userMsg = messages.find((m) => m.role === "user")!;
+      const text = typeof userMsg.content === "string"
+        ? userMsg.content
+        : userMsg.content.map((p) => (p.type === "text" ? p.text : "")).join("");
+      promptsReceived.push(text);
+      const action = callCount === 1
+        ? { kind: "exec", summary: "Extract", payload: { code: "document.title" } }
+        : { kind: "finish", summary: "Done — extracted the answer" };
+      return { content: JSON.stringify(action), model: "test-model" };
+    },
+  };
+
+  const config = makeConfig({ llmProvider: mockLlm, userMessageInbox: inbox, maxSteps: 5 });
+  await executeTask(makeTask(), config);
+
+  assert.ok(
+    promptsReceived.some((p) => p.includes("user said: Use my work email")),
+    "LLM-facing prompt should include 'user said: <text>' summary line",
+  );
 });
 
 // ---------------------------------------------------------------------------

@@ -49,6 +49,8 @@ export interface ContextBundle {
   repeatSignal?: { sameSig: number; sameResult: number; noProgress: number };
   sessionCapabilities?: Record<string, unknown>;
   providerActions?: Array<{ kind: string; description: string }>;
+  /** Last N user messages, newest first. */
+  userMessages?: string[];
 }
 
 import { redactSecrets } from "../shared/redact.js";
@@ -118,6 +120,15 @@ export function assembleSystemPrompt(context: ContextBundle): string {
  */
 export function assembleUserPrompt(context: ContextBundle): string {
   const sections: string[] = [];
+
+  if (context.userMessages && context.userMessages.length > 0) {
+    sections.push(
+      "Recent user messages (most recent first):\n" +
+        context.userMessages.map((m) => `- ${redactSecrets(m)}`).join("\n") +
+        "\n\nThese are direct instructions from the user. Treat them as authoritative " +
+        "for plan adjustments unless they conflict with the policy engine.",
+    );
+  }
 
   if (context.plan && context.plan.trim().length > 0) {
     sections.push(`Execution plan:\n${redactSecrets(context.plan)}`);

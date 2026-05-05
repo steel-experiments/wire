@@ -68,6 +68,14 @@ export interface PauseToken {
   waitWhilePaused(): Promise<void>;
 }
 
+// One-way channel for delivering user messages into a running task. The loop
+// drains messages at the top of each iteration; messages become `user-message`
+// trace events visible to the next planner step. Implementations are
+// caller-owned — a typical implementation is a mutable array exposed via pop().
+export interface UserMessageInbox {
+  pop(): string | null;
+}
+
 export interface RuntimeConfig {
   provider: BrowserProvider;
   policyEngine: PolicyEngine;
@@ -84,6 +92,7 @@ export interface RuntimeConfig {
   keepSessionOpen?: boolean;
   cancelSignal?: AbortSignal;
   pauseToken?: PauseToken;
+  userMessageInbox?: UserMessageInbox;
   existingSession?: BrowserSession;
   releaseExistingSessionOnExit?: boolean;
 }
@@ -281,6 +290,9 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number, a
         case "error":
           summary = `${String(e.payload.code ?? "error")}: ${String(e.payload.message ?? "")}`;
           break;
+        case "user-message":
+          summary = `user said: ${String(e.payload.message ?? "")}`;
+          break;
         default:
           summary = String(e.payload.summary ?? e.kind);
       }
@@ -314,6 +326,15 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number, a
 
     if (actionRegistry) {
       context.providerActions = actionRegistry.descriptions();
+    }
+
+    const recentUserMessages = state.events
+      .filter((e) => e.kind === "user-message")
+      .slice(-3)
+      .reverse()
+      .map((e) => String(e.payload.message ?? ""));
+    if (recentUserMessages.length > 0) {
+      context.userMessages = recentUserMessages;
     }
 
     // Compute state diff for progress detection
@@ -687,6 +708,22 @@ async function runMainLoop(
         });
         await flushTraceSink(state, config, signals);
       }
+    }
+
+    // Drain pending user messages into the trace stream so the next planner
+    // step sees them as recent traces.
+    if (config.userMessageInbox) {
+      let msg: string | null;
+      while ((msg = config.userMessageInbox.pop()) !== null) {
+        state.events.push({
+          id: createId("event"),
+          runId: state.run.id,
+          ts: nowIsoUtc(),
+          kind: "user-message",
+          payload: { message: msg },
+        });
+      }
+      await flushTraceSink(state, config, signals);
     }
 
     // Check stopping conditions

@@ -390,3 +390,16 @@ test("assembleUserPrompt omits repeat warning when streak is short", () => {
   const prompt = assembleUserPrompt(context);
   assert.ok(!/REPEATING|STUCK|STALLED/.test(prompt));
 });
+
+test("assembleUserPrompt includes recent user messages section when present", () => {
+  const context = makeContext({ userMessages: ["Use my work email", "skip second result"] });
+  const prompt = assembleUserPrompt(context);
+  assert.match(prompt, /Recent user messages/u);
+  assert.match(prompt, /Use my work email/u);
+  assert.match(prompt, /skip second result/u);
+});
+
+test("assembleUserPrompt omits the user messages section when no user messages", () => {
+  const prompt = assembleUserPrompt(makeContext({}));
+  assert.doesNotMatch(prompt, /Recent user messages/u);
+});

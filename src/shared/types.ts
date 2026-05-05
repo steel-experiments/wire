@@ -34,6 +34,7 @@ export type TraceEventKind =
   | "skill-load"
   | "skill-proposal"
   | "llm-usage"
+  | "user-message"
   | "error";
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired";
 export type PolicyDecisionResult = "allow" | "deny" | "require-approval";
