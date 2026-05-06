@@ -12,7 +12,8 @@ import type { SkillFrontmatter, SkillMetadata } from "../shared/types.js";
 import { loadSkillDocsFromDir, loadSkillsFromDir, findMatchingSkills, setSkillLoadWarningSink } from "./loader.js";
 import { matchSkillsByHostname, matchSkillsByTags, scoreSkills, sortByRelevance } from "./matcher.js";
 import { extractSections, parseSkillFile } from "./parser.js";
-import { manageSkillPromotion, promoteSkill, generateSkillProposal, writeSkillProposal, type PromotionCandidate } from "./promote.js";
+import { manageSkillPromotion, promoteSkill, generateSkillProposal, writeSkillProposal, parseSkillProposalResponse, hasReusableSignal, type PromotionCandidate } from "./promote.js";
+import { mergeStats, readSkillStats, writeSkillStats, updateSkillStatsFromRun, DEFAULT_STATS, type SkillStats } from "./stats.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -693,6 +694,7 @@ function makeCandidate(overrides: Partial<PromotionCandidate> = {}): PromotionCa
   return {
     skillId: createId("skill"),
     hostname: "example.com",
+    workflow: [],
     facts: ["Page has a heading"],
     selectors: ["h1"],
     routes: ["/"],
@@ -902,4 +904,323 @@ test("writeSkillProposal validates generated frontmatter before writing", async 
     () => writeSkillProposal(makeCandidate({ skillId: "bad" as PromotionCandidate["skillId"] }), dir),
     /Expected skill_\* id/u,
   );
+});
+
+// ---------------------------------------------------------------------------
+// Milestone 1: Workflow Generation
+// ---------------------------------------------------------------------------
+
+test("parseSkillProposalResponse accepts workflow array", () => {
+  const runId = createId("run");
+  const json = JSON.stringify({
+    hostname: "example.com",
+    workflow: [
+      "Fetch https://api.example.com/v2/search?q={query}",
+      "Parse response.data.items[] for id and title.",
+      "Fall back to browser when the API returns empty.",
+    ],
+    facts: ["API is public, no auth needed."],
+    selectors: [],
+    routes: ["/api/v2/search"],
+    waits: [],
+    traps: [],
+    confidence: 0.85,
+  });
+
+  const result = parseSkillProposalResponse(json, runId);
+  assert.ok(result);
+  assert.equal(result!.workflow.length, 3);
+  assert.equal(result!.workflow[0], "Fetch https://api.example.com/v2/search?q={query}");
+  assert.equal(result!.sourceRunId, runId);
+});
+
+test("parseSkillProposalResponse tolerates missing workflow", () => {
+  const runId = createId("run");
+  const json = JSON.stringify({
+    hostname: "example.com",
+    facts: ["Page has a heading"],
+    selectors: [],
+    routes: [],
+    waits: [],
+    traps: [],
+    confidence: 0.7,
+  });
+
+  const result = parseSkillProposalResponse(json, runId);
+  assert.ok(result);
+  assert.deepEqual(result!.workflow, []);
+});
+
+test("parseSkillProposalResponse ignores non-array workflow", () => {
+  const runId = createId("run");
+  const json = JSON.stringify({
+    hostname: "example.com",
+    workflow: "not an array",
+    facts: [],
+    selectors: [],
+    routes: [],
+    waits: [],
+    traps: [],
+    confidence: 0.7,
+  });
+
+  const result = parseSkillProposalResponse(json, runId);
+  assert.ok(result);
+  assert.deepEqual(result!.workflow, []);
+});
+
+test("parseSkillProposalResponse filters non-string workflow entries", () => {
+  const runId = createId("run");
+  const json = JSON.stringify({
+    hostname: "example.com",
+    workflow: ["Valid step", 42, null, "Another step"],
+    facts: [],
+    selectors: [],
+    routes: [],
+    waits: [],
+    traps: [],
+    confidence: 0.7,
+  });
+
+  const result = parseSkillProposalResponse(json, runId);
+  assert.ok(result);
+  assert.deepEqual(result!.workflow, ["Valid step", "Another step"]);
+});
+
+test("generateSkillProposal emits Workflow before other sections", () => {
+  const candidate = makeCandidate({
+    workflow: [
+      "Fetch the API at /api/search.",
+      "Parse the JSON response.",
+      "Fall back to browser when rate-limited.",
+    ],
+    facts: ["API returns JSON."],
+    traps: ["Rate limit at 100 req/min."],
+  });
+
+  const md = generateSkillProposal(candidate);
+  assert.match(md, /## Workflow/u);
+  assert.ok(md.indexOf("## Workflow") < md.indexOf("## Facts"), "Workflow must come before Facts");
+  assert.match(md, /1\. Fetch the API at \/api\/search\./u);
+  assert.match(md, /3\. Fall back to browser when rate-limited\./u);
+});
+
+test("generateSkillProposal omits Workflow section when workflow is empty", () => {
+  const candidate = makeCandidate({ workflow: [], facts: ["A fact."] });
+  const md = generateSkillProposal(candidate);
+  assert.ok(!md.includes("## Workflow"));
+  assert.match(md, /## Facts/u);
+});
+
+test("hasReusableSignal returns true for workflow-only candidates", () => {
+  const candidate = makeCandidate({
+    workflow: ["Step one."],
+    facts: [],
+    selectors: [],
+    routes: [],
+    waits: [],
+    traps: [],
+  });
+
+  assert.equal(hasReusableSignal(candidate), true);
+});
+
+test("hasReusableSignal returns false when all fields including workflow are empty", () => {
+  const candidate = makeCandidate({
+    workflow: [],
+    facts: [],
+    selectors: [],
+    routes: [],
+    waits: [],
+    traps: [],
+  });
+
+  assert.equal(hasReusableSignal(candidate), false);
+});
+
+test("promoteSkill rejects workflow containing secrets", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+
+  const candidate = makeCandidate({
+    workflow: ["Fetch the API with api_key=sk-abc123def456ghi789jkl."],
+  });
+  await assert.rejects(
+    () => promoteSkill(candidate, dir),
+    /secret patterns detected/u,
+  );
+});
+
+test("generated skill with workflow loads and surfaces workflow in sections", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+
+  const candidate = makeCandidate({
+    workflow: [
+      "Navigate to /search.",
+      "Fill the search input and submit.",
+    ],
+    facts: ["Search results are JS-rendered."],
+    confidence: 0.95,
+  });
+
+  await promoteSkill(candidate, dir);
+
+  const docs = await loadSkillDocsFromDir(dir);
+  assert.equal(docs.length, 1);
+  assert.ok(docs[0]!.sections["Workflow"]);
+  assert.match(docs[0]!.sections["Workflow"]!, /Navigate to \/search/u);
+  assert.ok(docs[0]!.sections["Facts"]);
+});
+
+test("existing skills without workflow still parse and load", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  await mkdir(dir, { recursive: true });
+
+  // Write an old-style skill with no workflow section
+  await writeFile(join(dir, "legacy.md"), STRIPE_SKILL_MD, "utf-8");
+
+  const skills = await loadSkillDocsFromDir(dir);
+  assert.equal(skills.length, 1);
+  assert.equal(skills[0]!.id, "skill_stripe-dashboard");
+  assert.ok(!skills[0]!.sections["Workflow"]);
+  assert.ok(skills[0]!.sections["Durable facts"]);
+});
+
+// ---------------------------------------------------------------------------
+// Milestone 5: Skill Effectiveness Signals
+// ---------------------------------------------------------------------------
+
+test("mergeStats increments loadedCount and successCount on success", () => {
+  const result = mergeStats(DEFAULT_STATS, {
+    succeeded: true,
+    stepCount: 5,
+    totalTokens: 8000,
+    loadedAt: "2026-05-06T10:00:00Z",
+  });
+  assert.equal(result.loadedCount, 1);
+  assert.equal(result.successCount, 1);
+  assert.equal(result.totalSteps, 5);
+  assert.equal(result.totalTokens, 8000);
+});
+
+test("mergeStats increments loadedCount but not successCount on failure", () => {
+  const result = mergeStats(DEFAULT_STATS, {
+    succeeded: false,
+    stepCount: 10,
+    totalTokens: 12000,
+    loadedAt: "2026-05-06T10:00:00Z",
+  });
+  assert.equal(result.loadedCount, 1);
+  assert.equal(result.successCount, 0);
+});
+
+test("mergeStats accumulates across multiple runs", () => {
+  let stats = mergeStats(DEFAULT_STATS, { succeeded: true, stepCount: 4, totalTokens: 5000, loadedAt: "2026-05-06T10:00:00Z" });
+  stats = mergeStats(stats, { succeeded: true, stepCount: 6, totalTokens: 7000, loadedAt: "2026-05-06T10:01:00Z" });
+  stats = mergeStats(stats, { succeeded: false, stepCount: 8, totalTokens: 9000, loadedAt: "2026-05-06T10:02:00Z" });
+
+  assert.equal(stats.loadedCount, 3);
+  assert.equal(stats.successCount, 2);
+  assert.equal(stats.totalSteps, 18);
+  assert.equal(stats.totalTokens, 21000);
+  assert.equal(stats.lastLoadedAt, "2026-05-06T10:02:00Z");
+});
+
+test("readSkillStats returns null for missing file", async () => {
+  testRoot = makeRoot();
+  const result = await readSkillStats(testRoot, "skill_nonexistent");
+  assert.equal(result, null);
+});
+
+test("writeSkillStats and readSkillStats round-trip", async () => {
+  testRoot = makeRoot();
+  const stats: SkillStats = {
+    loadedCount: 5,
+    successCount: 4,
+    totalSteps: 22,
+    totalTokens: 32000,
+    lastLoadedAt: "2026-05-06T12:00:00Z",
+  };
+
+  await writeSkillStats(testRoot, "skill_test", stats);
+  const loaded = await readSkillStats(testRoot, "skill_test");
+
+  assert.deepEqual(loaded, stats);
+});
+
+test("updateSkillStatsFromRun writes stats for each loaded skill", async () => {
+  testRoot = makeRoot();
+  const skillA = createId("skill");
+  const skillB = createId("skill");
+  const runId = createId("run");
+
+  // Build a minimal LoopResult-like object
+  await updateSkillStatsFromRun(testRoot, {
+    run: { id: runId } as any,
+    events: [
+      { kind: "skill-load", runId, payload: { skills: [skillA, skillB] }, id: createId("event"), ts: "2026-05-06T10:00:00Z" } as any,
+    ],
+    classification: { kind: "task-complete", confidence: 0.95 },
+    stepCount: 4,
+    startedAt: "2026-05-06T10:00:00Z",
+    usage: { promptTokens: 3000, completionTokens: 4000, totalTokens: 7000 },
+  } as any);
+
+  const statsA = await readSkillStats(testRoot, skillA);
+  const statsB = await readSkillStats(testRoot, skillB);
+
+  assert.equal(statsA!.loadedCount, 1);
+  assert.equal(statsA!.successCount, 1);
+  assert.equal(statsB!.loadedCount, 1);
+});
+
+test("updateSkillStatsFromRun is no-op when no skills loaded", async () => {
+  testRoot = makeRoot();
+  const runId = createId("run");
+
+  await updateSkillStatsFromRun(testRoot, {
+    run: { id: runId } as any,
+    events: [],
+    classification: { kind: "task-complete", confidence: 0.95 },
+    stepCount: 4,
+    startedAt: "2026-05-06T10:00:00Z",
+  } as any);
+
+  // No stats directory should exist
+  const { readdir: ls } = await import("node:fs/promises");
+  await assert.rejects(() => ls(join(testRoot, ".stats")), /ENOENT/u);
+});
+
+// ---------------------------------------------------------------------------
+// Workflow dedup signal
+// ---------------------------------------------------------------------------
+
+test("workflow text contributes to dedup similarity between proposals", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+
+  // Write a candidate with a distinctive workflow step
+  const first = makeCandidate({
+    facts: [],
+    selectors: [],
+    routes: [],
+    workflow: ["Navigate to /pricing and click the enterprise-plan button"],
+    confidence: 0.8,
+  });
+  await writeSkillProposal(first, dir);
+
+  // A second candidate with the same workflow phrase should be deduplicated
+  const second = makeCandidate({
+    skillId: createId("skill"),
+    facts: [],
+    selectors: [],
+    routes: [],
+    workflow: ["Navigate to /pricing and click the enterprise-plan button"],
+    confidence: 0.75,
+  });
+  const result = await manageSkillPromotion(second, dir);
+  // Dedup: near-duplicate workflow → no new proposal written
+  assert.ok(!result.promoted, "dedup should block near-duplicate workflow proposal");
 });

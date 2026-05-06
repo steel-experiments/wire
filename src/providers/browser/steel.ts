@@ -40,6 +40,7 @@ export interface SteelLogger {
 const DEFAULT_BASE_URL = "https://api.steel.dev/v1";
 const DEFAULT_CDP_COMMAND_TIMEOUT_MS = 30_000;
 const RAW_RUNTIME_EVALUATE_TIMEOUT_MS = 12_000;
+const STEEL_REGION_CODES = new Set(["lax", "iad"]);
 
 interface SteelSessionResponse {
   id: string;
@@ -188,8 +189,9 @@ function buildCreateSessionBody(input: CreateSessionInput): SteelCreateSessionBo
     body.persistProfile = true;
   }
 
-  if (input.region) {
-    body.region = input.region;
+  const inputRegion = normalizeSteelRegion(input.region);
+  if (inputRegion) {
+    body.region = inputRegion;
   }
 
   // sessionConfig takes precedence over legacy proxyCountryCode
@@ -207,8 +209,9 @@ function buildCreateSessionBody(input: CreateSessionInput): SteelCreateSessionBo
     if (typeof cfg.userAgent === "string") {
       body.userAgent = cfg.userAgent;
     }
-    if (typeof cfg.region === "string") {
-      body.region = cfg.region;
+    const configRegion = normalizeSteelRegion(cfg.region);
+    if (configRegion) {
+      body.region = configRegion;
     }
     if (typeof cfg.locale === "string") {
       body.locale = cfg.locale;
@@ -237,6 +240,23 @@ function buildCreateSessionBody(input: CreateSessionInput): SteelCreateSessionBo
   }
 
   return body;
+}
+
+function normalizeSteelRegion(region: unknown): string | undefined {
+  if (typeof region !== "string") return undefined;
+  const normalized = region.trim().toLowerCase();
+  return STEEL_REGION_CODES.has(normalized) ? normalized : undefined;
+}
+
+function sanitizedSessionConfig(config: SessionConfig): SessionConfig {
+  const sanitized: SessionConfig = { ...config };
+  const region = normalizeSteelRegion(sanitized.region);
+  if (region) {
+    sanitized.region = region;
+  } else {
+    delete sanitized.region;
+  }
+  return sanitized;
 }
 
 function extractSteelId(sessionId: SessionId): string {
@@ -273,7 +293,7 @@ export class SteelProvider implements BrowserProvider {
           "/sessions",
           { method: "POST", body: JSON.stringify(body) },
         );
-        return toBrowserSession(steel, input.region);
+        return toBrowserSession(steel, body.region);
       } catch (err) {
         lastError = err;
         const status = err instanceof SteelApiError ? err.status : 0;
@@ -982,10 +1002,10 @@ function readProxyConfig(value: unknown): SessionConfig["useProxy"] | undefined 
 export function createSteelActionHandlers(): ActionHandler[] {
   return [{
     kind: "reconfigure",
-    description: 'For "reconfigure", set payload fields: useProxy (bool or approved proxy object), solveCaptcha (bool), stealth (bool), userAgent (string), region (string), locale (string), timezone (string), viewport ({width,height}). Creates a new browser session with updated settings. Use when blocked by captcha, IP block, or anti-bot detection.',
+    description: 'For "reconfigure", set payload fields: useProxy (bool or approved proxy object), solveCaptcha (bool), stealth (bool), userAgent (string), region ("lax" or "iad" only), locale (string), timezone (string), viewport ({width,height}). Creates a new browser session with updated settings. Use when blocked by captcha, IP block, or anti-bot detection. Do not invent region names.',
     async execute(state, action, provider, context) {
       const requested = action.payload as JsonObject | undefined;
-      const merged: SessionConfig = { ...state.sessionConfig };
+      const merged: SessionConfig = sanitizedSessionConfig(state.sessionConfig ?? {});
 
       if (requested?.useProxy !== undefined) {
         const useProxy = readProxyConfig(requested.useProxy);
@@ -1001,7 +1021,12 @@ export function createSteelActionHandlers(): ActionHandler[] {
         merged.userAgent = requested.userAgent;
       }
       if (typeof requested?.region === "string") {
-        merged.region = requested.region;
+        const region = normalizeSteelRegion(requested.region);
+        if (region) {
+          merged.region = region;
+        } else {
+          delete merged.region;
+        }
       }
       if (typeof requested?.locale === "string") {
         merged.locale = requested.locale;

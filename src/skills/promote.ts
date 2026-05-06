@@ -13,6 +13,7 @@ import { parseSkillFile } from "./parser.js";
 export interface PromotionCandidate {
   skillId: SkillId;
   hostname: string;
+  workflow: string[];
   facts: string[];
   selectors: string[];
   routes: string[];
@@ -146,6 +147,7 @@ export function parseSkillProposalResponse(
   return {
     skillId: createId("skill"),
     hostname: parsed.hostname,
+    workflow: Array.isArray(parsed.workflow) ? parsed.workflow.filter((w: unknown) => typeof w === "string") : [],
     facts: Array.isArray(parsed.facts) ? parsed.facts.filter((f: unknown) => typeof f === "string") : [],
     selectors: Array.isArray(parsed.selectors) ? parsed.selectors.filter((s: unknown) => typeof s === "string") : [],
     routes: Array.isArray(parsed.routes) ? parsed.routes.filter((r: unknown) => typeof r === "string") : [],
@@ -175,7 +177,8 @@ export async function llmProposeSkill(
       "Given a trace of events from a completed run, decide whether there is reusable browser knowledge worth saving as a skill file.",
       "Pay special attention to errors — they reveal approaches that DON'T work. Always include failed approaches in the traps array so future runs avoid repeating them.",
       "If the trace contains useful domain knowledge (routes, selectors, wait patterns, working approaches, common pitfalls), return a JSON object with this shape:",
-      '{"hostname":"example.com","facts":["..."],"selectors":["..."],"routes":["..."],"waits":["..."],"traps":["..."],"confidence":0.8}',
+      '{"hostname":"example.com","workflow":["Step 1: ...","Step 2: ..."],"facts":["..."],"selectors":["..."],"routes":["..."],"waits":["..."],"traps":["..."],"confidence":0.8}',
+      "The workflow field is an ordered list of concise steps that produced the shortest reliable path. Include it when the trace reveals a repeatable sequence. Prefer the cheapest method: if an API endpoint was discovered, lead with that before browser steps. Include fallback conditions when the trace shows a primary method failing and an alternative working.",
       "If nothing is worth saving, respond with exactly: NONE",
       "Do not wrap the JSON in prose or code fences.",
     ].join("\n");
@@ -230,6 +233,15 @@ export function generateSkillProposal(candidate: PromotionCandidate): string {
   );
   lines.push("");
 
+  if (candidate.workflow.length > 0) {
+    lines.push("## Workflow");
+    lines.push("");
+    candidate.workflow.forEach((step, i) => {
+      lines.push(`${i + 1}. ${step}`);
+    });
+    lines.push("");
+  }
+
   if (candidate.facts.length > 0) {
     lines.push("## Facts");
     lines.push("");
@@ -278,8 +290,9 @@ export function generateSkillProposal(candidate: PromotionCandidate): string {
   return lines.join("\n");
 }
 
-function hasReusableSignal(candidate: PromotionCandidate): boolean {
-  return candidate.facts.length > 0 ||
+export function hasReusableSignal(candidate: PromotionCandidate): boolean {
+  return candidate.workflow.length > 0 ||
+    candidate.facts.length > 0 ||
     candidate.selectors.length > 0 ||
     candidate.routes.length > 0 ||
     candidate.waits.length > 0 ||
@@ -291,7 +304,7 @@ function skillFileName(candidate: PromotionCandidate): string {
 }
 
 function proposalSignal(candidate: PromotionCandidate): Set<string> {
-  const text = [...candidate.facts, ...candidate.selectors, ...candidate.routes, ...candidate.waits, ...candidate.traps].join(" ");
+  const text = [...candidate.workflow, ...candidate.facts, ...candidate.selectors, ...candidate.routes, ...candidate.waits, ...candidate.traps].join(" ");
   return new Set((text.toLowerCase().match(/[a-z0-9.#/-]{3,}/gu) ?? []).filter((w) => !["the", "and", "for", "with"].includes(w)));
 }
 

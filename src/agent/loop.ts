@@ -25,6 +25,7 @@ import { stableJsonStringify } from "../shared/ids.js";
 
 import { observeBrowser, toObservationPayload } from "../browser/observe.js";
 import { execCode, isLikelyNavigationCode } from "../browser/exec.js";
+import { prependHelpers } from "../browser/helpers.js";
 import { execRaw } from "../browser/raw.js";
 import { classifyRun, generateOutcomeSummary } from "./classify.js";
 import { detectAuthWall } from "../profiles/auth.js";
@@ -372,7 +373,7 @@ export async function executeStep(
         const result = await execCode({
           provider,
           sessionId: state.sessionId,
-          code,
+          code: prependHelpers(code),
           timeoutMs: Math.min(
             DEFAULT_EXEC_TIMEOUT_MS,
             Math.max(
@@ -615,7 +616,9 @@ export interface FinalizeOptions {
   authWallHit?: boolean;
   policyDenied?: boolean;
   budgetExhausted?: boolean;
+  maxStepsReached?: boolean;
   awaitingApproval?: boolean;
+  userCancelled?: boolean;
   stopReason?: string;
   pendingApproval?: ApprovalRequest;
   pendingAction?: ProposedAction;
@@ -637,11 +640,34 @@ function hasMeaningfulPayload(payload: TraceEvent["payload"]): boolean {
   const stdout = payload["stdout"];
   if (typeof stdout === "string" && stdout.trim().length > 0) return true;
   const ret = payload["returnValue"];
-  if (ret === undefined || ret === null) return false;
-  if (typeof ret === "string") return ret.trim().length > 0;
-  if (Array.isArray(ret)) return ret.length > 0;
-  if (typeof ret === "object") return Object.keys(ret as Record<string, unknown>).length > 0;
-  return true;
+  return hasMeaningfulValue(ret);
+}
+
+function hasMeaningfulValue(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (typeof value === "number" || typeof value === "boolean") return true;
+  if (Array.isArray(value)) return value.some(hasMeaningfulValue);
+  if (typeof value !== "object") return false;
+
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 0) return false;
+  return entries.some(([key, entryValue]) => {
+    if (key === "results" && Array.isArray(entryValue) && entryValue.length === 0) return false;
+    if (key === "answer" && typeof entryValue === "string" && entryValue.trim().length === 0) return false;
+    return hasMeaningfulValue(entryValue);
+  });
+}
+
+function hasMeaningfulDerivedResult(result: string | undefined): boolean {
+  if (result === undefined) return false;
+  const trimmed = result.trim();
+  if (trimmed.length === 0) return false;
+  try {
+    return hasMeaningfulValue(JSON.parse(trimmed) as unknown);
+  } catch {
+    return true;
+  }
 }
 
 // Pre-dispatch wireActions envelope returned BY THE AGENT'S OWN CODE
@@ -672,14 +698,16 @@ export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | 
   // Three-tier preference: meaningful + not-error-shaped + not-a-wire-command,
   // then merely meaningful, then anything. Empty payloads ({}, [], "") and
   // agent-emitted wireActions envelopes don't answer the task.
+  const nonWireCandidates = candidates.filter(
+    (event) => !looksLikeWireCommand(event.payload.returnValue),
+  );
   const latestAnswerEvent =
-    candidates.find((event) =>
+    nonWireCandidates.find((event) =>
       hasMeaningfulPayload(event.payload) &&
-      !looksLikeErrorReturn(event.payload.returnValue) &&
-      !looksLikeWireCommand(event.payload.returnValue)
+      !looksLikeErrorReturn(event.payload.returnValue)
     ) ??
-    candidates.find((event) => hasMeaningfulPayload(event.payload)) ??
-    candidates[0];
+    nonWireCandidates.find((event) => hasMeaningfulPayload(event.payload)) ??
+    nonWireCandidates[0];
 
   if (latestAnswerEvent) {
     const stdout = latestAnswerEvent.payload.stdout;
@@ -727,7 +755,8 @@ export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | 
 export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): LoopResult {
   const errorCount = state.events.filter((e) => e.kind === "error").length;
 
-  const classification = classifyRun({
+  const derivedResult = deriveRunResult(state.events, state.task.mode);
+  let classification = classifyRun({
     mode: state.task.mode,
     events: state.events,
     successCriteria: state.task.successCriteria,
@@ -739,6 +768,22 @@ export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): Lo
     awaitingApproval: options.awaitingApproval ?? false,
     consecutiveUnchanged: countConsecutiveUnchanged(state.events),
   });
+
+  if (
+    options.maxStepsReached === true &&
+    !hasMeaningfulDerivedResult(derivedResult) &&
+    (
+      classification.kind === "task-complete" ||
+      classification.kind === "partial-success" ||
+      classification.kind === "ambiguous"
+    )
+  ) {
+    classification = {
+      kind: "agent-error",
+      confidence: 0.9,
+      notes: ["Maximum steps reached before producing a meaningful answer"],
+    };
+  }
 
   const outcomeSummary = generateOutcomeSummary(classification, state.events);
 
@@ -756,8 +801,10 @@ export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): Lo
     outcomeSummary,
   };
 
-  const derivedResult = deriveRunResult(state.events, state.task.mode);
-  if (derivedResult !== undefined) {
+  const resultBlocked =
+    (options.maxStepsReached === true && !hasMeaningfulDerivedResult(derivedResult)) ||
+    (options.userCancelled === true && !hasMeaningfulDerivedResult(derivedResult));
+  if (derivedResult !== undefined && !resultBlocked) {
     finishedRun.result = derivedResult;
   }
 

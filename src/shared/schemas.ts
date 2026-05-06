@@ -131,6 +131,7 @@ export const artifactKindSchema = z.enum([
   "plot",
   "table",
   "note",
+  "comparison",
 ]);
 export const comparisonDimensionSchema = z.enum([
   "latency",

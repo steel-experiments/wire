@@ -219,9 +219,11 @@ const BASE_ACTION_GUIDANCE = [
   "Observation gives you orientation (URL, title, headings, element counts) — NOT page content. To read page content, write exec code (e.g. return document.body.innerText or query specific selectors).",
   "Prefer direct URL patterns before brittle DOM hunting when the destination is obvious.",
   "For web search tasks, use DuckDuckGo (duckduckgo.com) or Bing (bing.com). Google blocks headless browsers with captchas.",
+  "Before extracting search result selectors, confirm the current URL is still the search results page. If you opened a result tab/page, switch back to the search target or re-run the search before scraping SERP selectors.",
   "Wire auto-observes after navigation code. Do NOT emit a separate observe after navigating.",
   "After navigating to a target page, always exec code to extract the answer before finishing. Navigation alone is not task completion.",
   "Only use finish after your exec code has returned the actual answer in its return value.",
+  "Helpers available in every exec block: clickVisibleText(text), fillByLabel(label, value), extractTable(selector), waitForSelector(selector, timeoutMs). Use them for common interactions; fall back to querySelector for precision.",
   "Use reusable routes, selectors, waits, and traps from loaded skills when they apply.",
   "Do not wrap the JSON in prose.",
 ];

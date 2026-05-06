@@ -5,6 +5,7 @@ import {
   assembleSystemPrompt,
   assembleUserPrompt,
   sanitizeSkillContent,
+  buildActionGuidance,
 } from "./context.js";
 import type {
   ContextBundle,
@@ -402,4 +403,24 @@ test("assembleUserPrompt includes recent user messages section when present", ()
 test("assembleUserPrompt omits the user messages section when no user messages", () => {
   const prompt = assembleUserPrompt(makeContext({}));
   assert.doesNotMatch(prompt, /Recent user messages/u);
+});
+
+// ---------------------------------------------------------------------------
+// buildActionGuidance — helper surface
+// ---------------------------------------------------------------------------
+
+test("buildActionGuidance includes all four exec helpers", () => {
+  const context = makeContext();
+  const guidance = buildActionGuidance(context);
+
+  assert.match(guidance, /clickVisibleText/u);
+  assert.match(guidance, /fillByLabel/u);
+  assert.match(guidance, /extractTable/u);
+  assert.match(guidance, /waitForSelector/u);
+});
+
+test("buildActionGuidance includes the action shape line", () => {
+  const context = makeContext();
+  const guidance = buildActionGuidance(context);
+  assert.match(guidance, /observe.*exec.*raw.*finish/u);
 });

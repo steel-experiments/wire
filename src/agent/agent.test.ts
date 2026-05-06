@@ -736,6 +736,49 @@ test("finalizeRun persists final result from successful returnValue", () => {
   assert.equal(result.run.result, '{"answer":"Final answer","price":29}');
 });
 
+test("finalizeRun does not classify max-step empty JSON output as task-complete", () => {
+  const task = makeTask({ objective: "find what people are saying about steel.dev" });
+  const state = createLoopState(task, makeSessionId());
+
+  state.events.push(
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "observation",
+      payload: { url: "https://duckduckgo.com/?q=steel.dev", title: "steel.dev at DuckDuckGo" },
+    },
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "observation",
+      payload: { url: "https://steel.apidocumentation.com/api-reference", title: "Steel API" },
+    },
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, durationMs: 10, returnValue: { results: [], answer: "" } },
+    },
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "thought-summary",
+      payload: { reason: "Maximum steps reached" },
+    },
+  );
+  state.stepCount = 20;
+
+  const result = finalizeRun(state, { maxStepsReached: true });
+
+  assert.equal(result.run.status, "failed");
+  assert.equal(result.classification.kind, "agent-error");
+  assert.match(result.outcomeSummary, /Maximum steps reached/u);
+});
+
 test("finalizeRun skips error-shaped returnValue when picking final result", () => {
   const task = makeTask();
   const state = createLoopState(task, makeSessionId());
@@ -2763,7 +2806,7 @@ test("finalizeRun skips wireActions envelopes when picking final result", () => 
   assert.ok(!result.run.result!.includes("wireActions"), "result should not be the command envelope");
 });
 
-test("finalizeRun falls back to wireActions envelope when nothing else is meaningful", () => {
+test("finalizeRun returns no result when only wireActions envelope exists", () => {
   const task = makeTask();
   const state = createLoopState(task, makeSessionId());
 
@@ -2783,9 +2826,8 @@ test("finalizeRun falls back to wireActions envelope when nothing else is meanin
   });
 
   const result = finalizeRun(state);
-  // No better candidate exists — the second tier (merely meaningful) accepts
-  // the envelope rather than returning nothing.
-  assert.ok(result.run.result?.includes("wireActions"), "expected fallback to envelope when nothing better exists");
+  // wireActions envelopes are never valid answers — even as a fallback.
+  assert.equal(result.run.result, undefined, "wireActions envelope should not be used as result");
 });
 
 test("finalizeRun skips raw-action CDP results when picking final result", () => {
@@ -3021,4 +3063,58 @@ test("computeNoProgressStreak resets when a meaningful result lands at the tail"
     { id: "e3" as never, runId: "r" as never, ts: "3", kind: "code-result" as const, payload: { ok: true, returnValue: { score: 100 } } },
   ];
   assert.equal(computeNoProgressStreak(events), 0);
+});
+
+// ---------------------------------------------------------------------------
+// finalizeRun — userCancelled result gate
+// ---------------------------------------------------------------------------
+
+test("finalizeRun omits non-meaningful result when userCancelled", () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+
+  // Only a navigation-only result (empty object) — not meaningful
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: new Date().toISOString(),
+    kind: "code-result",
+    payload: { ok: true, durationMs: 5, returnValue: {} },
+  });
+
+  const result = finalizeRun(state, { userCancelled: true });
+  assert.equal(result.run.result, undefined, "non-meaningful partial result should be omitted on cancel");
+});
+
+test("finalizeRun keeps meaningful result even when userCancelled", () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: new Date().toISOString(),
+    kind: "code-result",
+    payload: { ok: true, durationMs: 10, stdout: "San Francisco: $1500/mo, New York: $3200/mo" },
+  });
+
+  const result = finalizeRun(state, { userCancelled: true });
+  assert.ok(result.run.result?.includes("San Francisco"), "meaningful result should be preserved on cancel");
+});
+
+test("finalizeRun preserves result behaviour unchanged when not cancelled", () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: new Date().toISOString(),
+    kind: "code-result",
+    payload: { ok: true, durationMs: 5, stdout: "found result" },
+  });
+
+  // Without cancellation the result should be set normally
+  const result = finalizeRun(state, { userCancelled: false });
+  assert.ok(result.run.result?.includes("found result"), "result should be set normally without cancel");
 });

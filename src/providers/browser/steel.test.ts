@@ -136,18 +136,43 @@ test("SteelProvider.createSession maps profile and region", async () => {
   const { provider, setNextResponse, restore } = createMockedProvider();
   setNextResponse(
     "/sessions",
-    fakeSteelSession({ profileId: "saved-profile-1", region: "us-west-2" }),
+    fakeSteelSession({ profileId: "saved-profile-1", region: "lax" }),
   );
 
   try {
     const session = await provider.createSession({
       profileId: "profile_saved-profile-1" as never,
-      region: "us-west-2",
+      region: "LAX",
     });
 
     assert.equal(session.profileId, "profile_saved-profile-1");
-    assert.equal(session.region, "us-west-2");
+    assert.equal(session.region, "lax");
   } finally {
+    restore();
+  }
+});
+
+test("SteelProvider.createSession drops invalid region before calling Steel", async () => {
+  const { provider, restore } = createMockedProvider();
+  const originalFetch = globalThis.fetch;
+  let capturedBody: Record<string, unknown> = {};
+
+  globalThis.fetch = async (_url: string | URL | Request, init?: RequestInit) => {
+    if (typeof init?.body === "string") {
+      capturedBody = JSON.parse(init.body);
+    }
+    return new Response(
+      JSON.stringify(fakeSteelSession()),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  };
+
+  try {
+    const session = await provider.createSession({ sessionConfig: { region: "eu-west-1" } });
+    assert.equal(capturedBody.region, undefined);
+    assert.equal(session.region, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
     restore();
   }
 });
@@ -634,7 +659,7 @@ test("SteelProvider.createSession maps sessionConfig fields to Steel body", asyn
         solveCaptcha: true,
         stealth: true,
         userAgent: "Mozilla/5.0 (custom)",
-        region: "eu-west-1",
+        region: "IAD",
         locale: "en-US",
         timezone: "America/New_York",
         viewport: { width: 1280, height: 720 },
@@ -645,7 +670,7 @@ test("SteelProvider.createSession maps sessionConfig fields to Steel body", asyn
     assert.equal(capturedBody.solveCaptcha, true);
     assert.equal(capturedBody.stealth, true);
     assert.equal(capturedBody.userAgent, "Mozilla/5.0 (custom)");
-    assert.equal(capturedBody.region, "eu-west-1");
+    assert.equal(capturedBody.region, "iad");
     assert.equal(capturedBody.locale, "en-US");
     assert.equal(capturedBody.timezone, "America/New_York");
     assert.deepEqual(capturedBody.viewport, { width: 1280, height: 720 });
@@ -775,6 +800,57 @@ test("Steel reconfigure action notifies replacement session callback", async () 
   assert.equal(callback?.summary, "Enable stealth session");
   assert.equal(state.sessionId, newSession.id);
   assert.equal(state.sessionLiveUrl, newSession.liveUrl);
+});
+
+test("Steel reconfigure action strips invalid region from requested config", async () => {
+  const oldSessionId = createId("session");
+  const newSession: BrowserSession = {
+    id: createId("session"),
+    provider: "steel",
+    createdAt: new Date().toISOString(),
+    status: "ready",
+  };
+  const state = createLoopState(makeTask(), oldSessionId);
+  state.sessionConfig = { region: "lax", stealth: false };
+  let capturedInput: { sessionConfig?: { region?: string; stealth?: boolean } } | undefined;
+
+  const provider: BrowserProvider = {
+    async createSession(input) {
+      capturedInput = input as typeof capturedInput;
+      return newSession;
+    },
+    async getSession() {
+      return newSession;
+    },
+    async stopSession() {},
+    async observe(input): Promise<BrowserObservation> {
+      return {
+        sessionId: input.sessionId,
+        url: "about:blank",
+        title: "about:blank",
+        tabs: [],
+        pageSummary: {},
+      };
+    },
+    async exec() {
+      throw new Error("not implemented");
+    },
+  };
+
+  const handler = createSteelActionHandlers()[0]!;
+  await handler.execute(
+    state,
+    {
+      kind: "reconfigure",
+      summary: "Enable stealth with bad region",
+      payload: { stealth: true, region: "eu-west-1" },
+    },
+    provider,
+  );
+
+  assert.equal(capturedInput?.sessionConfig?.region, undefined);
+  assert.equal(capturedInput?.sessionConfig?.stealth, true);
+  assert.equal(state.sessionConfig.region, undefined);
 });
 
 // ---------------------------------------------------------------------------

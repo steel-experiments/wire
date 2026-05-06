@@ -62,6 +62,7 @@ import {
   isNoProgressResult,
 } from "./state-helpers.js";
 import { ActionRegistry, type ActionHandler } from "./actions.js";
+import { updateSkillStatsFromRun } from "../skills/stats.js";
 
 export interface PauseToken {
   isPaused(): boolean;
@@ -532,7 +533,9 @@ function buildActionRegistry(config: RuntimeConfig): ActionRegistry {
 interface LoopSignals {
   policyDenied: boolean;
   authWallHit: boolean;
+  maxStepsReached: boolean;
   awaitingApproval: boolean;
+  userCancelled: boolean;
   pendingApproval: LoopResult["pendingApproval"];
   pendingAction: LoopResult["pendingAction"];
   flushedEvents: number;
@@ -568,7 +571,9 @@ async function initializeState(
   const signals: LoopSignals = {
     policyDenied: false,
     authWallHit: false,
+    maxStepsReached: false,
     awaitingApproval: false,
+    userCancelled: false,
     pendingApproval: undefined,
     pendingAction: undefined,
     flushedEvents: 0,
@@ -736,6 +741,12 @@ async function runMainLoop(
     });
 
     if (stopResult.stop) {
+      if (stopResult.reason === "Maximum steps reached") {
+        signals.maxStepsReached = true;
+      }
+      if (stopResult.reason === "User cancelled") {
+        signals.userCancelled = true;
+      }
       // Record the stop reason as a trace event
       state.events.push({
         id: createId("event"),
@@ -970,6 +981,7 @@ async function runMainLoop(
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
+        signals.userCancelled = true;
         state.events.push({
           id: createId("event"),
           runId: state.run.id,
@@ -1055,7 +1067,9 @@ async function finalizeExecution(
     authWallHit: signals.authWallHit,
     policyDenied: signals.policyDenied,
     budgetExhausted: false,
+    maxStepsReached: signals.maxStepsReached,
     awaitingApproval: signals.awaitingApproval,
+    userCancelled: signals.userCancelled,
   } as const;
 
   if (signals.pendingApproval) {
@@ -1063,6 +1077,7 @@ async function finalizeExecution(
       authWallHit: boolean;
       policyDenied: boolean;
       budgetExhausted: false;
+      maxStepsReached: boolean;
       awaitingApproval: boolean;
       pendingApproval: NonNullable<typeof signals.pendingApproval>;
       pendingAction?: ProposedAction;
@@ -1089,7 +1104,15 @@ async function finalizeExecution(
   await appendSkillProposalEvents(state, config.skillDir, config.llmProvider);
   await flushTraceSink(state, config, signals);
 
-  return finalizeRun(state, finalizeOptions);
+  const result = finalizeRun(state, finalizeOptions);
+
+  if (config.skillDir) {
+    try {
+      await updateSkillStatsFromRun(config.skillDir, result);
+    } catch { /* best-effort — stats loss must never affect run outcome */ }
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
