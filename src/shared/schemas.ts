@@ -114,6 +114,7 @@ export const traceEventKindSchema = z.enum([
   "approval-request",
   "approval-result",
   "skill-load",
+  "skill-empty",
   "skill-proposal",
   "error",
 ]);

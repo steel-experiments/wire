@@ -9,7 +9,7 @@ import { saveApprovalRequest } from "../storage/approvals.js";
 import { saveRunCheckpoint, loadRunCheckpoint } from "../storage/checkpoints.js";
 import type { BrowserProvider } from "../browser/bridge.js";
 
-import { createExperimentBundleFromRuns, reapExpiredApprovals, resolveProviderSelection } from "./runner.js";
+import { createExperimentBundleFromRuns, reapExpiredApprovals, resolveProviderSelection, resolveSkillDir } from "./runner.js";
 
 test("resolveProviderSelection uses explicit provider", () => {
   assert.equal(resolveProviderSelection("anthropic", "claude-sonnet-4-6"), "anthropic");
@@ -53,6 +53,16 @@ test("resolveProviderSelection rejects ambiguous provider choice when both keys 
       process.env.ANTHROPIC_API_KEY = originalAnthropic;
     }
   }
+});
+
+test("resolveSkillDir prefers explicit option over env over default", () => {
+  // Regression: default was hardcoded to "./skills" (cwd-relative). When a
+  // supervisor spawned wire from a tmpdir, it silently created an empty
+  // ./skills and zero skills loaded for the entire run group. Allow an env
+  // override so the install-time skills location can be set globally.
+  assert.equal(resolveSkillDir("./my-skills", { WIRE_SKILLS: "/etc/wire/skills" }), "./my-skills");
+  assert.equal(resolveSkillDir(undefined, { WIRE_SKILLS: "/etc/wire/skills" }), "/etc/wire/skills");
+  assert.equal(resolveSkillDir(undefined, {}), "./skills");
 });
 
 test("reapExpiredApprovals stops sessions and marks approvals expired", async () => {

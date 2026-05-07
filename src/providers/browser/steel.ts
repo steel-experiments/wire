@@ -924,7 +924,12 @@ async function evaluateJson<T>(
 ): Promise<T> {
   const response = await cdp.send<{
     result?: { value?: T; description?: string };
-    exceptionDetails?: { text?: string };
+    exceptionDetails?: {
+      text?: string;
+      lineNumber?: number;
+      columnNumber?: number;
+      exception?: { className?: string; description?: string };
+    };
   }>(
     "Runtime.evaluate",
     {
@@ -938,10 +943,39 @@ async function evaluateJson<T>(
   );
 
   if (response.exceptionDetails) {
-    throw new Error(response.exceptionDetails.text ?? response.result?.description ?? "Runtime evaluation failed");
+    throw new Error(formatExceptionDetails(response.exceptionDetails, response.result?.description));
   }
 
   return response.result?.value as T;
+}
+
+/**
+ * Build a human- and model-readable error message from CDP `exceptionDetails`.
+ * `text` alone is usually just "Uncaught (in promise)" — useless for debugging.
+ * The actual class/message/stack lives under `exception.description`. Surface
+ * line/column when present so the model can see *where* in its own code it
+ * blew up.
+ */
+function formatExceptionDetails(
+  details: {
+    text?: string;
+    lineNumber?: number;
+    columnNumber?: number;
+    exception?: { className?: string; description?: string };
+  },
+  fallback?: string,
+): string {
+  const description = details.exception?.description?.trim();
+  if (description && description.length > 0) {
+    const loc = details.lineNumber !== undefined
+      ? ` (line ${details.lineNumber + 1}${details.columnNumber !== undefined ? `, col ${details.columnNumber + 1}` : ""})`
+      : "";
+    // `description` typically already contains class+message+stack; only
+    // append a location if the description didn't already include a frame.
+    const hasFrame = /\bat\s+/.test(description);
+    return hasFrame ? description : `${description}${loc}`;
+  }
+  return details.text ?? fallback ?? "Runtime evaluation failed";
 }
 
 function asString(value: unknown, fallback: string): string {

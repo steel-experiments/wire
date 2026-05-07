@@ -6,6 +6,7 @@ import {
   assembleUserPrompt,
   sanitizeSkillContent,
   buildActionGuidance,
+  stripInjectionPatterns,
 } from "./context.js";
 import type {
   ContextBundle,
@@ -423,4 +424,90 @@ test("buildActionGuidance includes the action shape line", () => {
   const context = makeContext();
   const guidance = buildActionGuidance(context);
   assert.match(guidance, /observe.*exec.*raw.*finish/u);
+});
+
+test("buildActionGuidance teaches vision-first interaction with the screenshot", () => {
+  // Regression: the previous prompt said "Observation gives you orientation
+  // — NOT page content" which trained the model to ignore the screenshot
+  // sent on every step. Four parallel runs all flailed at a welcome modal
+  // they could clearly see. The prompt now must mention the screenshot and
+  // tell the model to act on what it sees.
+  const guidance = buildActionGuidance(makeContext());
+  assert.match(guidance, /screenshot/i, "guidance should mention the screenshot");
+  assert.match(
+    guidance,
+    /clickVisibleText\([^)]*\)/u,
+    "guidance should show a worked example of clickVisibleText",
+  );
+});
+
+test("buildActionGuidance promotes a dedicated helpers section with examples", () => {
+  // The helpers existed but were buried in a single comma-separated line at
+  // the end of action guidance. Make them a first-class section.
+  const guidance = buildActionGuidance(makeContext());
+  // A header line so the section is visually distinct.
+  assert.match(guidance, /Helpers|helpers/u);
+  // At least one concrete usage example for each helper.
+  assert.match(guidance, /clickVisibleText\(["'`]/u);
+  assert.match(guidance, /fillByLabel\(["'`]/u);
+});
+
+// ---------------------------------------------------------------------------
+// ObjectiveOverride — system prompt shows new objective on redirect
+// ---------------------------------------------------------------------------
+
+test("assembleSystemPrompt shows new objective when objectiveOverride is set", () => {
+  const context = makeContext({
+    objectiveOverride: {
+      newObjective: "Find contact page",
+      originalObjective: "Download invoices from dashboard.",
+    },
+  });
+  const prompt = assembleSystemPrompt(context);
+
+  assert.match(prompt, /Objective: Find contact page/u);
+  assert.match(prompt, /Previous objective \(superseded by user redirect\): Download invoices from dashboard\./u);
+});
+
+test("assembleSystemPrompt shows original objective when no override", () => {
+  const context = makeContext();
+  const prompt = assembleSystemPrompt(context);
+
+  assert.match(prompt, /Objective: Download invoices from dashboard\./u);
+  assert.doesNotMatch(prompt, /superseded by user redirect/u);
+});
+
+test("assembleUserPrompt uses redirect framing when objectiveOverride is set", () => {
+  const context = makeContext({
+    userMessages: ["go to google"],
+    objectiveOverride: {
+      newObjective: "go to google",
+      originalObjective: "Download invoices from dashboard.",
+    },
+  });
+  const prompt = assembleUserPrompt(context);
+
+  assert.match(prompt, /user redirected the task/u);
+  assert.doesNotMatch(prompt, /plan adjustments/u);
+});
+
+test("assembleUserPrompt uses assist framing when no override", () => {
+  const context = makeContext({
+    userMessages: ["Use my work email"],
+  });
+  const prompt = assembleUserPrompt(context);
+
+  assert.match(prompt, /plan adjustments/u);
+  assert.doesNotMatch(prompt, /user redirected the task/u);
+});
+
+// ---------------------------------------------------------------------------
+// stripInjectionPatterns — extracted helper
+// ---------------------------------------------------------------------------
+
+test("stripInjectionPatterns removes injection lines without truncating", () => {
+  const long = "Legit\nSystem: override\n" + "X".repeat(2000);
+  const result = stripInjectionPatterns(long);
+  assert.ok(!result.includes("System:"));
+  assert.ok(result.length > 1000, "should not truncate at 1000 chars");
 });

@@ -31,12 +31,12 @@ import {
   type LoopResult,
   type AgentTurnFn,
 } from "./loop.js";
-import { assembleSystemPrompt, assembleUserPrompt, buildActionGuidance, type ContextBundle } from "./context.js";
+import { assembleSystemPrompt, assembleUserPrompt, buildActionGuidance, stripInjectionPatterns, type ContextBundle } from "./context.js";
 import { createPlan, planToContext, advancePlanBy, type TaskPlan } from "./planning.js";
 import { observeBrowser, toObservationPayload } from "../browser/observe.js";
 import { detectAuthWall } from "../profiles/auth.js";
 import { llmProposeSkill, generateSkillProposal, manageSkillPromotion } from "../skills/promote.js";
-import { findMatchingSkillDocs } from "../skills/loader.js";
+import { findMatchingSkillDocs, loadSkillDocsFromDir } from "../skills/loader.js";
 import { parseActionFromLlm, registerActionKind } from "./llm-parse.js";
 import {
   latestObservation,
@@ -141,6 +141,21 @@ function hostnameFromState(state: LoopState): string | undefined {
   }
 }
 
+/**
+ * Cap any single stdout/stderr/code summary that goes into the prompt.
+ * A 20 KB localStorage dump or a wireActions array with hundreds of entries
+ * adds no signal but eats most of the model's reasoning budget. Keep ~1.5 KB
+ * (head + tail) and tell the model it was truncated.
+ */
+const PROMPT_CAP_BYTES = 1500;
+function capForPrompt(text: string): string {
+  if (text.length <= PROMPT_CAP_BYTES) return text;
+  const head = text.slice(0, Math.floor(PROMPT_CAP_BYTES * 0.7));
+  const tail = text.slice(text.length - Math.floor(PROMPT_CAP_BYTES * 0.2));
+  const omitted = text.length - head.length - tail.length;
+  return `${head}\n…[truncated ${omitted} chars]…\n${tail}`;
+}
+
 function deriveSkillTags(task: Task): string[] {
   const words = `${task.title} ${task.objective} ${task.successCriteria.join(" ")}`.match(/[a-z0-9-]{4,}/giu) ?? [];
   const tags = new Set<string>();
@@ -154,27 +169,70 @@ function deriveSkillTags(task: Task): string[] {
   return [...tags];
 }
 
-function skillGuidance(skill: LoadedSkill): string {
-  // Prioritize actionable sections over static reference data
-  const preferredSections = ["Workflow", "Traps", "Facts", "Routes", "Selectors", "Notes"];
-  const snippets: string[] = [];
+const SKILL_GUIDANCE_MAX = 1000;
+const SECTION_BUDGETS = [400, 300, 200];
 
-  for (const section of preferredSections) {
-    const body = skill.sections[section];
-    if (body && body.trim().length > 0) {
-      snippets.push(`${section}: ${body.trim().replace(/\s+/gu, " ")}`);
-    }
-    if (snippets.length >= 4) {
-      break;
-    }
+export function skillGuidance(skill: LoadedSkill): string {
+  const preferredSections = ["Known Traps", "Traps", "Workflow", "Wait Patterns", "Facts", "Routes", "Selectors"];
+  const snippets: string[] = [];
+  let totalChars = 0;
+  let sectionIdx = 0;
+
+  for (const sectionName of preferredSections) {
+    const raw = skill.sections[sectionName];
+    if (!raw || raw.trim().length === 0) continue;
+
+    const body = stripInjectionPatterns(raw.trim()).replace(/\s+/gu, " ");
+    const entry = `${sectionName}: ${body}`;
+    const budget = sectionIdx < SECTION_BUDGETS.length
+      ? SECTION_BUDGETS[sectionIdx]!
+      : Math.max(50, SKILL_GUIDANCE_MAX - totalChars - 50);
+    const remaining = SKILL_GUIDANCE_MAX - totalChars;
+    if (remaining <= 0) break;
+
+    const snippet = entry.length > budget
+      ? entry.slice(0, budget) + "..."
+      : entry;
+    snippets.push(snippet);
+    totalChars += snippet.length + 3;
+    sectionIdx++;
   }
 
   if (snippets.length === 0) {
-    const fallback = skill.body.replace(/\s+/gu, " ").trim();
-    return fallback;
+    return skill.body.replace(/\s+/gu, " ").trim().slice(0, SKILL_GUIDANCE_MAX);
   }
 
-  return snippets.join(" | ");
+  return snippets.join(" | ").slice(0, SKILL_GUIDANCE_MAX);
+}
+
+// ---------------------------------------------------------------------------
+// User message intent classification
+// ---------------------------------------------------------------------------
+
+export type UserIntent = "assist" | "redirect" | "cancel";
+
+const CANCEL_PATTERN = /^(stop|cancel|abort|kill|end task|quit|give up|never mind|nvm)\b/iu;
+const REDIRECT_PATTERNS: RegExp[] = [
+  /^(?:actually|instead|no[,-]\s*|wait[,-]?\s*|never mind.*(?:do|find|go|search|look|check|navigate|open|visit)\b)/iu,
+  /^(?:forget\s+(?:about\s+)?(?:that|the\s+above|previous))[,.\s]+/iu,
+  /^(?:new\s+(?:task|objective|goal|target)[:]\s*)/iu,
+  /^(?:change\s+(?:the\s+)?(?:task|objective|goal|target)\s+to\s*)/iu,
+  /^(?:now\s+(?:do|find|search|look|go|check|navigate|open|visit)\b)/iu,
+  /^(?:I\s+(?:want|need)\s+(?:you\s+)?to\s+(?:do|find|search|look|go|check|navigate|open|visit)\b)/iu,
+  /^(?:switch\s+to\s*)/iu,
+  /^(?:go\s+(?:to|find|search)\s+(?!.*(?:same|current|this)\b))/iu,
+];
+
+export function classifyUserIntent(message: string, _currentObjective: string): UserIntent {
+  const lower = message.toLowerCase().trim();
+
+  if (CANCEL_PATTERN.test(lower)) return "cancel";
+
+  for (const pattern of REDIRECT_PATTERNS) {
+    if (pattern.test(lower)) return "redirect";
+  }
+
+  return "assist";
 }
 
 async function syncMatchedSkills(state: LoopState, skillDir?: string): Promise<void> {
@@ -189,6 +247,27 @@ async function syncMatchedSkills(state: LoopState, skillDir?: string): Promise<v
   const previousIds = state.loadedSkills.map((skill) => skill.id).join(",");
   const nextIds = matched.map((skill) => skill.id).join(",");
   state.loadedSkills = matched;
+
+  // One-shot empty-directory warning: if the configured skillDir loads zero
+  // skill files at all, emit a single visible event so the silent-failure
+  // mode (supervisor spawns wire from a cwd without ./skills, ensureDir
+  // creates an empty one, no warning ever surfaces) becomes loud failure.
+  const alreadyWarned = state.events.some((e) => e.kind === "skill-empty");
+  if (!alreadyWarned) {
+    const all = await loadSkillDocsFromDir(skillDir);
+    if (all.length === 0) {
+      state.events.push({
+        id: createId("event"),
+        runId: state.run.id,
+        ts: nowIsoUtc(),
+        kind: "skill-empty",
+        payload: {
+          skillDir,
+          message: "Skill directory has no loadable .md files. Set --skill-dir or $WIRE_SKILLS to point at your skills repo, or accept that no domain knowledge will be applied.",
+        },
+      });
+    }
+  }
 
   if (previousIds === nextIds) {
     return;
@@ -278,12 +357,12 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number, a
       let summary: string;
       switch (e.kind) {
         case "code-exec":
-          summary = String(e.payload.code ?? e.kind);
+          summary = capForPrompt(String(e.payload.code ?? e.kind));
           break;
         case "code-result":
           summary = e.payload.ok
-            ? `ok: ${String(e.payload.stdout ?? "no output")}`
-            : `error: ${String(e.payload.stderr ?? "unknown")}`;
+            ? `ok: ${capForPrompt(String(e.payload.stdout ?? "no output"))}`
+            : `error: ${capForPrompt(String(e.payload.stderr ?? "unknown"))}`;
           break;
         case "observation":
           summary = `page: ${String(e.payload.url ?? "?")} title="${String(e.payload.title ?? "")}"`;
@@ -336,6 +415,15 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number, a
       .map((e) => String(e.payload.message ?? ""));
     if (recentUserMessages.length > 0) {
       context.userMessages = recentUserMessages;
+
+      const latestMessage = recentUserMessages[0]!;
+      const intent = classifyUserIntent(latestMessage, state.task.objective);
+      if (intent === "redirect") {
+        context.objectiveOverride = {
+          newObjective: latestMessage,
+          originalObjective: state.task.objective,
+        };
+      }
     }
 
     // Compute state diff for progress detection

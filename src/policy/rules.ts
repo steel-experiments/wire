@@ -237,10 +237,18 @@ const ACCOUNT_PATTERNS = [
   /\b(change|update|grant|revoke|invite)\b/iu,
 ];
 
+// Submit-style verbs are flagged only when they look like a *call* and not a
+// *declaration*. The bare-word match `\b(purchase|checkout|pay|send)\b` was
+// catching innocuous helper names like `function send(dir){...}` (a keyboard
+// dispatch helper) and blocking gameplay tasks at approval. "send" is dropped
+// entirely because it is too commonly a synonym for `dispatch` in input code.
 const SUBMIT_PATTERNS = [
   /\.submit\s*\(/u,
   /\brequestSubmit\s*\(/u,
-  /\b(purchase|checkout|pay|send)\b/iu,
+  // Method call: o.purchase(), order.pay(), etc.
+  /\.\s*(?:purchase|checkout|pay)\s*\(/iu,
+  // Free-standing call like checkout(), excluding declarations.
+  /(?<!function\s)(?<!const\s)(?<!let\s)(?<!var\s)\b(?:purchase|checkout|pay)\s*\(/iu,
 ];
 
 // Bare zero-arg .click() is a user-input gesture, not inherently a submit.

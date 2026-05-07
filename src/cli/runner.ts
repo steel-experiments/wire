@@ -103,6 +103,24 @@ function defaultStorageRoot(): string {
   return process.env["WIRE_ROOT"] ?? ".wire";
 }
 
+/**
+ * Resolve the skills directory in priority order:
+ *   1. explicit --skill-dir option
+ *   2. $WIRE_SKILLS env var (use this when wire is spawned from an arbitrary cwd)
+ *   3. ./skills relative to the current working directory
+ *
+ * Exported so we can test the precedence and so external embedders can call
+ * it before constructing a RuntimeConfig.
+ */
+export function resolveSkillDir(
+  explicit?: string,
+  env: { WIRE_SKILLS?: string } = process.env as { WIRE_SKILLS?: string },
+): string {
+  if (explicit !== undefined && explicit.length > 0) return explicit;
+  if (env.WIRE_SKILLS !== undefined && env.WIRE_SKILLS.length > 0) return env.WIRE_SKILLS;
+  return "./skills";
+}
+
 function inferProviderFromModel(model?: string): LlmProvider | undefined {
   if (!model) {
     return undefined;
@@ -224,7 +242,7 @@ function createRuntimeConfig(
   if (llmProvider) {
     config.llmProvider = llmProvider;
   }
-  config.skillDir = options.skillDir ?? "./skills";
+  config.skillDir = resolveSkillDir(options.skillDir);
   config.sessionInput = { timeoutMinutes: Math.max(15, Math.ceil(maxSteps * 30 / 60)) };
   if (options.profileId || options.sessionConfig) {
     if (options.profileId) config.sessionInput.profileId = options.profileId as never;

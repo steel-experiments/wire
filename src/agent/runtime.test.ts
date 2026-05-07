@@ -2,14 +2,14 @@
 // ABOUTME: existingSession, and LLM usage aggregation.
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { executeTask } from "./runtime.js";
+import { executeTask, skillGuidance, classifyUserIntent } from "./runtime.js";
 import type { RuntimeConfig, UserMessageInbox } from "./runtime.js";
 import type { BrowserProvider, BrowserObserveInput } from "../browser/bridge.js";
 import type { ActionHandler } from "./actions.js";
 import type { PolicyEngine } from "../policy/engine.js";
 import type { LLMProvider, ChatMessage, ChatResponse } from "../providers/llm/openai.js";
 import { createId } from "../shared/ids.js";
-import type { Task, BrowserSession, BrowserObservation } from "../shared/types.js";
+import type { Task, BrowserSession, BrowserObservation, LoadedSkill } from "../shared/types.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -236,6 +236,92 @@ test("user-message events appear in recentTraces summary with 'user said:' prefi
   );
 });
 
+test("executeTask emits skill-empty warning when skillDir resolves to a directory with no .md files", async () => {
+  // Regression: a supervisor that spawned wire from a tmpdir got `./skills`
+  // silently auto-created empty, and zero skills loaded for an entire run
+  // group despite a perfect-match skill living in the dev repo. Emit a
+  // visible event so this never fails silently again.
+  const { mkdtemp } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const emptyDir = await mkdtemp(join(tmpdir(), "wire-skills-empty-"));
+
+  let callCount = 0;
+  const mockLlm: LLMProvider = {
+    model: "test-model",
+    async chat(): Promise<ChatResponse> {
+      callCount++;
+      const action = callCount === 1
+        ? { kind: "exec", summary: "Probe", payload: { code: "1" } }
+        : { kind: "finish", summary: "Done — verified the empty path" };
+      return { content: JSON.stringify(action), model: "test-model" };
+    },
+  };
+
+  const config = makeConfig({ llmProvider: mockLlm, skillDir: emptyDir, maxSteps: 3 });
+  const result = await executeTask(makeTask(), config);
+  const hasWarning = result.events.some((e) => e.kind === "skill-empty");
+  assert.ok(hasWarning, "expected a skill-empty event when skillDir is empty");
+});
+
+test("recentTraces summary truncates large exec stdout before reaching the LLM", async () => {
+  // Regression: an exec that dumped a 12KB localStorage payload bloated the
+  // next LLM input by ~10x without adding value. Cap stdout/stderr in the
+  // recentTraces summary so the model gets a usable preview, not a flood.
+  const huge = "A".repeat(20_000);
+  let callCount = 0;
+  const promptsReceived: string[] = [];
+
+  const mockLlm: LLMProvider = {
+    model: "test-model",
+    async chat(messages: ChatMessage[]): Promise<ChatResponse> {
+      callCount++;
+      const userMsg = messages.find((m) => m.role === "user")!;
+      const text = typeof userMsg.content === "string"
+        ? userMsg.content
+        : userMsg.content.map((p) => (p.type === "text" ? p.text : "")).join("");
+      promptsReceived.push(text);
+      const action = callCount === 1
+        ? { kind: "exec", summary: "Dump", payload: { code: "return 'huge'" } }
+        : { kind: "finish", summary: "Done — captured the dump" };
+      return { content: JSON.stringify(action), model: "test-model" };
+    },
+  };
+
+  // Override exec to return the huge payload as stdout.
+  const provider: BrowserProvider = {
+    createSession: async () => makeSession(),
+    getSession: async () => makeSession(),
+    stopSession: async () => {},
+    observe: async () => makeObservation(),
+    exec: async () => ({ ok: true, durationMs: 1, stdout: huge, returnValue: huge }),
+  };
+
+  const config = makeConfig({ provider, llmProvider: mockLlm, maxSteps: 3 });
+  await executeTask(makeTask(), config);
+
+  // The second prompt to the LLM contains the recentTraces summary that
+  // includes the prior exec result.
+  const secondPrompt = promptsReceived[1] ?? "";
+  // Hard cap: a 20KB single value must not appear in full inside the prompt.
+  assert.ok(
+    secondPrompt.length < 10_000,
+    `prompt should be capped well under 10KB; got ${secondPrompt.length}`,
+  );
+  // But there must be SOME signal of the result so the model knows it ran.
+  assert.match(
+    secondPrompt,
+    /AAAA/,
+    "prompt should still contain a preview of stdout",
+  );
+  // And there should be a marker so the model knows it was truncated.
+  assert.match(
+    secondPrompt,
+    /truncat/i,
+    "prompt should mark the value as truncated",
+  );
+});
+
 // ---------------------------------------------------------------------------
 // Change 4: existingSession
 // ---------------------------------------------------------------------------
@@ -374,4 +460,121 @@ test("executeTask surfaces LLM usage in LoopResult when provider returns it", as
     return sum + (u?.inputTokens ?? 0) + (u?.outputTokens ?? 0);
   }, 0);
   assert.equal(result.usage!.totalTokens, expectedTotal, "aggregated totalTokens should match sum of events");
+});
+
+// ---------------------------------------------------------------------------
+// skillGuidance — section-priority truncation
+// ---------------------------------------------------------------------------
+
+function makeSkill(overrides: Partial<LoadedSkill> & { sections: Record<string, string> }): LoadedSkill {
+  return {
+    id: "skill_test",
+    scope: "domain",
+    tags: ["test"],
+    updatedAt: new Date().toISOString(),
+    source: "generated",
+    path: "/fake/skill.md",
+    body: "",
+    sections: overrides.sections,
+    ...overrides,
+  };
+}
+
+test("skillGuidance includes Known Traps content", () => {
+  const skill = makeSkill({
+    sections: {
+      "Facts": "The site is at example.com.",
+      "Known Traps": "window.dispatchEvent does NOT work. Use CDP Input.dispatchKeyEvent instead.",
+    },
+  });
+  const guidance = skillGuidance(skill);
+  assert.match(guidance, /Known Traps/u);
+  assert.match(guidance, /window\.dispatchEvent does NOT work/u);
+});
+
+test("skillGuidance places Known Traps before Facts", () => {
+  const skill = makeSkill({
+    sections: {
+      "Facts": "The site is at example.com.",
+      "Known Traps": "Do not use synthetic events.",
+    },
+  });
+  const guidance = skillGuidance(skill);
+  const trapsIdx = guidance.indexOf("Do not use synthetic events");
+  const factsIdx = guidance.indexOf("The site is at example.com");
+  assert.ok(trapsIdx < factsIdx, "Known Traps should appear before Facts in guidance");
+});
+
+test("skillGuidance includes Workflow content", () => {
+  const skill = makeSkill({
+    sections: {
+      "Workflow": "1. Navigate to /classic. 2. Dismiss tutorial. 3. Use wireActions.",
+      "Facts": "The game is available at /classic.",
+    },
+  });
+  const guidance = skillGuidance(skill);
+  assert.match(guidance, /Workflow/u);
+  assert.match(guidance, /Navigate to \/classic/u);
+});
+
+test("skillGuidance includes Traps section when skill uses Traps instead of Known Traps", () => {
+  const skill = makeSkill({
+    sections: {
+      "Traps": "Avoid clicking the ads.",
+    },
+  });
+  const guidance = skillGuidance(skill);
+  assert.match(guidance, /Traps/u);
+  assert.match(guidance, /Avoid clicking the ads/u);
+});
+
+test("skillGuidance truncates at 1000 chars but preserves first matched section", () => {
+  const skill = makeSkill({
+    sections: {
+      "Known Traps": "A".repeat(500),
+      "Workflow": "B".repeat(500),
+      "Facts": "C".repeat(500),
+    },
+  });
+  const guidance = skillGuidance(skill);
+  assert.ok(guidance.length <= 1000, `guidance should be capped at 1000 chars, got ${guidance.length}`);
+  assert.match(guidance, /Known Traps/u, "should still include Known Traps section header");
+  assert.match(guidance, /A{10,}/u, "should include traps content even with long sections");
+});
+
+test("skillGuidance falls back to body when no sections match", () => {
+  const skill = makeSkill({
+    body: "Fallback guidance content from the body.",
+    sections: {},
+  });
+  const guidance = skillGuidance(skill);
+  assert.equal(guidance, "Fallback guidance content from the body.");
+});
+
+// ---------------------------------------------------------------------------
+// classifyUserIntent — heuristic intent classification
+// ---------------------------------------------------------------------------
+
+test("classifyUserIntent returns assist for tactical messages", () => {
+  assert.equal(classifyUserIntent("Use my work email", "Download invoices"), "assist");
+  assert.equal(classifyUserIntent("skip the second result", "Download invoices"), "assist");
+  assert.equal(classifyUserIntent("try a different selector", "Download invoices"), "assist");
+  assert.equal(classifyUserIntent("scroll down", "Download invoices"), "assist");
+});
+
+test("classifyUserIntent returns redirect for task-switching messages", () => {
+  assert.equal(classifyUserIntent("go to google", "play 2048 game"), "redirect");
+  assert.equal(classifyUserIntent("actually, find me flights to Tokyo", "Download invoices"), "redirect");
+  assert.equal(classifyUserIntent("no, search for Amazon instead", "Find Stripe pricing"), "redirect");
+  assert.equal(classifyUserIntent("switch to the billing page", "Download invoices"), "redirect");
+  assert.equal(classifyUserIntent("now do a search for weather", "Download invoices"), "redirect");
+  assert.equal(classifyUserIntent("I want you to find the CEO's email", "Download invoices"), "redirect");
+});
+
+test("classifyUserIntent returns cancel for stop signals", () => {
+  assert.equal(classifyUserIntent("stop", "Download invoices"), "cancel");
+  assert.equal(classifyUserIntent("cancel", "Download invoices"), "cancel");
+  assert.equal(classifyUserIntent("abort", "Download invoices"), "cancel");
+  assert.equal(classifyUserIntent("quit", "Download invoices"), "cancel");
+  assert.equal(classifyUserIntent("never mind", "Download invoices"), "cancel");
 });

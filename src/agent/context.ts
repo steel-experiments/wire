@@ -37,6 +37,11 @@ export interface StateDiffSummary {
   consecutiveUnchanged: number;
 }
 
+export interface ObjectiveOverride {
+  newObjective: string;
+  originalObjective: string;
+}
+
 export interface ContextBundle {
   task: TaskObjective;
   skills: SkillSummary[];
@@ -51,6 +56,8 @@ export interface ContextBundle {
   providerActions?: Array<{ kind: string; description: string }>;
   /** Last N user messages, newest first. */
   userMessages?: string[];
+  /** When set, the user has redirected the task to a new objective. */
+  objectiveOverride?: ObjectiveOverride;
 }
 
 import { redactSecrets } from "../shared/redact.js";
@@ -59,15 +66,17 @@ const INJECTION_LINE_PATTERN = /^(system|ignore previous|disregard|forget)\b/iu;
 const SYSTEM_TAG_PATTERN = /<system>[\s\S]*?<\/system>/giu;
 const SKILL_GUIDANCE_CHAR_LIMIT = 1000;
 
-export function sanitizeSkillContent(text: string): string {
+export function stripInjectionPatterns(text: string): string {
   let result = text.replace(SYSTEM_TAG_PATTERN, "");
-
   result = result
     .split("\n")
     .filter((line) => !INJECTION_LINE_PATTERN.test(line))
     .join("\n");
+  return result;
+}
 
-  return result.slice(0, SKILL_GUIDANCE_CHAR_LIMIT);
+export function sanitizeSkillContent(text: string): string {
+  return stripInjectionPatterns(text).slice(0, SKILL_GUIDANCE_CHAR_LIMIT);
 }
 
 /**
@@ -80,7 +89,13 @@ export function assembleSystemPrompt(context: ContextBundle): string {
   // Role and task mode
   sections.push(`You are a browser automation agent running in ${context.task.mode} mode.`);
   sections.push("You have an active browser session. You MUST interact with the browser to complete tasks — never answer from prior knowledge.");
-  sections.push(`Objective: ${redactSecrets(context.task.objective)}`);
+
+  if (context.objectiveOverride) {
+    sections.push(`Objective: ${redactSecrets(context.objectiveOverride.newObjective)}`);
+    sections.push(`Previous objective (superseded by user redirect): ${redactSecrets(context.objectiveOverride.originalObjective)}`);
+  } else {
+    sections.push(`Objective: ${redactSecrets(context.task.objective)}`);
+  }
 
   // Constraints
   if (context.task.constraints.length > 0) {
@@ -122,11 +137,15 @@ export function assembleUserPrompt(context: ContextBundle): string {
   const sections: string[] = [];
 
   if (context.userMessages && context.userMessages.length > 0) {
+    const redirectActive = !!context.objectiveOverride;
+    const framing = redirectActive
+      ? "The user redirected the task. Follow the new objective above as the primary goal."
+      : "These are direct instructions from the user. Treat them as authoritative " +
+        "for plan adjustments unless they conflict with the policy engine.";
     sections.push(
       "Recent user messages (most recent first):\n" +
         context.userMessages.map((m) => `- ${redactSecrets(m)}`).join("\n") +
-        "\n\nThese are direct instructions from the user. Treat them as authoritative " +
-        "for plan adjustments unless they conflict with the policy engine.",
+        "\n\n" + framing,
     );
   }
 
@@ -140,7 +159,7 @@ export function assembleUserPrompt(context: ContextBundle): string {
       (s) => {
         const base = `- ${s.id} (${s.scope}): ${redactSecrets(s.matchReason)}`;
         if (s.guidance && s.guidance.length > 0) {
-          return `${base}\n  Guidance: ${redactSecrets(sanitizeSkillContent(s.guidance))}`;
+          return `${base}\n  Guidance: ${redactSecrets(s.guidance)}`;
         }
         return base;
       },
@@ -211,19 +230,29 @@ export function assembleUserPrompt(context: ContextBundle): string {
 
 const BASE_ACTION_GUIDANCE = [
   "Return exactly one next action as JSON.",
+  // --- Vision-first interaction --------------------------------------------
+  "Each observation includes a screenshot of the page. Look at it FIRST. If the screenshot shows a modal, banner, cookie wall, tutorial, or overlay blocking the content you need, dismiss it before doing anything else — usually with `await clickVisibleText(\"<button text from the screenshot>\")`.",
+  "When the goal needs interacting with a visible element (a button, link, tab), prefer clicking it by its visible label over hand-rolling a DOM selector. Reading the screenshot is faster and more reliable than guessing class names.",
+  "The page-summary fields (URL, title, headings, element counts) are orientation only. To read the page's actual text content, use exec (e.g. `return document.body.innerText`).",
+  // --- Action shapes -------------------------------------------------------
   'For "observe", omit payload unless you need {"targetId":"..."}',
   'For "exec", set payload.code to JavaScript that runs in the browser. Code is auto-wrapped as (async () => { YOUR_CODE })(). Do NOT wrap your code in another IIFE; use top-level `return` to output results.',
   "Each exec call defaults to a 12-second CDP timeout and payload.timeoutMs is capped at 12000. Keep scripts short; avoid sleep/poll loops. For long sequences, split across turns or return wireActions.",
   'For "raw", set payload.method to a CDP method and payload.params to its parameters. Use raw only when exec cannot reach the needed browser behavior.',
   '"exec" code can return {wireActions: [{method, params}, ...]} to send CDP commands after the code runs. Keep wireActions batches under 80 commands; send another action after reading state.',
-  "Observation gives you orientation (URL, title, headings, element counts) — NOT page content. To read page content, write exec code (e.g. return document.body.innerText or query specific selectors).",
   "Prefer direct URL patterns before brittle DOM hunting when the destination is obvious.",
   "For web search tasks, use DuckDuckGo (duckduckgo.com) or Bing (bing.com). Google blocks headless browsers with captchas.",
   "Before extracting search result selectors, confirm the current URL is still the search results page. If you opened a result tab/page, switch back to the search target or re-run the search before scraping SERP selectors.",
   "Wire auto-observes after navigation code. Do NOT emit a separate observe after navigating.",
   "After navigating to a target page, always exec code to extract the answer before finishing. Navigation alone is not task completion.",
   "Only use finish after your exec code has returned the actual answer in its return value.",
-  "Helpers available in every exec block: clickVisibleText(text), fillByLabel(label, value), extractTable(selector), waitForSelector(selector, timeoutMs). Use them for common interactions; fall back to querySelector for precision.",
+  // --- Helpers (defined in every exec block) -------------------------------
+  "Helpers available in every exec block — prefer these over hand-rolled querySelector loops:",
+  '  • `await clickVisibleText("Skip")` — clicks the first visible button/link whose text contains the argument. Use this to dismiss modals, accept cookies, follow CTAs.',
+  '  • `await fillByLabel("Email", "alice@example.com")` — focuses the input matched by <label>, aria-label, or placeholder, sets the value, and fires input/change events.',
+  '  • `extractTable("table.results")` — returns a 2D array of cell text from the matched table.',
+  '  • `await waitForSelector(".game-container", 5000)` — resolves when the selector appears, rejects after timeoutMs.',
+  "These helpers throw a descriptive error if the target is missing — let the throw bubble up so you see what went wrong, then adjust.",
   "Use reusable routes, selectors, waits, and traps from loaded skills when they apply.",
   "Do not wrap the JSON in prose.",
 ];

@@ -284,6 +284,44 @@ test("classifyExecRisk still flags real submit code", () => {
   assert.equal(classifyExecRisk("checkout()").kind, "submit");
 });
 
+test("classifyExecRisk does NOT flag 'send' as a helper-function name", () => {
+  // Regression: runs 1+2 of the play2048 group hit submit-approval because the
+  // model wrote `function send(dir){...}` and `const send = key => ...` as
+  // keyboard-dispatch helpers. The word "send" is too common in input code to
+  // treat as a financial verb.
+  assert.equal(
+    classifyExecRisk(
+      "function send(dir){ document.dispatchEvent(new KeyboardEvent('keydown',{key:dir,bubbles:true})); }",
+    ).kind,
+    "input",
+  );
+  assert.equal(
+    classifyExecRisk(
+      "const send = key => document.dispatchEvent(new KeyboardEvent('keydown',{key,bubbles:true}));",
+    ).kind,
+    "input",
+  );
+  // A bare `send(...)` call alone doesn't tell us much — but it must not be
+  // mistaken for a financial submit just because of its name.
+  assert.notEqual(classifyExecRisk("send('ArrowDown');").kind, "submit");
+});
+
+test("classifyExecRisk does NOT flag declarations of pay/purchase/checkout", () => {
+  // A function called `purchase` is not the same as actually invoking a
+  // purchase. Declarations should pass through; calls should still flag.
+  assert.equal(
+    classifyExecRisk("function purchase() { return computePrice(); }").kind,
+    "read",
+  );
+  assert.equal(
+    classifyExecRisk("const checkout = computeTotal;").kind,
+    "read",
+  );
+  // But invocations still flag.
+  assert.equal(classifyExecRisk("purchase();").kind, "submit");
+  assert.equal(classifyExecRisk("order.pay()").kind, "submit");
+});
+
 // ---------------------------------------------------------------------------
 // rules.ts — BASELINE_RULES
 // ---------------------------------------------------------------------------

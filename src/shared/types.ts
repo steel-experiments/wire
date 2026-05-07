@@ -32,6 +32,7 @@ export type TraceEventKind =
   | "approval-request"
   | "approval-result"
   | "skill-load"
+  | "skill-empty"
   | "skill-proposal"
   | "llm-usage"
   | "user-message"

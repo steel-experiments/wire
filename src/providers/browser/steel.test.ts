@@ -331,6 +331,46 @@ test("SteelProvider.exec evaluates code in the page target", async () => {
   }
 });
 
+test("SteelProvider.exec surfaces exception class+message+location, not bare 'Uncaught'", async () => {
+  // Regression: runs were getting bare `stderr: "Uncaught (in promise)"` with
+  // no class, message, or stack frame. The model can't debug from that — it
+  // retried near-identical code three times before being aborted. Surface the
+  // actual exception details so the next exec can be informed.
+  const { provider, setNextResponse, setCdpResponse, restore } = createMockedProvider();
+  setNextResponse("/sessions/aaa-bbb-ccc", fakeSteelSession({ id: "aaa-bbb-ccc" }));
+  setCdpResponse("Target.getTargets", {
+    targetInfos: [{ targetId: "tab-1", type: "page", title: "Example", url: "https://example.com" }],
+  });
+  setCdpResponse("Target.attachToTarget", { sessionId: "cdp-session-1" });
+  setCdpResponse("Runtime.evaluate", {
+    exceptionDetails: {
+      text: "Uncaught (in promise)",
+      lineNumber: 2,
+      columnNumber: 14,
+      exception: {
+        type: "object",
+        subtype: "error",
+        className: "TypeError",
+        description: "TypeError: foo is not a function\n    at <anonymous>:3:5",
+      },
+    },
+  });
+
+  try {
+    const result = await provider.exec({
+      sessionId: "session_aaa-bbb-ccc" as never,
+      code: "return foo();",
+    });
+    assert.equal(result.ok, false);
+    const stderr = result.stderr ?? "";
+    assert.match(stderr, /TypeError/, "stderr should include the error class");
+    assert.match(stderr, /foo is not a function/, "stderr should include the error message");
+    assert.match(stderr, /<anonymous>:3:5|line 2|col(?:umn)? 14/i, "stderr should include a location");
+  } finally {
+    restore();
+  }
+});
+
 test("SteelProvider.raw sends a CDP command over websocket", async () => {
   const { provider, setNextResponse, setCdpResponse, restore } = createMockedProvider();
   setNextResponse("/sessions/aaa-bbb-ccc", fakeSteelSession({ id: "aaa-bbb-ccc" }));
