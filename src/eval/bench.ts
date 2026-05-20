@@ -13,6 +13,7 @@ import { createOpenAIProvider } from "../providers/llm/openai.js";
 import { createAnthropicProvider } from "../providers/llm/anthropic.js";
 import { nowIsoUtc } from "../shared/ids.js";
 import { atomicWriteJson, ensureDir, entityDir, entityPath, listJsonFiles, readJsonFile } from "../storage/atomic.js";
+import { defaultStorageRoot } from "../cli/paths.js";
 
 // Types
 
@@ -135,7 +136,7 @@ async function runBenchmark(
   judgeProvider?: LLMProvider,
 ): Promise<BenchResult> {
   const notes: string[] = [];
-  const root = process.env.WIRE_ROOT ?? ".wire";
+  const root = defaultStorageRoot();
 
   const runOpts: RunOptions = {
     objective: bm.objective,
@@ -308,10 +309,6 @@ export async function loadBenchmarks(filePath: string): Promise<BenchmarkCase[]>
 // Report persistence
 
 const BENCH_KIND = "benchmarks";
-
-function defaultStorageRoot(): string {
-  return process.env.WIRE_ROOT ?? ".wire";
-}
 
 function benchReportPath(root: string, id: string): string {
   return entityPath(root, BENCH_KIND, id);

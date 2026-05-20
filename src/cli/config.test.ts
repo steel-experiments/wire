@@ -148,6 +148,30 @@ test("loadConfig reads user-level ~/.wire/config.json", async () => {
   }
 });
 
+test("loadConfig reads config from WIRE_HOME when no test userDir is supplied", async () => {
+  const wireHome = await makeIsolatedDir();
+  const projectDir = await makeIsolatedDir();
+  const previous = process.env.WIRE_HOME;
+  try {
+    process.env.WIRE_HOME = wireHome;
+    await writeFile(
+      join(wireHome, "config.json"),
+      JSON.stringify({ llm: { provider: "openai", model: "from-wire-home" } }),
+    );
+    const config = await loadConfig(projectDir);
+    assert.equal(config.llm?.provider, "openai");
+    assert.equal(config.llm?.model, "from-wire-home");
+  } finally {
+    if (previous === undefined) {
+      delete process.env.WIRE_HOME;
+    } else {
+      process.env.WIRE_HOME = previous;
+    }
+    await rm(wireHome, { recursive: true });
+    await rm(projectDir, { recursive: true });
+  }
+});
+
 test("loadConfig merges user defaults with project overrides", async () => {
   const userDir = await makeIsolatedDir();
   const projectDir = await makeIsolatedDir();

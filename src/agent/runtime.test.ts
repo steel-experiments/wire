@@ -9,7 +9,7 @@ import type { ActionHandler } from "./actions.js";
 import type { PolicyEngine } from "../policy/engine.js";
 import type { LLMProvider, ChatMessage, ChatResponse } from "../providers/llm/openai.js";
 import { createId } from "../shared/ids.js";
-import type { Task, BrowserSession, BrowserObservation, LoadedSkill } from "../shared/types.js";
+import type { Task, BrowserSession, BrowserObservation, LoadedSkill, JsonObject } from "../shared/types.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -414,6 +414,121 @@ test("executeTask closes a replacement session created after reconfiguring an ex
     stoppedSessionIds,
     [existingSession.id, replacementSession.id],
     "should stop both the old injected session during reconfigure and the replacement session during final cleanup",
+  );
+});
+
+test("executeTask auto-recovers once from anti-bot captcha observation", async () => {
+  const { mkdtemp, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const skillDir = await mkdtemp(join(tmpdir(), "wire-google-skill-"));
+  await writeFile(join(skillDir, "google.md"), [
+    "---",
+    "id: skill_google",
+    "scope: domain",
+    "hostnamePatterns:",
+    '  - "google.com"',
+    "tags:",
+    "  - google.com",
+    "updatedAt: 2026-05-20",
+    "source: generated",
+    "---",
+    "",
+    "# Google",
+    "",
+    "## Known Traps",
+    "",
+    "- Navigating directly to Google Search may redirect to /sorry/index with a CAPTCHA/auth wall.",
+  ].join("\n"), "utf-8");
+
+  const existingSession = makeSession();
+  const replacementSession = { ...makeSession(), id: createId("session") };
+  let createSessionCalls = 0;
+  let turnCalls = 0;
+  let capturedPayload: Record<string, unknown> | undefined;
+
+  const reconfigureHandler: ActionHandler = {
+    kind: "reconfigure",
+    description: "test reconfigure",
+    async execute(state, action, provider) {
+      capturedPayload = action.payload ?? {};
+      const newSession = await provider.createSession({ sessionConfig: action.payload ?? {} });
+      state.sessionId = newSession.id;
+      state.sessionConfig = action.payload ?? {};
+      state.events.push({
+        id: createId("event"),
+        runId: state.run.id,
+        ts: new Date().toISOString(),
+        kind: "thought-summary",
+        payload: { summary: action.summary, kind: "reconfigure" },
+      });
+      const observation = await provider.observe({ sessionId: state.sessionId });
+      state.events.push({
+        id: createId("event"),
+        runId: state.run.id,
+        ts: new Date().toISOString(),
+        kind: "observation",
+        payload: {
+          url: observation.url,
+          title: observation.title,
+          pageSummary: (observation.pageSummary as unknown as JsonObject) ?? {},
+        },
+      });
+      return {};
+    },
+  };
+
+  const provider: BrowserProvider = {
+    ...makeConfig().provider,
+    createSession: async () => {
+      createSessionCalls++;
+      return replacementSession;
+    },
+    observe: async () => {
+      if (createSessionCalls === 0) {
+        return {
+          sessionId: existingSession.id,
+          url: "https://www.google.com/sorry/index?continue=https://www.google.com/search%3Fq%3Dvercel%2Bpricing",
+          title: "Unusual traffic",
+          tabs: [],
+          pageSummary: { forms: 1, buttons: 1, dialogs: 0, tables: 0, links: 2, inputs: 1, headings: ["Verify you are human"] },
+        };
+      }
+      return {
+        sessionId: replacementSession.id,
+        url: "about:blank",
+        title: "",
+        tabs: [],
+        pageSummary: { forms: 0, buttons: 0, dialogs: 0, tables: 0, links: 0, inputs: 0, headings: [] },
+      };
+    },
+    exec: async () => ({ ok: true, durationMs: 1, returnValue: "Vercel pricing page reachable directly at /pricing" }),
+  };
+
+  const result = await executeTask(
+    makeTask(),
+    makeConfig({
+      existingSession,
+      actionHandlers: [reconfigureHandler],
+      provider,
+      skillDir,
+      maxSteps: 4,
+    }),
+    async () => {
+      turnCalls++;
+      return turnCalls === 1
+        ? { kind: "exec", summary: "Extract answer after recovery", payload: { code: "return document.body.innerText" } }
+        : { kind: "finish", summary: "Done" };
+    },
+  );
+
+  assert.equal(createSessionCalls, 1, "should create one replacement session");
+  assert.deepEqual(capturedPayload, { useProxy: true, solveCaptcha: true });
+  assert.equal(result.sessionId, replacementSession.id);
+  assert.notEqual(result.classification.kind, "blocked-auth");
+  assert.ok(
+    result.events.some((e) => e.kind === "thought-summary" && e.payload.kind === "reconfigure"),
+    "should record the recovery reconfigure",
   );
 });
 

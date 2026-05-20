@@ -42,7 +42,7 @@ function hostnameMatches(pattern: string, hostname: string): boolean {
     return hostname.endsWith(suffix) || hostname === p.slice(2);
   }
 
-  return hostname === p;
+  return hostname === p || hostname === `www.${p}`;
 }
 
 function hostnamePatternParts(pattern: string): string[] {

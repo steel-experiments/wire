@@ -272,6 +272,18 @@ test("matchSkillsByHostname wildcard matches bare domain", () => {
   assert.equal(result.length, 1);
 });
 
+test("matchSkillsByHostname bare domain matches www host", () => {
+  const skills = [
+    makeSkillMeta({
+      id: "skill_google" as SkillMetadata["id"],
+      hostnamePatterns: ["google.com"],
+    }),
+  ];
+
+  const result = matchSkillsByHostname(skills, "www.google.com");
+  assert.equal(result.length, 1);
+});
+
 test("matchSkillsByHostname returns empty for skills without hostnamePatterns", () => {
   const skills = [
     makeSkillMeta({
@@ -669,6 +681,22 @@ test("scoreSkills includes tag-matched skill even with no hostname match", () =>
   };
   const matched = scoreSkills([skill], { hostname: "elgoog.im", tags: ["pull-requests"], minScore: 6 });
   assert.equal(matched.length, 1, "tag overlap alone should still pass");
+});
+
+test("scoreSkills matches task word against hostname pattern label", () => {
+  const skill: SkillMetadata = {
+    id: "skill_vercel",
+    scope: "domain",
+    hostnamePatterns: ["vercel.com"],
+    tags: ["auto-promoted", "vercel.com"],
+    updatedAt: "2026-05-20",
+    source: "generated",
+    confidence: 0.88,
+  };
+
+  const matched = scoreSkills([skill], { tags: ["vercel", "price", "task"], minScore: 6 });
+  assert.equal(matched.length, 1, "domain skill should load before navigation when objective names the site");
+  assert.ok(matched[0]!.reasons.includes("hostname-tag-overlap:1"));
 });
 
 test("scoreSkills boosts skills with successful shorter cheaper runs", () => {

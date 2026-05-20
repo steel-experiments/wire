@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { homedir } from "node:os";
 import type { JsonObject, SessionConfig } from "../shared/types.js";
+import { wireHome } from "./paths.js";
 
 // Config types
 
@@ -114,12 +114,12 @@ async function readConfigFile(path: string, strict?: boolean): Promise<WireConfi
   }
 }
 
-// loadConfig — merges user-level ~/.wire/config.json with project wire.json
+// loadConfig — merges user-level Wire config with project wire.json
 // Project config overrides user-level defaults.
 
 export async function loadConfig(dir?: string, userDir?: string, strict?: boolean): Promise<WireConfig> {
-  const userHome = userDir ?? homedir();
-  const user = await readConfigFile(resolve(userHome, ".wire", "config.json"), strict);
+  const userConfigDir = userDir ? resolve(userDir, ".wire") : wireHome();
+  const user = await readConfigFile(resolve(userConfigDir, "config.json"), strict);
   const project = await readConfigFile(resolve(dir ?? process.cwd(), "wire.json"), strict);
 
   if (strict) {

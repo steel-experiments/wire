@@ -19,10 +19,7 @@ import { scoreRun } from "../eval/scoring.js";
 import { classifyError } from "./errors.js";
 import { success, failure } from "./output.js";
 import { buildTimeline, summarizeTimeline } from "../trace/replay.js";
-
-function defaultStorageRoot(): string {
-  return process.env["WIRE_ROOT"] ?? ".wire";
-}
+import { defaultStorageRoot } from "./paths.js";
 
 export async function main(argv: string[]): Promise<void> {
   const args = parseArgs(argv);

@@ -235,23 +235,21 @@ return {
 | `infra-error` | Network / Steel / provider |
 | `ambiguous` | Insufficient evidence |
 
-"Failed" is not a useful word. Classification is the contract that evals, skills, and humans speak.
+"Failed" is not a useful word. Classification is the shared contract.
 
 ---
 
 ## Decomposed scoring + training export
 
-Beyond the categorical 7 kinds, every run gets a decomposed score:
+Beyond the 7 categorical kinds, every run gets a decomposed score:
 
-```ts
-RunScoreComponents {
-  classification  // how the run was judged
-  contract        // satisfied / total task-contract checks
-  evidence        // artifact + observation richness
-  efficiency      // step count vs ideal
-  policy          // denials, approval violations
-}
 ```
+classification · contract · evidence · efficiency · policy
+```
+
+- `contract` — satisfied / total task-contract checks
+- `evidence` — artifact + observation richness
+- `efficiency` — step count vs ideal
 
 Traces become training data via `wire export` in four formats:
 `trajectory` · `sft` · `rewards` · `preferences`
@@ -260,7 +258,7 @@ Traces become training data via `wire export` in four formats:
 wire export --format sft --min-score 0.8 --out data/sft.jsonl
 ```
 
-**Wire does not train models.** It produces scored, redacted trajectories for SFT / reward / DPO pipelines. Score is diagnostic — verify before using as reward.
+**Wire does not train models** — it ships scored, redacted trajectories for SFT / RL.
 
 ---
 
@@ -288,7 +286,7 @@ Same browser. Different jobs.
 | Eval | Eyeballing | `wire bench --json` |
 | Multi-run experiments | Manual, lost | `branching`, `ComparisonSpec` are types |
 | Replay weeks later | Session-scoped | Persisted runs/events/artifacts |
-| Training-data export | None | `wire export` → trajectory / sft / rewards / preferences |
+| Training-data export | None | `wire export` (4 formats) |
 
 > Claude Code is an agent you *use*. Wire is an agent you *deploy*.
 
@@ -307,10 +305,8 @@ Cited in `SPECS.md:31`. We borrowed minimal-core ethos + file-based skill format
 | Skills | **User-authored** | **Agent-authored + promoted** |
 | Sessions | Tree-JSONL (`/fork`, `/clone`) | `events.jsonl` + classification |
 | Policy | **None** — "run in a container" | Deterministic engine |
-| Training export | None | `wire export` → trajectory / sft / rewards / preferences |
+| Training export | None | `wire export` (4 formats) |
 | Size | ~40k LOC, 142 files, 17 deps | ~14.5k LOC, 65 files, 1 dep |
-
-What pi does better: branching session UX is ahead of our `branching.ts`.
 
 ---
 
@@ -322,13 +318,11 @@ Cited in `SPECS.md:31`. We borrowed code-as-action + agent-authored skills.
 |---|---|---|
 | Substrate | Local Chrome via CDP | Steel cloud Chrome |
 | Action model | **Python heredoc** | Typed TS `exec` |
-| Helpers | Agent edits per task | Agent edits per task (`edit-helper` action) |
-| Skills | Markdown, agent-authored | Same, + promotion lifecycle |
+| Helpers | Agent edits per task | Same, via `edit-helper` |
+| Skills | Markdown, agent-authored | Same + promotion lifecycle |
 | Policy | Prompt-level only | Deterministic engine |
-| Trace | Daemon log + screenshots | Structured events + classification |
-| Training export | None | `wire export` → trajectory / sft / rewards / preferences |
-| Size | ~1k LOC, 6 files, 4 deps | ~14.5k LOC, 65 files, 1 dep |
-| Language | Python | TypeScript |
+| Training export | None | `wire export` (4 formats) |
+| Size | ~1k LOC, 4 deps | ~14.5k LOC, 1 dep |
 
 ---
 

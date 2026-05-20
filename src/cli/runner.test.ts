@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createId, nowIsoUtc } from "../shared/ids.js";
 import type { ApprovalRequest, RunCheckpoint, SessionId } from "../shared/types.js";
@@ -58,11 +58,10 @@ test("resolveProviderSelection rejects ambiguous provider choice when both keys 
 test("resolveSkillDir prefers explicit option over env over default", () => {
   // Regression: default was hardcoded to "./skills" (cwd-relative). When a
   // supervisor spawned wire from a tmpdir, it silently created an empty
-  // ./skills and zero skills loaded for the entire run group. Allow an env
-  // override so the install-time skills location can be set globally.
+  // ./skills and zero skills loaded for the entire run group.
   assert.equal(resolveSkillDir("./my-skills", { WIRE_SKILLS: "/etc/wire/skills" }), "./my-skills");
   assert.equal(resolveSkillDir(undefined, { WIRE_SKILLS: "/etc/wire/skills" }), "/etc/wire/skills");
-  assert.equal(resolveSkillDir(undefined, {}), "./skills");
+  assert.equal(resolveSkillDir(undefined, {}), join(homedir(), ".wire", "skills"));
 });
 
 test("reapExpiredApprovals stops sessions and marks approvals expired", async () => {

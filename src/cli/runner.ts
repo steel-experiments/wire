@@ -34,6 +34,7 @@ import type { SessionConfig } from "../shared/types.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { createConsoleTraceSink } from "../ui/stream.js";
+import { defaultSkillDir, defaultStorageRoot } from "./paths.js";
 
 // Result types
 
@@ -102,15 +103,11 @@ function autoApprovingEngine(inner: PolicyEngine): PolicyEngine {
 
 // Helpers
 
-function defaultStorageRoot(): string {
-  return process.env["WIRE_ROOT"] ?? ".wire";
-}
-
 /**
  * Resolve the skills directory in priority order:
  *   1. explicit --skill-dir option
  *   2. $WIRE_SKILLS env var (use this when wire is spawned from an arbitrary cwd)
- *   3. ./skills relative to the current working directory
+ *   3. ~/.wire/skills by default
  *
  * Exported so we can test the precedence and so external embedders can call
  * it before constructing a RuntimeConfig.
@@ -121,7 +118,7 @@ export function resolveSkillDir(
 ): string {
   if (explicit !== undefined && explicit.length > 0) return explicit;
   if (env.WIRE_SKILLS !== undefined && env.WIRE_SKILLS.length > 0) return env.WIRE_SKILLS;
-  return "./skills";
+  return defaultSkillDir();
 }
 
 function inferProviderFromModel(model?: string): LlmProvider | undefined {

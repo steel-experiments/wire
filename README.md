@@ -52,10 +52,10 @@ wire bench --provider openai --model gpt-5.4-mini  # specific LLM
 wire bench --json                                   # JSON for CI (exits 1 on failure)
 ```
 
-Reports persist to `.wire/benchmarks/` so you can diff across changes:
+Reports persist to `~/.wire/state/benchmarks/` by default so you can diff across changes:
 
 ```bash
-diff <(jq '.' .wire/benchmarks/bench-old.json) <(jq '.' .wire/benchmarks/bench-new.json)
+diff <(jq '.' ~/.wire/state/benchmarks/bench-old.json) <(jq '.' ~/.wire/state/benchmarks/bench-new.json)
 ```
 
 ## How it works
@@ -63,7 +63,7 @@ diff <(jq '.' .wire/benchmarks/bench-old.json) <(jq '.' .wire/benchmarks/bench-n
 1. **You provide an objective.** Wire creates a Task and opens a real Chrome session via Steel.
 2. **The agent loops.** Each step: observe the page (orientation only — URL, title, headings, element counts), reason with an LLM, execute JavaScript in the browser. The agent writes its own extraction and interaction code per task. Actions are real code, not a DSL.
 3. **Policy gates destructive ops.** Submissions, purchases, and deletions require explicit approval. Deny rules block irreversible actions outright.
-4. **Every run leaves evidence.** Trace events, artifacts, a classification, and an outcome summary — all persisted as JSON under `.wire/`.
+4. **Every run leaves evidence.** Trace events, artifacts, a classification, and an outcome summary — all persisted as JSON under `~/.wire/state/` by default.
 5. **Skills accumulate.** After a run, Wire proposes durable markdown skills from reusable patterns it discovered (routes, selectors, traps). These are loaded automatically on future visits to the same site.
 
 ## Domain objects
@@ -98,7 +98,7 @@ LLM settings resolve in priority order:
 1. CLI flags: `--provider openai --model gpt-5.4-mini`
 2. Environment: `WIRE_PROVIDER`, `WIRE_MODEL`
 3. Project config: `wire.json` → `{"llm":{"provider":"openai","model":"gpt-5.4-mini"}}`
-4. User config: `~/.wire/config.json`
+4. User config: `$WIRE_HOME/config.json` (default: `~/.wire/config.json`)
 5. Default: `gpt-5.4-mini` for OpenAI, `claude-sonnet-4-6` for Anthropic
 
 If both API keys are present, you must specify which provider to use. Wire rejects mismatched pairs.
@@ -112,7 +112,9 @@ If both API keys are present, you must specify which provider to use. Wire rejec
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `WIRE_PROVIDER` | Override LLM provider (`openai` or `anthropic`) |
 | `WIRE_MODEL` | Override LLM model |
-| `WIRE_ROOT` | Storage root (default: `.wire`) |
+| `WIRE_HOME` | User-level Wire home (default: `~/.wire`) |
+| `WIRE_ROOT` | Storage root (default: `$WIRE_HOME/state`) |
+| `WIRE_SKILLS` | Skills directory (default: `$WIRE_HOME/skills`) |
 
 ## Architecture
 
