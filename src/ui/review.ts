@@ -93,6 +93,15 @@ export function formatArtifacts(artifacts: Artifact[]): string {
     const mime = artifact.mimeType ? ` (${artifact.mimeType})` : "";
     lines.push(`  [${artifact.kind}] ${artifact.path}${mime}`);
     lines.push(`    ID: ${artifact.id}  Created: ${artifact.createdAt}`);
+    const hash = artifact.metadata?.contentHash;
+    const size = artifact.metadata?.contentSize;
+    const preview = artifact.metadata?.contentPreview;
+    if (typeof hash === "string") {
+      lines.push(`    Content: hash=${hash}${typeof size === "number" ? ` size=${size}` : ""}`);
+    }
+    if (typeof preview === "string" && preview.length > 0) {
+      lines.push(`    Preview: ${truncate(preview.replace(/\s+/gu, " "), 120)}`);
+    }
   }
 
   return lines.join("\n");

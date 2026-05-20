@@ -3,6 +3,7 @@ import type {
   BrowserSession,
   CreateSessionInput,
   JsonObject,
+  JsonValue,
   LoadedSkill,
   ProfileId,
   ProposedAction,
@@ -10,6 +11,8 @@ import type {
   SessionConfig,
   SessionId,
   Task,
+  TraceBlobKind,
+  TraceBlobRef,
   TraceEvent,
 } from "../shared/types.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
@@ -25,6 +28,7 @@ import type { LLMProvider, ChatMessage, ContentPart } from "../providers/llm/ope
 
 import {
   createLoopState,
+  deriveRunResult,
   executeStep,
   finalizeRun,
   shouldStop,
@@ -64,6 +68,12 @@ import {
 } from "./state-helpers.js";
 import { ActionRegistry, type ActionHandler } from "./actions.js";
 import { updateSkillStatsFromRun } from "../skills/stats.js";
+import {
+  contractToPrompt,
+  contractValidationPayload,
+  createTaskContract,
+  validateTaskContract,
+} from "./contract.js";
 
 export interface PauseToken {
   isPaused(): boolean;
@@ -90,6 +100,13 @@ export interface RuntimeConfig {
     details: { oldSessionId: SessionId; newSession: BrowserSession; summary: string },
   ) => Promise<void> | void;
   traceSink?: TraceSink;
+  traceLlmMessages?: boolean;
+  saveTraceBlob?: (
+    runId: TraceEvent["runId"],
+    kind: TraceBlobKind,
+    value: JsonValue,
+    contentType?: string,
+  ) => Promise<TraceBlobRef>;
   actionHandlers?: ActionHandler[];
   keepSessionOpen?: boolean;
   cancelSignal?: AbortSignal;
@@ -97,6 +114,13 @@ export interface RuntimeConfig {
   userMessageInbox?: UserMessageInbox;
   existingSession?: BrowserSession;
   releaseExistingSessionOnExit?: boolean;
+}
+
+function chatMessageToJson(message: ChatMessage): JsonObject {
+  return {
+    role: message.role,
+    content: message.content as JsonValue,
+  };
 }
 
 export interface TraceSink {
@@ -356,7 +380,12 @@ function metacognitionTraces(events: TraceEvent[]): Array<{ kind: string; summar
   return traces;
 }
 
-export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number, actionRegistry?: ActionRegistry): AgentTurnFn {
+export function defaultAgentTurn(
+  llmProvider?: LLMProvider,
+  maxSteps?: number,
+  actionRegistry?: ActionRegistry,
+  traceOptions?: Pick<RuntimeConfig, "traceLlmMessages" | "saveTraceBlob">,
+): AgentTurnFn {
   return async (state: LoopState, provider: BrowserProvider): Promise<ProposedAction> => {
     const taskPlan = planForState(state);
 
@@ -423,6 +452,13 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number, a
         case "user-message":
           summary = `user said: ${String(e.payload.message ?? "")}`;
           break;
+        case "contract-check":
+          summary = e.payload.passed === true
+            ? "completion contract passed"
+            : `completion contract failed: ${
+              Array.isArray(e.payload.missing) ? e.payload.missing.slice(0, 3).join("; ") : "missing evidence"
+            }`;
+          break;
         default:
           summary = String(e.payload.summary ?? e.kind);
       }
@@ -448,6 +484,7 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number, a
       recentTraces: [...recentTraces, ...metacognitionTraces(state.events)],
       policyNotes: [],
       plan: planToContext(taskPlan),
+      contract: contractToPrompt(state.contract),
     };
 
     if (state.sessionConfig) {
@@ -522,6 +559,27 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number, a
       ];
 
       const response = await llmProvider.chat(messages);
+
+      if (traceOptions?.traceLlmMessages === true && traceOptions.saveTraceBlob) {
+        const messageRefs: JsonObject[] = [];
+        for (const message of messages) {
+          const ref = await traceOptions.saveTraceBlob(state.run.id, "llm-message", chatMessageToJson(message), "application/json");
+          messageRefs.push({ hash: ref.hash, size: ref.size, kind: ref.kind, role: message.role });
+        }
+        const responseRef = await traceOptions.saveTraceBlob(state.run.id, "llm-response", response.content, "text/plain");
+        state.events.push({
+          id: createId("event"),
+          runId: state.run.id,
+          ts: nowIsoUtc(),
+          kind: "llm-call",
+          payload: {
+            callIndex: state.stepCount + 1,
+            model: response.model,
+            messageRefs,
+            responseRef: { hash: responseRef.hash, size: responseRef.size, kind: responseRef.kind },
+          },
+        });
+      }
 
       if (response.usage) {
         state.events.push({
@@ -616,7 +674,7 @@ export async function executeTask(
   agentTurn?: AgentTurnFn,
 ): Promise<LoopResult> {
   const registry = buildActionRegistry(config);
-  const turn = agentTurn ?? defaultAgentTurn(config.llmProvider, config.maxSteps, registry);
+  const turn = agentTurn ?? defaultAgentTurn(config.llmProvider, config.maxSteps, registry, config);
 
   if (isCancelled(config)) {
     return executeWithState(task, config, turn, undefined, createCancelledState(task, config), undefined, registry);
@@ -639,7 +697,7 @@ export async function resumeTask(
   agentTurn?: AgentTurnFn,
 ): Promise<LoopResult> {
   const registry = buildActionRegistry(config);
-  const turn = agentTurn ?? defaultAgentTurn(config.llmProvider, config.maxSteps, registry);
+  const turn = agentTurn ?? defaultAgentTurn(config.llmProvider, config.maxSteps, registry, config);
   const state: LoopState = {
     task: checkpoint.task,
     run: checkpoint.run,
@@ -650,6 +708,7 @@ export async function resumeTask(
     startedAt: checkpoint.startedAt,
     helperSource: checkpoint.helperSource ?? DEFAULT_HELPER_SOURCE,
     helperVersion: checkpoint.helperVersion ?? 0,
+    contract: createTaskContract(checkpoint.task),
   };
 
   return executeWithState(checkpoint.task, config, turn, undefined, state, checkpoint.pendingAction, registry);
@@ -949,6 +1008,23 @@ async function runMainLoop(
           appendExtractedResultArtifact(state);
         } else if (!hasRecordedTaskArtifact(state)) {
           appendTaskNoteArtifact(state, action.summary);
+        }
+        const validation = validateTaskContract(
+          state.contract,
+          state.events,
+          deriveRunResult(state.events, state.task.mode),
+        );
+        state.events.push({
+          id: createId("event"),
+          runId: state.run.id,
+          ts: nowIsoUtc(),
+          kind: "contract-check",
+          payload: contractValidationPayload(validation),
+        });
+        if (!validation.passed && state.stepCount < config.maxSteps) {
+          state.stepCount++;
+          await flushTraceSink(state, config, signals);
+          continue;
         }
         state.events.push({
           id: createId("event"),

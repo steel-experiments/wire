@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import type { JsonValue, RunId, TraceBlob, TraceBlobKind } from "../shared/types.js";
+import type { Artifact, JsonValue, RunId, TraceBlob, TraceBlobKind } from "../shared/types.js";
 import { nowIsoUtc, stableJsonStringify } from "../shared/ids.js";
 import { parseBoundary, traceBlobSchema } from "../shared/schemas.js";
 import {
@@ -65,4 +65,19 @@ export async function loadTraceBlob(root: string, runId: RunId, hash: string): P
   } catch (err) {
     throw new CorruptError(path, "schema validation failed", err);
   }
+}
+
+export async function resolveTraceBlobRef(root: string, runId: RunId, hash: string): Promise<JsonValue> {
+  return (await loadTraceBlob(root, runId, hash)).value;
+}
+
+export async function loadArtifactContent(root: string, artifact: Artifact): Promise<string | undefined> {
+  const hash = typeof artifact.metadata?.contentHash === "string" ? artifact.metadata.contentHash : undefined;
+  if (hash !== undefined) {
+    const value = await resolveTraceBlobRef(root, artifact.runId, hash);
+    return typeof value === "string" ? value : stableJsonStringify(value);
+  }
+
+  const legacy = artifact.metadata?.content;
+  return typeof legacy === "string" ? legacy : undefined;
 }

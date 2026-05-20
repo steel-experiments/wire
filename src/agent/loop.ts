@@ -37,6 +37,7 @@ import { detectAuthWall } from "../profiles/auth.js";
 import { redactJsonObject } from "../shared/redact.js";
 import { countConsecutiveUnchanged } from "./state-helpers.js";
 import type { ActionExecutionContext } from "./actions.js";
+import { createTaskContract, type TaskContract } from "./contract.js";
 
 const MAX_CDP_BATCH_COMMANDS = 80;
 const DEFAULT_EXEC_TIMEOUT_MS = 12_000;
@@ -246,6 +247,8 @@ export interface LoopState extends TaskContext, RunTrace, StepCounter {
   /** Task-local browser helper module source used as the exec preamble. */
   helperSource: string;
   helperVersion: number;
+  /** Minimal task-derived completion contract. */
+  contract: TaskContract;
 }
 
 export interface LoopResult {
@@ -294,6 +297,7 @@ export function createLoopState(
     startedAt: nowIsoUtc(),
     helperSource: DEFAULT_HELPER_SOURCE,
     helperVersion: 0,
+    contract: createTaskContract(task),
   };
 
   if (sessionLiveUrl !== undefined) {

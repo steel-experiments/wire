@@ -462,6 +462,42 @@ test("executeTask surfaces LLM usage in LoopResult when provider returns it", as
   assert.equal(result.usage!.totalTokens, expectedTotal, "aggregated totalTokens should match sum of events");
 });
 
+test("executeTask records opt-in LLM call blob refs without inline messages", async () => {
+  const saved: Array<{ kind: string; value: unknown; contentType?: string }> = [];
+  const mockLlm: LLMProvider = {
+    model: "test-model",
+    async chat(): Promise<ChatResponse> {
+      return {
+        content: JSON.stringify({ kind: "finish", summary: "Done" }),
+        model: "test-model",
+      };
+    },
+  };
+
+  const config = makeConfig({
+    llmProvider: mockLlm,
+    maxSteps: 1,
+    traceLlmMessages: true,
+    async saveTraceBlob(_runId, kind, value, contentType) {
+      saved.push(contentType === undefined ? { kind, value } : { kind, value, contentType });
+      return { hash: `hash-${saved.length}`, size: JSON.stringify(value).length, kind };
+    },
+  });
+
+  const result = await executeTask(makeTask(), config);
+  const call = result.events.find((event) => event.kind === "llm-call");
+
+  assert.ok(call);
+  assert.ok(saved.filter((item) => item.kind === "llm-message").length >= 2);
+  assert.ok(saved.filter((item) => item.kind === "llm-response").length >= 1);
+  assert.deepEqual(
+    Object.keys(call.payload).sort(),
+    ["callIndex", "messageRefs", "model", "responseRef"].sort(),
+  );
+  assert.match(JSON.stringify(call.payload), /hash-1/u);
+  assert.doesNotMatch(JSON.stringify(call.payload), /Completion contract|Return exactly one next action/u);
+});
+
 // ---------------------------------------------------------------------------
 // skillGuidance — section-priority truncation
 // ---------------------------------------------------------------------------

@@ -162,6 +162,7 @@ async function handleRun(
     if (args.verbose) opts.verbose = args.verbose;
     if (args.quiet) opts.quiet = args.quiet;
     if (args.noColor) opts.color = false;
+    if (args.traceLlm) opts.traceLlmMessages = true;
 
     const result = await runTask(opts);
 

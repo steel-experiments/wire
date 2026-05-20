@@ -442,6 +442,13 @@ test("parseArgs parses --json flag as true", () => {
   assert.equal(args.json, true);
 });
 
+test("parseArgs parses --trace-llm flag", () => {
+  const args = parseArgs(["node", "wire", "run", "--trace-llm", "inspect prompts"]);
+
+  assert.equal(args.traceLlm, true);
+  assert.equal(args.objective, "inspect prompts");
+});
+
 test("parseArgs parses version flags", () => {
   assert.equal(parseArgs(["node", "wire", "-V"]).version, true);
   assert.equal(parseArgs(["node", "wire", "--version"]).version, true);

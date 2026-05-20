@@ -263,7 +263,7 @@ async function judgeResult(
         content: `Objective: ${objective}\n\nAgent output:\n${result.slice(0, 2000)}`,
       },
     ],
-    { temperature: 0, maxTokens: 10 },
+    { temperature: 0, maxTokens: 16 },
   );
 
   const score = parseFloat(response.content.trim());

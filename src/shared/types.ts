@@ -34,6 +34,8 @@ export type TraceEventKind =
   | "skill-load"
   | "skill-empty"
   | "skill-proposal"
+  | "contract-check"
+  | "llm-call"
   | "llm-usage"
   | "user-message"
   | "error";
@@ -347,6 +349,12 @@ export interface TraceBlob {
   size: number;
   value: JsonValue;
   contentType?: string;
+}
+
+export interface TraceBlobRef {
+  hash: string;
+  size: number;
+  kind: TraceBlobKind;
 }
 
 export interface ComparisonSpec {

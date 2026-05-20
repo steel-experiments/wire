@@ -25,6 +25,7 @@ export interface CliArgs {
   verbose?: boolean;
   quiet?: boolean;
   noColor?: boolean;
+  traceLlm?: boolean;
   help?: boolean;
   version?: boolean;
 }
@@ -241,6 +242,12 @@ export function parseArgs(argv: string[]): CliArgs {
       continue;
     }
 
+    if (arg === "--trace-llm") {
+      result.traceLlm = true;
+      i++;
+      continue;
+    }
+
     // Positional: the command
     if (arg !== undefined && VALID_COMMANDS.has(arg)) {
       result.command = arg as CliArgs["command"];
@@ -324,6 +331,7 @@ export function formatHelp(): string {
     "  --verbose, -v            Stream observations, policy checks and full output",
     "  --quiet, -q              Suppress per-step trace stream",
     "  --no-color               Disable ANSI color in trace stream",
+    "  --trace-llm              Store LLM messages/responses as blob refs",
     "  --version, -V            Show version",
     "  --help, -h               Show this help message",
   ].join("\n");

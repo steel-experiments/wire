@@ -914,6 +914,8 @@ export interface Artifact {
 
 Trace spans must not repeatedly persist full immutable message arrays or large content payloads inline. Store large trace content as run-scoped blobs keyed by a hash of canonical JSON, then keep compact refs in events and metadata. Reconstruct full content at read time when a review/debug command needs it.
 
+LLM message tracing is opt-in (`--trace-llm` or `WIRE_TRACE_LLM_MESSAGES=1`) and must store only message/response blob refs on `llm-call` events, never full prompts inline.
+
 ### 15.5 Minimum trace policy
 Every run must capture at least:
 - task id,

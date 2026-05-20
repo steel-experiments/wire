@@ -40,6 +40,7 @@ import { listSessions, loadSession, saveSession } from "./sessions.js";
 import { listArtifacts, loadArtifact, saveArtifact } from "./artifacts.js";
 import {
   hashTraceBlobValue,
+  loadArtifactContent,
   loadTraceBlob,
   saveTraceBlobValue,
   traceBlobPath,
@@ -742,6 +743,20 @@ test("loadTraceBlob throws NotFoundError for missing blob", async () => {
   await assert.rejects(() => loadTraceBlob(testRoot, createId("run"), "0".repeat(64)), {
     name: "NotFoundError",
   } as Error);
+});
+
+test("loadArtifactContent resolves contentHash blobs and legacy content metadata", async () => {
+  testRoot = makeRoot();
+  const runId = createId("run");
+  const blob = await saveTraceBlobValue(testRoot, runId, "artifact-content", "full body", "text/plain");
+  const artifact = makeArtifact({
+    runId,
+    metadata: { contentHash: blob.hash, contentPreview: "full" },
+  });
+  const legacy = makeArtifact({ metadata: { content: "legacy body" } });
+
+  assert.equal(await loadArtifactContent(testRoot, artifact), "full body");
+  assert.equal(await loadArtifactContent(testRoot, legacy), "legacy body");
 });
 
 // ---------------------------------------------------------------------------

@@ -124,6 +124,16 @@ function resultAddressesObjective(resultText: string | undefined, objective: str
   return false;
 }
 
+function latestFailedContractCheck(events: TraceEvent[]): string[] {
+  const failed = [...events].reverse().find((event) =>
+    event.kind === "contract-check" &&
+    event.payload.passed === false
+  );
+  if (!failed) return [];
+  const missing = failed.payload.missing;
+  return Array.isArray(missing) ? missing.map(String).filter((item) => item.length > 0) : ["Completion contract failed"];
+}
+
 export interface ClassificationInput {
   mode: TaskMode;
   events: TraceEvent[];
@@ -290,6 +300,8 @@ export function classifyRun(input: ClassificationInput): RunClassification {
   const objectiveRelevant = mode === "task" && objective;
   const finalResultText = extractFinalResultText(events);
   const addressesObjective = !objectiveRelevant || resultAddressesObjective(finalResultText, objective!);
+  const contractFailures = latestFailedContractCheck(events);
+  const contractPassed = contractFailures.length === 0;
 
   if (codeSuccessCount > 0 && codeFailCount === 0) {
     const hasAnswerArtifact = answerArtifactCount > 0 || (terminalEventHasExtractedAnswer && !terminalIsNavOnly);
@@ -298,6 +310,13 @@ export function classifyRun(input: ClassificationInput): RunClassification {
       : hasEvidence && (terminalEventIsEvidence || terminalEventHasExtractedAnswer);
 
     if (taskModeHasCompletionEvidence) {
+      if (!contractPassed) {
+        return {
+          kind: "partial-success",
+          confidence: 0.55,
+          notes: ["Completion contract failed", ...contractFailures.slice(0, 3)],
+        };
+      }
       if (addressesObjective) {
         if (errorCount > 0) {
           const recovered: RunClassification = {
@@ -336,6 +355,17 @@ export function classifyRun(input: ClassificationInput): RunClassification {
   // Partial success — but if the run recovered and has a real answer artifact, count it complete
   if (codeSuccessCount > 0 && codeFailCount > 0) {
     const hasAnswerArtifact = answerArtifactCount > 0 && codeSuccessWithOutputCount > 0;
+    if (mode === "task" && hasAnswerArtifact && !contractPassed) {
+      return {
+        kind: "partial-success",
+        confidence: 0.55,
+        notes: [
+          `Recovered after ${codeFailCount} failed code execution${codeFailCount === 1 ? "" : "s"}`,
+          "Completion contract failed",
+          ...contractFailures.slice(0, 3),
+        ],
+      };
+    }
     if (mode === "task" && hasAnswerArtifact && addressesObjective) {
       return {
         kind: "task-complete",
