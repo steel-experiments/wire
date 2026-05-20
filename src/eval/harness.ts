@@ -9,9 +9,7 @@ import type {
 import { computeTaskMetrics, aggregateMetrics, formatEvaluationReport } from "./metrics.js";
 import type { TaskMetrics, AggregateMetrics } from "./metrics.js";
 
-// ---------------------------------------------------------------------------
 // Benchmark task definition
-// ---------------------------------------------------------------------------
 
 export interface BenchmarkTask {
   id: string;
@@ -24,9 +22,7 @@ export interface BenchmarkTask {
   maxSteps: number;
 }
 
-// ---------------------------------------------------------------------------
 // Evaluation result
-// ---------------------------------------------------------------------------
 
 export interface EvaluationResult {
   id: string;
@@ -36,9 +32,7 @@ export interface EvaluationResult {
   notes: string[];
 }
 
-// ---------------------------------------------------------------------------
 // Evaluate a single benchmark
-// ---------------------------------------------------------------------------
 
 export function evaluateRun(
   benchmark: BenchmarkTask,
@@ -80,9 +74,7 @@ export function evaluateRun(
   };
 }
 
-// ---------------------------------------------------------------------------
 // Evaluate multiple benchmarks
-// ---------------------------------------------------------------------------
 
 export interface BatchEvaluationResult {
   results: EvaluationResult[];
@@ -123,9 +115,7 @@ export function evaluateBatch(
   };
 }
 
-// ---------------------------------------------------------------------------
 // Sample benchmark tasks
-// ---------------------------------------------------------------------------
 
 export const SAMPLE_BENCHMARKS: BenchmarkTask[] = [
   {

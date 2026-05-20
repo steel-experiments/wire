@@ -3,9 +3,7 @@ import { resolve } from "node:path";
 import { homedir } from "node:os";
 import type { JsonObject, SessionConfig } from "../shared/types.js";
 
-// ---------------------------------------------------------------------------
 // Config types
-// ---------------------------------------------------------------------------
 
 export type LlmProvider = "openai" | "anthropic";
 
@@ -21,9 +19,7 @@ export interface WireConfig {
   model?: string;
 }
 
-// ---------------------------------------------------------------------------
 // readConfigFile — reads a JSON config file, returns {} on missing/invalid
-// ---------------------------------------------------------------------------
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -118,10 +114,8 @@ async function readConfigFile(path: string, strict?: boolean): Promise<WireConfi
   }
 }
 
-// ---------------------------------------------------------------------------
 // loadConfig — merges user-level ~/.wire/config.json with project wire.json
 // Project config overrides user-level defaults.
-// ---------------------------------------------------------------------------
 
 export async function loadConfig(dir?: string, userDir?: string, strict?: boolean): Promise<WireConfig> {
   const userHome = userDir ?? homedir();
@@ -160,9 +154,7 @@ export async function loadConfig(dir?: string, userDir?: string, strict?: boolea
   return merged;
 }
 
-// ---------------------------------------------------------------------------
 // resolveLlmConfig — CLI flag > env var > config file > legacy config
-// ---------------------------------------------------------------------------
 
 export function resolveLlmConfig(
   cliProvider?: LlmProvider,

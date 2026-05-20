@@ -4,7 +4,13 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { HELPER_PREAMBLE, prependHelpers } from "./helpers.js";
+import {
+  createHelperDiff,
+  HELPER_PREAMBLE,
+  helperSourceToPreamble,
+  prependHelpers,
+  validateHelperSource,
+} from "./helpers.js";
 
 test("HELPER_PREAMBLE defines clickVisibleText", () => {
   assert.ok(HELPER_PREAMBLE.includes("function clickVisibleText("), "missing clickVisibleText");
@@ -58,6 +64,51 @@ test("prependHelpers adds a newline separator between preamble and user code", (
 test("prependHelpers with empty user code still returns preamble", () => {
   const result = prependHelpers("");
   assert.ok(result.includes("function clickVisibleText("), "preamble missing for empty code");
+});
+
+test("prependHelpers accepts rewritten helper source", () => {
+  const helperSource = "export function findTitle() { return document.title; }";
+  const result = prependHelpers("return findTitle();", helperSource);
+
+  assert.ok(result.startsWith("function findTitle()"), "rewritten helper not prepended");
+  assert.ok(!result.includes("export function"), "export keyword should be stripped for execution");
+  assert.ok(result.endsWith("return findTitle();"), "user code missing");
+});
+
+test("helperSourceToPreamble strips exports from JS-compatible module source", () => {
+  const source = [
+    "export async function clickThing() { return true; }",
+    "export const selector = '#main';",
+  ].join("\n");
+
+  const preamble = helperSourceToPreamble(source);
+
+  assert.match(preamble, /^async function clickThing/u);
+  assert.match(preamble, /\nconst selector = '#main';/u);
+});
+
+test("validateHelperSource rejects empty helper edits", () => {
+  const result = validateHelperSource("  ");
+  assert.equal(result.ok, false);
+});
+
+test("validateHelperSource rejects Node globals", () => {
+  const result = validateHelperSource("function bad() { return process.env.SECRET; }");
+  assert.equal(result.ok, false);
+});
+
+test("validateHelperSource accepts JS-compatible exported helpers", () => {
+  const result = validateHelperSource("export function byTestId(id) { return document.querySelector(`[data-testid=\"${id}\"]`); }");
+  assert.deepEqual(result, { ok: true });
+});
+
+test("createHelperDiff records removed and added helper lines", () => {
+  const diff = createHelperDiff("function a() { return 1; }", "function a() { return 2; }");
+
+  assert.ok(diff.includes("--- helpers/before.js"));
+  assert.ok(diff.includes("+++ helpers/after.js"));
+  assert.ok(diff.includes("-function a() { return 1; }"));
+  assert.ok(diff.includes("+function a() { return 2; }"));
 });
 
 test("clickVisibleText throws on no match — error message includes text arg", () => {

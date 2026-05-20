@@ -16,6 +16,7 @@ import { createId, nowIsoUtc } from "../shared/ids.js";
 import { basename } from "node:path";
 
 import type { BrowserProvider } from "../browser/bridge.js";
+import { DEFAULT_HELPER_SOURCE } from "../browser/helpers.js";
 import { createBrowserSession, stopBrowserSession } from "../browser/session.js";
 
 import type { PolicyEngine } from "../policy/engine.js";
@@ -36,7 +37,7 @@ import { createPlan, planToContext, advancePlanBy, type TaskPlan } from "./plann
 import { observeBrowser, toObservationPayload } from "../browser/observe.js";
 import { detectAuthWall } from "../profiles/auth.js";
 import { llmProposeSkill, generateSkillProposal, manageSkillPromotion } from "../skills/promote.js";
-import { findMatchingSkillDocs, loadSkillDocsFromDir } from "../skills/loader.js";
+import { findMatchingSkillDocMatches, loadSkillDocsFromDir } from "../skills/loader.js";
 import { parseActionFromLlm, registerActionKind } from "./llm-parse.js";
 import {
   latestObservation,
@@ -156,6 +157,28 @@ function capForPrompt(text: string): string {
   return `${head}\n…[truncated ${omitted} chars]…\n${tail}`;
 }
 
+function observationTabs(payload: TraceEvent["payload"]): Array<{ id: string; url: string; title: string }> {
+  const tabs = payload.tabs;
+  if (!Array.isArray(tabs)) return [];
+  return tabs.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const tab = item as JsonObject;
+    if (typeof tab.id !== "string") return [];
+    return [{
+      id: tab.id,
+      url: typeof tab.url === "string" ? tab.url : "",
+      title: typeof tab.title === "string" ? tab.title : "",
+    }];
+  });
+}
+
+function observationDriftMessage(payload: TraceEvent["payload"]): string | undefined {
+  const drift = payload.tabDrift;
+  if (!drift || typeof drift !== "object" || Array.isArray(drift)) return undefined;
+  const message = (drift as JsonObject).message;
+  return typeof message === "string" ? message : undefined;
+}
+
 function deriveSkillTags(task: Task): string[] {
   const words = `${task.title} ${task.objective} ${task.successCriteria.join(" ")}`.match(/[a-z0-9-]{4,}/giu) ?? [];
   const tags = new Set<string>();
@@ -205,9 +228,7 @@ export function skillGuidance(skill: LoadedSkill): string {
   return snippets.join(" | ").slice(0, SKILL_GUIDANCE_MAX);
 }
 
-// ---------------------------------------------------------------------------
 // User message intent classification
-// ---------------------------------------------------------------------------
 
 export type UserIntent = "assist" | "redirect" | "cancel";
 
@@ -243,7 +264,8 @@ async function syncMatchedSkills(state: LoopState, skillDir?: string): Promise<v
 
   const hostname = hostnameFromState(state);
   const tags = deriveSkillTags(state.task);
-  const matched = await findMatchingSkillDocs(skillDir, hostname, tags);
+  const matches = await findMatchingSkillDocMatches(skillDir, hostname, tags);
+  const matched = matches.map((entry) => entry.skill);
   const previousIds = state.loadedSkills.map((skill) => skill.id).join(",");
   const nextIds = matched.map((skill) => skill.id).join(",");
   state.loadedSkills = matched;
@@ -281,6 +303,11 @@ async function syncMatchedSkills(state: LoopState, skillDir?: string): Promise<v
     payload: {
       skills: matched.map((skill) => skill.id),
       labels: matched.map(skillDisplayLabel),
+      matches: matches.map((entry) => ({
+        skillId: entry.skill.id,
+        score: entry.score,
+        reasons: entry.reasons,
+      })),
       hostname: hostname ?? "",
       source: skillDir,
     },
@@ -340,13 +367,28 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number, a
       .map((e) => {
         const ps = e.payload.pageSummary as Record<string, unknown> | undefined;
         const headings = Array.isArray(ps?.headings) ? ps!.headings as string[] : undefined;
-        const obs: { url: string; title: string; forms: number; buttons: number; dialogs: number; headings?: string[] } = {
+        const obs: {
+          url: string;
+          title: string;
+          forms: number;
+          buttons: number;
+          dialogs: number;
+          headings?: string[];
+          targetId?: string;
+          tabs?: Array<{ id: string; url: string; title: string }>;
+          tabDrift?: string;
+        } = {
           url: String(e.payload.url ?? ""),
           title: String(e.payload.title ?? ""),
           forms: typeof ps?.forms === "number" ? ps.forms : 0,
           buttons: typeof ps?.buttons === "number" ? ps.buttons : 0,
           dialogs: typeof ps?.dialogs === "number" ? ps.dialogs : 0,
         };
+        if (typeof e.payload.targetId === "string") obs.targetId = e.payload.targetId;
+        const tabs = observationTabs(e.payload);
+        if (tabs.length > 0) obs.tabs = tabs;
+        const tabDrift = observationDriftMessage(e.payload);
+        if (tabDrift) obs.tabDrift = tabDrift;
         if (headings) {
           obs.headings = headings;
         }
@@ -366,6 +408,14 @@ export function defaultAgentTurn(llmProvider?: LLMProvider, maxSteps?: number, a
           break;
         case "observation":
           summary = `page: ${String(e.payload.url ?? "?")} title="${String(e.payload.title ?? "")}"`;
+          {
+            const tabs = observationTabs(e.payload);
+            const drift = observationDriftMessage(e.payload);
+            if (e.payload.targetId || tabs.length > 0) {
+              summary += ` target=${String(e.payload.targetId ?? "?")} tabs=${tabs.length}`;
+            }
+            if (drift) summary += ` ${drift}`;
+          }
           break;
         case "error":
           summary = `${String(e.payload.code ?? "error")}: ${String(e.payload.message ?? "")}`;
@@ -598,6 +648,8 @@ export async function resumeTask(
     events: checkpoint.events,
     stepCount: checkpoint.stepCount,
     startedAt: checkpoint.startedAt,
+    helperSource: checkpoint.helperSource ?? DEFAULT_HELPER_SOURCE,
+    helperVersion: checkpoint.helperVersion ?? 0,
   };
 
   return executeWithState(checkpoint.task, config, turn, undefined, state, checkpoint.pendingAction, registry);
@@ -614,9 +666,7 @@ function buildActionRegistry(config: RuntimeConfig): ActionRegistry {
   return registry;
 }
 
-// ---------------------------------------------------------------------------
 // initializeState — setup, initial observation, skill sync, approval resume
-// ---------------------------------------------------------------------------
 
 interface LoopSignals {
   policyDenied: boolean;
@@ -736,9 +786,7 @@ async function initializeState(
   return signals;
 }
 
-// ---------------------------------------------------------------------------
 // runMainLoop — the while(true) agent loop
-// ---------------------------------------------------------------------------
 
 async function runMainLoop(
   state: LoopState,
@@ -1142,9 +1190,7 @@ async function runMainLoop(
   }
 }
 
-// ---------------------------------------------------------------------------
 // finalizeExecution — artifact persistence, skill proposals, finalization
-// ---------------------------------------------------------------------------
 
 async function finalizeExecution(
   state: LoopState,
@@ -1203,9 +1249,7 @@ async function finalizeExecution(
   return result;
 }
 
-// ---------------------------------------------------------------------------
 // executeWithState — orchestrator
-// ---------------------------------------------------------------------------
 
 async function executeWithState(
   task: Task,

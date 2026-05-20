@@ -26,6 +26,7 @@ export interface CliArgs {
   quiet?: boolean;
   noColor?: boolean;
   help?: boolean;
+  version?: boolean;
 }
 
 const VALID_COMMANDS = new Set(["run", "review", "result", "list", "approve", "bench", "replay"]);
@@ -42,6 +43,12 @@ export function parseArgs(argv: string[]): CliArgs {
 
     if (arg === "--help" || arg === "-h") {
       result.help = true;
+      i++;
+      continue;
+    }
+
+    if (arg === "--version" || arg === "-V") {
+      result.version = true;
       i++;
       continue;
     }
@@ -317,6 +324,7 @@ export function formatHelp(): string {
     "  --verbose, -v            Stream observations, policy checks and full output",
     "  --quiet, -q              Suppress per-step trace stream",
     "  --no-color               Disable ANSI color in trace stream",
+    "  --version, -V            Show version",
     "  --help, -h               Show this help message",
   ].join("\n");
 }

@@ -1,38 +1,18 @@
-// ABOUTME: Live console renderer for trace events emitted during a wire run.
-// ABOUTME: Plugged in as a RuntimeConfig.traceSink to surface agent activity in real time.
-
 import type { TraceEvent, TraceEventKind } from "../shared/types.js";
 import { createPalette, isColorSupported, type Palette } from "./colors.js";
 
-export interface StreamRendererOptions {
-  verbose?: boolean;
-  color?: boolean;
-  maxSteps?: number;
-  out?: (line: string) => void;
-}
+export interface StreamRendererOptions { verbose?: boolean; color?: boolean; maxSteps?: number; out?: (line: string) => void; }
 
 interface RendererState {
-  step: number;
-  palette: Palette;
-  verbose: boolean;
-  maxSteps?: number;
-  out: (line: string) => void;
-  sawObservation: boolean;
-  lastExecSig?: string;
-  repeatCount: number;
+  step: number; palette: Palette; verbose: boolean; maxSteps?: number; out: (line: string) => void;
+  sawObservation: boolean; lastExecSig?: string; repeatCount: number;
 }
 
-/** Event kinds shown only with --verbose. */
-const VERBOSE_ONLY: ReadonlySet<TraceEventKind> = new Set<TraceEventKind>([
-  "policy-check",
-]);
+const VERBOSE_ONLY: ReadonlySet<TraceEventKind> = new Set<TraceEventKind>(["policy-check"]);
 
-/** Repeat detection: hash the first N normalized chars of an exec. */
 const REPEAT_SIGNATURE_LEN = 80;
 
-export interface ConsoleSink {
-  onEvent(event: TraceEvent): void;
-}
+export interface ConsoleSink { onEvent(event: TraceEvent): void; }
 
 export function createConsoleTraceSink(options: StreamRendererOptions = {}): ConsoleSink {
   const verbose = options.verbose === true;
@@ -40,38 +20,26 @@ export function createConsoleTraceSink(options: StreamRendererOptions = {}): Con
   const palette = createPalette(color);
   const out = options.out ?? ((line: string) => process.stdout.write(`${line}\n`));
 
-  const state: RendererState = {
-    step: 0,
-    palette,
-    verbose,
-    out,
-    sawObservation: false,
-    repeatCount: 0,
-  };
+  const state: RendererState = { step: 0, palette, verbose, out, sawObservation: false, repeatCount: 0 };
   if (options.maxSteps !== undefined) state.maxSteps = options.maxSteps;
 
   return {
     onEvent(event: TraceEvent): void {
-      // Only code-exec increments the step counter — that's one agent turn.
-      // Observations are setup or auto-after-navigation continuations.
       if (event.kind === "code-exec") {
         state.step += 1;
         updateRepeat(state, event);
       }
 
       const line = formatEvent(event, state);
-      if (line !== null) {
-        out(line);
-      }
+      if (line !== null) out(line);
     },
   };
 }
 
 function updateRepeat(state: RendererState, event: TraceEvent): void {
   const sig = execSignature(event);
-  if (sig && sig === state.lastExecSig) {
-    state.repeatCount += 1;
-  } else {
+  if (sig && sig === state.lastExecSig) state.repeatCount += 1;
+  else {
     state.repeatCount = 0;
     if (sig) state.lastExecSig = sig;
   }
@@ -79,21 +47,14 @@ function updateRepeat(state: RendererState, event: TraceEvent): void {
 
 function execSignature(event: TraceEvent): string | undefined {
   const code = event.payload["code"];
-  if (typeof code === "string") {
-    return oneLine(code).slice(0, REPEAT_SIGNATURE_LEN);
-  }
+  if (typeof code === "string") return oneLine(code).slice(0, REPEAT_SIGNATURE_LEN);
   const methods = event.payload["methods"];
-  if (Array.isArray(methods)) {
-    return `raw:${methods.join(",")}`;
-  }
+  if (Array.isArray(methods)) return `raw:${methods.join(",")}`;
   return undefined;
 }
 
 function formatEvent(event: TraceEvent, state: RendererState): string | null {
-  if (!state.verbose && VERBOSE_ONLY.has(event.kind)) {
-    return null;
-  }
-
+  if (!state.verbose && VERBOSE_ONLY.has(event.kind)) return null;
   const { palette: p } = state;
 
   switch (event.kind) {
@@ -108,13 +69,10 @@ function formatEvent(event: TraceEvent, state: RendererState): string | null {
     }
 
     case "code-exec": {
-      const code = typeof event.payload["code"] === "string"
-        ? truncate(oneLine(event.payload["code"] as string), state.verbose ? 200 : 90)
-        : event.payload["rawCommands"]
-          ? `raw[${String(event.payload["rawCommands"])}] ${String(event.payload["methods"] ?? "")}`
-          : "(no code)";
+      const code = formatCodeExec(event, state);
+      const label = actionLabel(event);
       const repeat = state.repeatCount > 0 ? ` ${p.yellow(`↻×${state.repeatCount + 1}`)}` : "";
-      return `${stepPrefix(state)} ${p.cyan("⚙ exec    ")}${repeat} ${code}`;
+      return `${stepPrefix(state)} ${p.cyan(label)}${repeat} ${code}`;
     }
 
     case "code-result": {
@@ -131,32 +89,19 @@ function formatEvent(event: TraceEvent, state: RendererState): string | null {
 
     case "thought-summary": {
       const kind = typeof event.payload["kind"] === "string" ? event.payload["kind"] : "";
-      const summary = typeof event.payload["summary"] === "string"
-        ? event.payload["summary"]
-        : typeof event.payload["reason"] === "string"
-          ? event.payload["reason"]
-          : "";
-      if (kind === "finish") {
-        return `${donePrefix(state)} ${p.bold(p.green("✓ finish  "))} ${truncate(summary, 200)}`;
-      }
+      const summary = typeof event.payload["summary"] === "string" ? event.payload["summary"] : typeof event.payload["reason"] === "string" ? event.payload["reason"] : "";
+      if (kind === "finish") return `${donePrefix(state)} ${p.bold(p.green("✓ finish  "))} ${truncate(summary, 200)}`;
       return `${donePrefix(state)} ${p.dim("◇ stop    ")} ${p.dim(truncate(summary, 200))}`;
     }
 
     case "policy-check": {
       const result = String(event.payload["result"] ?? "");
       const kind = String(event.payload["policyKind"] ?? event.payload["actionKind"] ?? "");
-      const tag = result === "deny"
-        ? p.red("⛔ deny    ")
-        : result === "require-approval"
-          ? p.yellow("⚠ approve ")
-          : p.dim("· allow   ");
+      const tag = result === "deny" ? p.red("⛔ deny    ") : result === "require-approval" ? p.yellow("⚠ approve ") : p.dim("· allow   ");
       return `${contPrefix(state)} ${tag} ${p.dim(kind)}`;
     }
 
-    case "approval-request": {
-      const summary = String(event.payload["summary"] ?? "");
-      return `${contPrefix(state)} ${p.yellow("⚠ approval")} ${truncate(summary, 120)}`;
-    }
+    case "approval-request": return `${contPrefix(state)} ${p.yellow("⚠ approval")} ${truncate(String(event.payload["summary"] ?? ""), 120)}`;
 
     case "skill-load": {
       const labels = Array.isArray(event.payload["labels"]) ? event.payload["labels"] : [];
@@ -178,9 +123,8 @@ function formatEvent(event: TraceEvent, state: RendererState): string | null {
     }
 
     case "error": {
-      const message = String(event.payload["message"] ?? "unknown error");
       const code = String(event.payload["code"] ?? "");
-      return `${contPrefix(state)} ${p.bold(p.red("✗ error   "))} ${code ? p.dim(`[${code}] `) : ""}${truncate(message, 200)}`;
+      return `${contPrefix(state)} ${p.bold(p.red("✗ error   "))} ${code ? p.dim(`[${code}] `) : ""}${truncate(String(event.payload["message"] ?? "unknown error"), 200)}`;
     }
 
     case "artifact": {
@@ -190,8 +134,7 @@ function formatEvent(event: TraceEvent, state: RendererState): string | null {
       return `${contPrefix(state)} ${p.dim(`▤ artifact ${kind} ${path}`)}`;
     }
 
-    default:
-      return null;
+    default: return null;
   }
 }
 
@@ -203,6 +146,26 @@ function preferredDetail(ok: boolean, ret: unknown, stdout: string, stderr: stri
   if (stderr) return stderr;
   if (ret !== undefined) return stringifyReturn(ret);
   return stdout;
+}
+
+function actionLabel(event: TraceEvent): string {
+  if (event.payload["rawCommands"]) return "⚙ raw     ";
+  const code = typeof event.payload["code"] === "string" ? event.payload["code"] : "";
+  if (/location\.(href|assign|replace)|Page\.navigate|window\.open/u.test(code)) return "↪ navigate";
+  if (/\.click\(|dispatchEvent|Input\.dispatch|KeyboardEvent|MouseEvent|fillByLabel|clickVisibleText/u.test(code)) return "● interact";
+  if (/querySelector|innerText|textContent|getAttribute|extract|return document/u.test(code)) return "◆ inspect ";
+  return "⚙ exec    ";
+}
+
+function formatCodeExec(event: TraceEvent, state: RendererState): string {
+  const code = event.payload["code"];
+  if (typeof code === "string") return truncate(oneLine(code), state.verbose ? 200 : 90);
+  if (!event.payload["rawCommands"]) return "(no code)";
+  const summaries = event.payload["summaries"];
+  const methods = event.payload["methods"];
+  const list = Array.isArray(summaries) && summaries.length > 0 ? summaries : methods;
+  const detail = Array.isArray(list) ? list.map(String).join("; ") : String(list ?? "");
+  return `raw[${String(event.payload["rawCommands"])}] ${truncate(detail, state.verbose ? 220 : 110)}`;
 }
 
 function stepPrefix(state: RendererState): string {
@@ -217,28 +180,12 @@ function stepPrefix(state: RendererState): string {
 }
 
 function contPrefix(state: RendererState): string {
-  // Width matches "[NN/MM] " when maxSteps is set, "[NN] " otherwise.
-  const width = state.maxSteps ? 8 : 6;
-  return " ".repeat(width);
+  return " ".repeat(state.maxSteps ? 8 : 6);
 }
 
-function donePrefix(state: RendererState): string {
-  return state.palette.dim(state.maxSteps ? "[done  ]" : "[done]");
-}
-
-function initPrefix(state: RendererState): string {
-  return state.palette.dim(state.maxSteps ? "[init  ]" : "[init]");
-}
-
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return `${s.slice(0, Math.max(0, max - 1))}…`;
-}
-
-function oneLine(s: string): string {
-  return s.replace(/\s+/gu, " ").trim();
-}
-
+function donePrefix(state: RendererState): string { return state.palette.dim(state.maxSteps ? "[done  ]" : "[done]"); }
+function initPrefix(state: RendererState): string { return state.palette.dim(state.maxSteps ? "[init  ]" : "[init]"); }
+function truncate(s: string, max: number): string { return s.length <= max ? s : `${s.slice(0, Math.max(0, max - 1))}…`; }
 function hostnameOf(url: string): string {
   try {
     return new URL(url).hostname || url;
@@ -255,3 +202,5 @@ function stringifyReturn(v: unknown): string {
     return String(v);
   }
 }
+
+function oneLine(s: string): string { return s.replace(/\s+/gu, " ").trim(); }

@@ -15,6 +15,9 @@ export interface SkillSummary {
 export interface ObservationSummary {
   url: string;
   title: string;
+  targetId?: string;
+  tabs?: Array<{ id: string; url: string; title: string }>;
+  tabDrift?: string;
   forms: number;
   buttons: number;
   dialogs: number;
@@ -86,7 +89,6 @@ export function sanitizeSkillContent(text: string): string {
 export function assembleSystemPrompt(context: ContextBundle): string {
   const sections: string[] = [];
 
-  // Role and task mode
   sections.push(`You are a browser automation agent running in ${context.task.mode} mode.`);
   sections.push("You have an active browser session. You MUST interact with the browser to complete tasks — never answer from prior knowledge.");
 
@@ -97,14 +99,12 @@ export function assembleSystemPrompt(context: ContextBundle): string {
     sections.push(`Objective: ${redactSecrets(context.task.objective)}`);
   }
 
-  // Constraints
   if (context.task.constraints.length > 0) {
     sections.push(
       "Constraints:\n" + context.task.constraints.map((c) => `- ${redactSecrets(c)}`).join("\n"),
     );
   }
 
-  // Success criteria
   if (context.task.successCriteria.length > 0) {
     sections.push(
       "Success criteria:\n" +
@@ -112,7 +112,6 @@ export function assembleSystemPrompt(context: ContextBundle): string {
     );
   }
 
-  // Policy notes
   if (context.policyNotes.length > 0) {
     sections.push(
       "Policy notes:\n" +
@@ -120,7 +119,6 @@ export function assembleSystemPrompt(context: ContextBundle): string {
     );
   }
 
-  // Budget
   if (context.budget) {
     const { remaining, max, unit } = context.budget;
     sections.push(`Budget: ${remaining}/${max} ${unit} remaining.`);
@@ -153,7 +151,6 @@ export function assembleUserPrompt(context: ContextBundle): string {
     sections.push(`Execution plan:\n${redactSecrets(context.plan)}`);
   }
 
-  // Loaded skills
   if (context.skills.length > 0) {
     const skillLines = context.skills.map(
       (s) => {
@@ -167,12 +164,24 @@ export function assembleUserPrompt(context: ContextBundle): string {
     sections.push("Loaded skills:\nSite-specific; follow their Workflow and Traps before guessing.\n" + skillLines.join("\n"));
   }
 
-  // Current observations
   if (context.observations.length > 0) {
     const obs = context.observations[context.observations.length - 1]!;
     const obsParts = [`Current page: ${obs.url}`];
     if (obs.title) {
       obsParts.push(`Title: ${obs.title}`);
+    }
+    if (obs.targetId) {
+      obsParts.push(`Selected tab: ${obs.targetId}`);
+    }
+    if (obs.tabs && obs.tabs.length > 0) {
+      const tabs = obs.tabs
+        .slice(0, 6)
+        .map((tab) => `${tab.id}: ${tab.title || tab.url || "(untitled)"}`)
+        .join(" | ");
+      obsParts.push(`Open tabs: ${tabs}`);
+    }
+    if (obs.tabDrift) {
+      obsParts.push(`WARNING: ${obs.tabDrift}`);
     }
     obsParts.push(`Elements: ${obs.forms} forms, ${obs.buttons} buttons, ${obs.dialogs} dialogs`);
     if (obs.headings && obs.headings.length > 0) {
@@ -181,7 +190,6 @@ export function assembleUserPrompt(context: ContextBundle): string {
     sections.push(obsParts.join("\n"));
   }
 
-  // Recent traces
   if (context.recentTraces.length > 0) {
     const traceLines = context.recentTraces.slice(-5).map(
       (t) => `[${t.kind}] ${redactSecrets(t.summary)}`,
@@ -189,7 +197,6 @@ export function assembleUserPrompt(context: ContextBundle): string {
     sections.push("Recent activity:\n" + traceLines.join("\n"));
   }
 
-  // State diff
   if (context.stateDiff) {
     const diff = context.stateDiff;
     const diffParts = [`Last state change: ${diff.summary}`, `Consecutive unchanged observations: ${diff.consecutiveUnchanged}`];
@@ -206,7 +213,6 @@ export function assembleUserPrompt(context: ContextBundle): string {
     else if (sameSig >= 4) sections.push(`REPEATING: You ran the same exec code ${sameSig} times in a row. If this isn't progressing, switch to a different selector, action, or approach.`);
   }
 
-  // Session capabilities (generic rendering)
   if (context.sessionCapabilities) {
     const entries = Object.entries(context.sessionCapabilities).filter(
       ([, v]) => v !== undefined,
@@ -224,30 +230,26 @@ export function assembleUserPrompt(context: ContextBundle): string {
   return sections.join("\n\n");
 }
 
-// ---------------------------------------------------------------------------
-// Action guidance — LLM-facing instructions for available actions
-// ---------------------------------------------------------------------------
-
 const BASE_ACTION_GUIDANCE = [
   "Return exactly one next action as JSON.",
-  // --- Vision-first interaction --------------------------------------------
   "Each observation includes a screenshot of the page. Look at it FIRST. If the screenshot shows a modal, banner, cookie wall, tutorial, or overlay blocking the content you need, dismiss it before doing anything else — usually with `await clickVisibleText(\"<button text from the screenshot>\")`.",
   "When the goal needs interacting with a visible element (a button, link, tab), prefer clicking it by its visible label over hand-rolling a DOM selector. Reading the screenshot is faster and more reliable than guessing class names.",
   "The page-summary fields (URL, title, headings, element counts) are orientation only. To read the page's actual text content, use exec (e.g. `return document.body.innerText`).",
-  // --- Action shapes -------------------------------------------------------
   'For "observe", omit payload unless you need {"targetId":"..."}',
+  'For "edit-helper", set payload.source to the complete JS-compatible helper module for this task. Use it only when a reusable helper would reduce repeated code in later exec steps.',
   'For "exec", set payload.code to JavaScript that runs in the browser. Code is auto-wrapped as (async () => { YOUR_CODE })(). Do NOT wrap your code in another IIFE; use top-level `return` to output results.',
   "Each exec call defaults to a 12-second CDP timeout and payload.timeoutMs is capped at 12000. Keep scripts short; avoid sleep/poll loops. For long sequences, split across turns or return wireActions.",
   'For "raw", set payload.method to a CDP method and payload.params to its parameters. Use raw only when exec cannot reach the needed browser behavior.',
   '"exec" code can return {wireActions: [{method, params}, ...]} to send CDP commands after the code runs. Keep wireActions batches under 80 commands; send another action after reading state.',
+  "When DOM clicks fail across iframe, shadow DOM, or cross-origin boundaries, use viewport-coordinate `Input.dispatchMouseEvent` clicks via raw or wireActions.",
   "Prefer direct URL patterns before brittle DOM hunting when the destination is obvious.",
   "For web search tasks, use DuckDuckGo (duckduckgo.com) or Bing (bing.com). Google blocks headless browsers with captchas.",
   "Before extracting search result selectors, confirm the current URL is still the search results page. If you opened a result tab/page, switch back to the search target or re-run the search before scraping SERP selectors.",
+  "If an observation warns about tab drift or a new tab, choose the intended tab explicitly with observe payload.targetId or exec payload.target {tabId}.",
   "Wire auto-observes after navigation code. Do NOT emit a separate observe after navigating.",
   "After navigating to a target page, always exec code to extract the answer before finishing. Navigation alone is not task completion.",
   "Only use finish after your exec code has returned the actual answer in its return value.",
-  // --- Helpers (defined in every exec block) -------------------------------
-  "Helpers available in every exec block — prefer these over hand-rolled querySelector loops:",
+  "Helpers available in every exec block — they are task-local and may be replaced with edit-helper when the current task needs a different thin helper surface:",
   '  • `await clickVisibleText("Skip")` — clicks the first visible button/link whose text contains the argument. Use this to dismiss modals, accept cookies, follow CTAs.',
   '  • `await fillByLabel("Email", "alice@example.com")` — focuses the input matched by <label>, aria-label, or placeholder, sets the value, and fires input/change events.',
   '  • `extractTable("table.results")` — returns a 2D array of cell text from the matched table.',
@@ -258,7 +260,7 @@ const BASE_ACTION_GUIDANCE = [
 ];
 
 export function buildActionGuidance(context: ContextBundle): string {
-  const coreKinds = ["observe", "exec", "raw", "finish"];
+  const coreKinds = ["observe", "edit-helper", "exec", "raw", "finish"];
   const providerKinds = (context.providerActions ?? []).map((a) => a.kind);
   const allKinds = [...coreKinds, ...providerKinds].join("|");
 

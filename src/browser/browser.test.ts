@@ -12,7 +12,7 @@ import type { JsonObject } from "../shared/types.js";
 import type { BrowserObserveInput, BrowserProvider } from "./bridge.js";
 import { execCode, isLikelyNavigationCode } from "./exec.js";
 import { observeBrowser } from "./observe.js";
-import { execRaw } from "./raw.js";
+import { clickAt, dispatchMouseEvent, execRaw } from "./raw.js";
 import { describeTarget, resolveTarget } from "./targets.js";
 
 // ---------------------------------------------------------------------------
@@ -435,6 +435,61 @@ test("execRaw propagates provider errors", async () => {
     () => execRaw({ provider, sessionId: createId("session"), method: "test" }),
     { message: "CDP connection lost" },
   );
+});
+
+test("dispatchMouseEvent sends Input.dispatchMouseEvent with viewport params", async () => {
+  const sessionId = createId("session");
+  let capturedInput: BrowserRawRequest | undefined;
+  const provider = createMockProvider({
+    async raw(input: BrowserRawRequest): Promise<unknown> {
+      capturedInput = input;
+      return { ok: true };
+    },
+  });
+
+  await dispatchMouseEvent({
+    provider,
+    sessionId,
+    type: "mouseWheel",
+    x: 42,
+    y: 17,
+    deltaY: 120,
+    modifiers: 2,
+  });
+
+  assert.ok(capturedInput);
+  assert.equal(capturedInput.method, "Input.dispatchMouseEvent");
+  assert.deepEqual(capturedInput.params, {
+    type: "mouseWheel",
+    x: 42,
+    y: 17,
+    deltaY: 120,
+    modifiers: 2,
+  });
+});
+
+test("clickAt emits compositor mouse move, press, and release", async () => {
+  const sessionId = createId("session");
+  const inputs: BrowserRawRequest[] = [];
+  const provider = createMockProvider({
+    async raw(input: BrowserRawRequest): Promise<unknown> {
+      inputs.push(input);
+      return { ok: true };
+    },
+  });
+
+  await clickAt({ provider, sessionId, x: 100, y: 200 });
+
+  assert.deepEqual(inputs.map((input) => input.method), [
+    "Input.dispatchMouseEvent",
+    "Input.dispatchMouseEvent",
+    "Input.dispatchMouseEvent",
+  ]);
+  assert.deepEqual(inputs.map((input) => input.params), [
+    { type: "mouseMoved", x: 100, y: 200, button: "none" },
+    { type: "mousePressed", x: 100, y: 200, button: "left", buttons: 1, clickCount: 1 },
+    { type: "mouseReleased", x: 100, y: 200, button: "left", buttons: 0, clickCount: 1 },
+  ]);
 });
 
 // ---------------------------------------------------------------------------

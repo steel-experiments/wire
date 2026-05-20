@@ -1,8 +1,6 @@
 import type { Task, TaskMode } from "../shared/types.js";
 
-// ---------------------------------------------------------------------------
 // TaskPlan — decomposition of a complex task into ordered steps
-// ---------------------------------------------------------------------------
 
 export interface TaskPlan {
   steps: string[];
@@ -10,9 +8,7 @@ export interface TaskPlan {
   mode: TaskMode;
 }
 
-// ---------------------------------------------------------------------------
 // createPlan — generate a simple plan from a task's objective and criteria
-// ---------------------------------------------------------------------------
 
 export function createPlan(task: Task): TaskPlan {
   const steps: string[] = [];
@@ -32,9 +28,7 @@ export function createPlan(task: Task): TaskPlan {
   };
 }
 
-// ---------------------------------------------------------------------------
 // advanceStep — move to the next step in the plan
-// ---------------------------------------------------------------------------
 
 export function advanceStep(plan: TaskPlan): TaskPlan {
   if (plan.currentStepIndex >= plan.steps.length - 1) {
@@ -64,17 +58,13 @@ export function advancePlanBy(plan: TaskPlan, steps: number): TaskPlan {
   };
 }
 
-// ---------------------------------------------------------------------------
 // isPlanComplete — check if all steps have been completed
-// ---------------------------------------------------------------------------
 
 export function isPlanComplete(plan: TaskPlan): boolean {
   return plan.currentStepIndex >= plan.steps.length - 1;
 }
 
-// ---------------------------------------------------------------------------
 // planToContext — render the plan as context for the agent
-// ---------------------------------------------------------------------------
 
 export function planToContext(plan: TaskPlan): string {
   const lines: string[] = [];

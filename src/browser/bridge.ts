@@ -8,18 +8,14 @@ import type {
   SessionId,
 } from "../shared/types.js";
 
-// ---------------------------------------------------------------------------
 // Browser observe input
-// ---------------------------------------------------------------------------
 
 export interface BrowserObserveInput {
   sessionId: SessionId;
   targetId?: string;
 }
 
-// ---------------------------------------------------------------------------
 // Browser provider contract
-// ---------------------------------------------------------------------------
 
 export interface BrowserProvider {
   createSession(input: CreateSessionInput): Promise<BrowserSession>;

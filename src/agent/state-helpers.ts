@@ -182,9 +182,7 @@ export function isRecoverableStepError(message: string): boolean {
     .test(message);
 }
 
-// ---------------------------------------------------------------------------
 // Observation diffing — detect stalled progress
-// ---------------------------------------------------------------------------
 
 export interface ObservationDiff {
   urlChanged: boolean;

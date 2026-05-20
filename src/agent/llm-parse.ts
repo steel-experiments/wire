@@ -2,12 +2,11 @@ import type { ProposedAction } from "../shared/types.js";
 import { safeParseBoundary, proposedActionSchema } from "../shared/schemas.js";
 import type { LoopState } from "./loop.js";
 
-// ---------------------------------------------------------------------------
 // Action kinds the LLM is allowed to produce
-// ---------------------------------------------------------------------------
 
 const ACTION_KINDS: Set<string> = new Set([
   "observe",
+  "edit-helper",
   "exec",
   "raw",
   "request-approval",
@@ -23,9 +22,7 @@ export function registerActionKind(kind: string): void {
 
 export { ACTION_KINDS };
 
-// ---------------------------------------------------------------------------
 // parseActionFromLlm — extract a ProposedAction from LLM text output
-// ---------------------------------------------------------------------------
 
 export function parseActionFromLlm(content: string, state: LoopState): ProposedAction {
   const jsonMatch = content.match(/```json\s*([\s\S]*?)```/u);

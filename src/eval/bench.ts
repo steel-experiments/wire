@@ -14,9 +14,7 @@ import { createAnthropicProvider } from "../providers/llm/anthropic.js";
 import { nowIsoUtc } from "../shared/ids.js";
 import { atomicWriteJson, ensureDir, entityDir, entityPath, listJsonFiles, readJsonFile } from "../storage/atomic.js";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 export interface BenchmarkCase {
   id: string;
@@ -66,9 +64,7 @@ export interface BenchOptions {
   json?: boolean | undefined;
 }
 
-// ---------------------------------------------------------------------------
 // Main runner
-// ---------------------------------------------------------------------------
 
 export async function bench(options: BenchOptions): Promise<BenchReport> {
   const filePath = resolve(options.benchmarksFile ?? "benchmarks/default.json");
@@ -119,9 +115,7 @@ export async function bench(options: BenchOptions): Promise<BenchReport> {
   return report;
 }
 
-// ---------------------------------------------------------------------------
 // Single benchmark execution
-// ---------------------------------------------------------------------------
 
 async function runBenchmark(
   bm: BenchmarkCase,
@@ -209,9 +203,7 @@ async function runBenchmark(
   };
 }
 
-// ---------------------------------------------------------------------------
 // Result extraction (mirrors main.ts deriveExtractedResultFromEvents)
-// ---------------------------------------------------------------------------
 
 function extractResult(run: Run, events: TraceEvent[]): string | undefined {
   if (run.result) return run.result;
@@ -247,9 +239,7 @@ function extractResult(run: Run, events: TraceEvent[]): string | undefined {
   return undefined;
 }
 
-// ---------------------------------------------------------------------------
 // LLM-as-judge
-// ---------------------------------------------------------------------------
 
 async function judgeResult(
   provider: LLMProvider,
@@ -281,9 +271,7 @@ async function judgeResult(
   return Math.min(1, Math.max(0, score));
 }
 
-// ---------------------------------------------------------------------------
 // Provider helpers
-// ---------------------------------------------------------------------------
 
 function createJudgeProvider(
   provider?: LlmProvider,
@@ -295,18 +283,14 @@ function createJudgeProvider(
   return undefined;
 }
 
-// ---------------------------------------------------------------------------
 // File loading
-// ---------------------------------------------------------------------------
 
 export async function loadBenchmarks(filePath: string): Promise<BenchmarkCase[]> {
   const raw = await readFile(filePath, "utf-8");
   return JSON.parse(raw) as BenchmarkCase[];
 }
 
-// ---------------------------------------------------------------------------
 // Report persistence
-// ---------------------------------------------------------------------------
 
 const BENCH_KIND = "benchmarks";
 
@@ -343,9 +327,7 @@ export async function listBenchReports(root: string): Promise<BenchReport[]> {
   return reports.sort((a, b) => b.runAt.localeCompare(a.runAt));
 }
 
-// ---------------------------------------------------------------------------
 // Report formatting
-// ---------------------------------------------------------------------------
 
 export function formatBenchReport(report: BenchReport): string {
   const lines: string[] = [];

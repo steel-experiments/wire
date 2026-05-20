@@ -23,9 +23,7 @@ import {
   readJsonFile,
 } from "./atomic.js";
 
-// ---------------------------------------------------------------------------
 // Runs
-// ---------------------------------------------------------------------------
 
 const RUNS_KIND = "runs";
 
@@ -84,9 +82,7 @@ export async function listRuns(root: string, taskId?: TaskId): Promise<Run[]> {
   return runs;
 }
 
-// ---------------------------------------------------------------------------
 // Hypotheses
-// ---------------------------------------------------------------------------
 
 const HYPOTHESES_KIND = "hypotheses";
 
@@ -113,9 +109,7 @@ export async function loadHypothesis(root: string, id: HypothesisId): Promise<Hy
   }
 }
 
-// ---------------------------------------------------------------------------
 // Experiment bundles
-// ---------------------------------------------------------------------------
 
 const EXPERIMENTS_KIND = "experiments";
 

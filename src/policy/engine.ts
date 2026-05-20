@@ -7,17 +7,13 @@ import type {
 import { BASELINE_RULES, evaluateRules } from "./rules.js";
 import type { PolicyAction, PolicyRule } from "./rules.js";
 
-// ---------------------------------------------------------------------------
 // PolicyEngine interface
-// ---------------------------------------------------------------------------
 
 export interface PolicyEngine {
   check(actionId: ActionId, action: PolicyAction): PolicyDecision;
 }
 
-// ---------------------------------------------------------------------------
 // createPolicyEngine
-// ---------------------------------------------------------------------------
 
 export function createPolicyEngine(rules?: PolicyRule[]): PolicyEngine {
   const activeRules = rules ?? BASELINE_RULES;

@@ -35,9 +35,7 @@ import { dirname, join } from "node:path";
 import type { Artifact, TraceEvent } from "../shared/types.js";
 import { createConsoleTraceSink } from "../ui/stream.js";
 
-// ---------------------------------------------------------------------------
 // Result types
-// ---------------------------------------------------------------------------
 
 export interface RunResult {
   taskId: TaskId;
@@ -61,9 +59,7 @@ export interface ApproveResult {
   result?: string | undefined;
 }
 
-// ---------------------------------------------------------------------------
 // Run options
-// ---------------------------------------------------------------------------
 
 export interface RunOptions {
   objective: string;
@@ -82,9 +78,7 @@ export interface RunOptions {
   keepSessionOpen?: boolean;
 }
 
-// ---------------------------------------------------------------------------
 // Auto-approving policy decorator (--yes mode)
-// ---------------------------------------------------------------------------
 
 function autoApprovingEngine(inner: PolicyEngine): PolicyEngine {
   return {
@@ -95,9 +89,7 @@ function autoApprovingEngine(inner: PolicyEngine): PolicyEngine {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 function defaultStorageRoot(): string {
   return process.env["WIRE_ROOT"] ?? ".wire";
@@ -287,9 +279,7 @@ export function createExperimentBundleFromRuns(
   return bundle;
 }
 
-// ---------------------------------------------------------------------------
 // Artifact persistence
-// ---------------------------------------------------------------------------
 
 async function persistExecutionArtifacts(
   root: string,
@@ -311,6 +301,8 @@ async function persistExecutionArtifacts(
       events: result.events,
       stepCount: result.stepCount,
       startedAt: result.startedAt,
+      helperSource: result.helperSource,
+      helperVersion: result.helperVersion,
       pendingAction: result.pendingAction,
       approvalRequestId: result.pendingApproval.id,
       savedAt: nowIsoUtc(),
@@ -390,9 +382,7 @@ export async function reapExpiredApprovals(
   return reaped;
 }
 
-// ---------------------------------------------------------------------------
 // runTask — returns RunResult
-// ---------------------------------------------------------------------------
 
 export async function runTask(options: RunOptions): Promise<RunResult> {
   const root = defaultStorageRoot();
@@ -559,9 +549,7 @@ function renderProposedAction(request: import("../shared/types.js").ApprovalRequ
   console.log("");
 }
 
-// ---------------------------------------------------------------------------
 // approveRun — returns ApproveResult
-// ---------------------------------------------------------------------------
 
 export async function approveRun(runId: RunId, jsonOutput?: boolean): Promise<ApproveResult> {
   const root = defaultStorageRoot();

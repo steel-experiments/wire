@@ -6,9 +6,7 @@ import type {
 } from "../shared/types.js";
 import { isRecoverableStepError } from "../agent/state-helpers.js";
 
-// ---------------------------------------------------------------------------
 // Evaluation metrics
-// ---------------------------------------------------------------------------
 
 export interface TaskMetrics {
   taskId: string;
@@ -54,9 +52,7 @@ export function computeTaskMetrics(
   };
 }
 
-// ---------------------------------------------------------------------------
 // Aggregate metrics across runs
-// ---------------------------------------------------------------------------
 
 export interface AggregateMetrics {
   totalRuns: number;
@@ -97,9 +93,7 @@ export function aggregateMetrics(metrics: TaskMetrics[]): AggregateMetrics {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Format evaluation report
-// ---------------------------------------------------------------------------
 
 export function formatEvaluationReport(
   taskMetrics: TaskMetrics[],
@@ -133,9 +127,7 @@ export function formatEvaluationReport(
   return lines.join("\n");
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 function computeDuration(events: TraceEvent[]): number {
   if (events.length < 2) return 0;

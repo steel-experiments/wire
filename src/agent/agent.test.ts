@@ -30,6 +30,7 @@ import {
 } from "./loop.js";
 import type { LoopState, StopConditions } from "./loop.js";
 import { ActionRegistry } from "./actions.js";
+import { writeSkillStats } from "../skills/stats.js";
 import {
   isNavigationOnlyResult,
   hasPostNavigationExtraction,
@@ -246,7 +247,17 @@ test("shouldStop prioritizes user cancellation over other conditions", () => {
 test("executeStep handles observe action", async () => {
   const task = makeTask();
   const state = createLoopState(task, makeSessionId());
-  const provider = createMockProvider();
+  const sessionId = makeSessionId();
+  const provider = createMockProvider({
+    async createSession(): Promise<BrowserSession> {
+      return {
+        id: sessionId,
+        provider: "custom",
+        createdAt: new Date().toISOString(),
+        status: "ready",
+      };
+    },
+  });
   const policy = createMockPolicyEngine();
 
   const result = await executeStep(state, { kind: "observe", summary: "Look at page" }, provider, policy);
@@ -286,11 +297,12 @@ test("executeStep handles exec action with allowed policy", async () => {
 
   assert.equal(result.policyDenied, false);
   assert.equal(result.state.stepCount, 1);
-  // policy-check + code-exec + code-result = 3 events
-  assert.equal(result.state.events.length, 3);
+  // policy-check + code-exec + code-result + auto-observe after click
+  assert.equal(result.state.events.length, 4);
   assert.equal(result.state.events[0]!.kind, "policy-check");
   assert.equal(result.state.events[1]!.kind, "code-exec");
   assert.equal(result.state.events[2]!.kind, "code-result");
+  assert.equal(result.state.events[3]!.kind, "observation");
   assert.equal(execInput?.timeoutMs, 12_000);
 });
 
@@ -313,6 +325,98 @@ test("executeStep caps requested exec timeout", async () => {
   );
 
   assert.equal(execInput?.timeoutMs, 12_000);
+});
+
+test("executeStep handles task-local helper rewrites", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  const provider = createMockProvider();
+  const policy = createMockPolicyEngine();
+
+  const result = await executeStep(
+    state,
+    {
+      kind: "edit-helper",
+      summary: "Replace helper surface for this task",
+      payload: {
+        source: "export function readMain() { return document.querySelector('main')?.textContent || ''; }",
+      },
+    },
+    provider,
+    policy,
+  );
+
+  assert.equal(result.policyDenied, false);
+  assert.equal(result.state.helperVersion, 1);
+  assert.match(result.state.helperSource, /readMain/u);
+  const artifact = result.state.events.find((event) =>
+    event.kind === "artifact" && event.payload.kind === "helper-diff"
+  );
+  assert.ok(artifact, "helper edit should emit a helper-diff artifact");
+  assert.match(String(artifact.payload.content), /readMain/u);
+});
+
+test("executeStep uses rewritten helpers in later exec calls", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  let execInput: BrowserExecRequest | undefined;
+  const provider = createMockProvider({
+    async exec(input: BrowserExecRequest): Promise<BrowserExecResult> {
+      execInput = input;
+      return { ok: true, stdout: "ok", durationMs: 10 };
+    },
+  });
+  const policy = createMockPolicyEngine();
+
+  await executeStep(
+    state,
+    {
+      kind: "edit-helper",
+      summary: "Replace helper surface for this task",
+      payload: {
+        source: "export function readMain() { return document.querySelector('main')?.textContent || ''; }",
+      },
+    },
+    provider,
+    policy,
+  );
+  await executeStep(
+    state,
+    {
+      kind: "exec",
+      summary: "Use helper",
+      payload: { code: "return readMain();" },
+    },
+    provider,
+    policy,
+  );
+
+  assert.ok(execInput?.code.includes("function readMain()"), "custom helper not prepended");
+  assert.ok(!execInput?.code.includes("export function readMain"), "helper export should be stripped");
+  assert.ok(execInput?.code.includes("return readMain();"), "exec code missing");
+});
+
+test("executeStep rejects invalid helper rewrites", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  const provider = createMockProvider();
+
+  const result = await executeStep(
+    state,
+    {
+      kind: "edit-helper",
+      summary: "Bad helper",
+      payload: { source: "function bad() { return process.env.SECRET; }" },
+    },
+    provider,
+    createMockPolicyEngine(),
+  );
+
+  assert.equal(result.state.helperVersion, 0);
+  assert.match(result.state.helperSource, /clickVisibleText/u);
+  assert.ok(result.state.events.some((event) =>
+    event.kind === "error" && String(event.payload.code) === "EHELPER"
+  ));
 });
 
 test("executeStep handles exec action denied by policy", async () => {
@@ -1079,6 +1183,88 @@ test("executeTask loads matched skills into the live agent prompt", async () => 
     );
     assert.match(capturedUserPrompt, /Loaded skills:/u);
     assert.match(capturedUserPrompt, /Use \/pricing directly/u);
+  } finally {
+    await rm(skillDir, { recursive: true, force: true });
+  }
+});
+
+test("executeTask records skill-load match score reasons", async () => {
+  const task = makeTask({
+    objective: "Open pricing on example.com",
+    successCriteria: ["Pricing visible"],
+  });
+  const sessionId = makeSessionId();
+  const provider = createMockProvider({
+    async createSession(): Promise<BrowserSession> {
+      return {
+        id: sessionId,
+        provider: "custom",
+        createdAt: new Date().toISOString(),
+        status: "ready",
+      };
+    },
+  });
+  const skillDir = await mkdtemp(join(tmpdir(), "wire-agent-skills-"));
+  const skillId = createId("skill");
+  const skillContent = [
+    "---",
+    `id: ${skillId}`,
+    "scope: domain",
+    "hostnamePatterns:",
+    "  - example.com",
+    "tags:",
+    "  - pricing",
+    "updatedAt: 2026-04-24",
+    "source: generated",
+    "confidence: 0.5",
+    "---",
+    "",
+    "## Facts",
+    "Use /pricing directly.",
+  ].join("\n");
+
+  await writeFile(join(skillDir, "example.md"), skillContent, "utf-8");
+  await writeSkillStats(skillDir, skillId, {
+    loadedCount: 4,
+    successCount: 4,
+    outcomeCounts: { "task-complete": 4 },
+    totalSteps: 16,
+    totalTokens: 12_000,
+    lastLoadedAt: "2026-05-20T10:00:00.000Z",
+    recentRuns: [],
+  });
+
+  const llmProvider = {
+    model: "test-model",
+    async chat() {
+      return {
+        content: JSON.stringify({ kind: "finish", summary: "Done" }),
+        model: "test-model",
+      };
+    },
+  };
+
+  try {
+    const session: BrowserSession = {
+      id: makeSessionId(),
+      provider: "steel",
+      createdAt: new Date().toISOString(),
+      status: "ready",
+    };
+    const result = await executeTask(
+      task,
+      { provider, policyEngine: createMockPolicyEngine(), maxSteps: 2, skillDir, llmProvider, existingSession: session },
+    );
+    const skillLoad = result.events.find((event) => event.kind === "skill-load");
+    assert.ok(skillLoad);
+    const matches = skillLoad.payload.matches;
+    assert.ok(Array.isArray(matches));
+    const match = matches[0] as { skillId: string; reasons: unknown[] };
+    assert.equal(match.skillId, skillId);
+    assert.ok(Array.isArray(match.reasons));
+    assert.ok(match.reasons.some((reason: unknown) =>
+      typeof reason === "string" && reason.startsWith("effective-success")
+    ));
   } finally {
     await rm(skillDir, { recursive: true, force: true });
   }
@@ -2208,6 +2394,54 @@ test("executeStep auto-observes after raw Page.navigate", async () => {
   );
 
   assert.equal(observeCount, 1);
+});
+
+test("executeStep auto-observes after clicks and records tab drift", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: new Date().toISOString(),
+    kind: "observation",
+    payload: {
+      targetId: "tab-1",
+      url: "https://example.com",
+      title: "Before",
+      tabs: [{ id: "tab-1", title: "Before", url: "https://example.com", active: true }],
+    },
+  });
+  let observeCount = 0;
+  const provider = createMockProvider({
+    async exec() {
+      return { ok: true, durationMs: 10, returnValue: { clicked: true } };
+    },
+    async observe(input: BrowserObserveInput): Promise<BrowserObservation> {
+      observeCount++;
+      return {
+        sessionId: input.sessionId,
+        targetId: "tab-2",
+        url: "https://example.com/cookies",
+        title: "Cookie Policy",
+        tabs: [
+          { id: "tab-1", title: "Before", url: "https://example.com", active: false },
+          { id: "tab-2", title: "Cookie Policy", url: "https://example.com/cookies", active: true },
+        ],
+      };
+    },
+  } as Partial<BrowserProvider>);
+
+  await executeStep(
+    state,
+    { kind: "exec", summary: "Click cookie consent", payload: { code: "document.querySelector('button').click(); return {clicked:true}" } },
+    provider,
+    createMockPolicyEngine(),
+  );
+
+  assert.equal(observeCount, 1);
+  const latest = state.events.filter((e) => e.kind === "observation").at(-1)!;
+  assert.equal((latest.payload.tabDrift as Record<string, unknown>).targetChanged, true);
+  assert.match(String((latest.payload.tabDrift as Record<string, unknown>).message), /new tab/u);
 });
 
 test("executeStep caps oversized wireActions batches", async () => {

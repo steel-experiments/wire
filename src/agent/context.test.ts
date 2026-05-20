@@ -136,6 +136,30 @@ test("assembleSystemPrompt redacts secrets in constraints", () => {
   assert.ok(prompt.includes("[REDACTED]"));
 });
 
+test("assembleUserPrompt includes tab target and drift warning", () => {
+  const context = makeContext({
+    observations: [{
+      url: "https://example.com/cookies",
+      title: "Cookie Policy",
+      targetId: "tab-2",
+      tabs: [
+        { id: "tab-1", title: "Shop", url: "https://example.com" },
+        { id: "tab-2", title: "Cookie Policy", url: "https://example.com/cookies" },
+      ],
+      tabDrift: "Tab drift detected: selected tab changed tab-1 -> tab-2; new tab: https://example.com/cookies",
+      forms: 0,
+      buttons: 1,
+      dialogs: 0,
+    }],
+  });
+
+  const prompt = assembleUserPrompt(context);
+
+  assert.ok(prompt.includes("Selected tab: tab-2"));
+  assert.ok(prompt.includes("Open tabs: tab-1: Shop | tab-2: Cookie Policy"));
+  assert.ok(prompt.includes("WARNING: Tab drift detected"));
+});
+
 // ---------------------------------------------------------------------------
 // assembleUserPrompt
 // ---------------------------------------------------------------------------

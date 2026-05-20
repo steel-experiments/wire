@@ -244,12 +244,12 @@ Initial metadata should be descriptive, not self-modifying:
 }
 ```
 
-Do not auto-retire or auto-boost skills in the first version. Surface the signal for humans and later RFCs.
+Effectiveness should influence future skill loading conservatively. Skills with repeated successful, shorter, cheaper runs may rank higher; skills with repeated low-success, long, expensive runs may rank lower. Do not rewrite, retire, or promote skills solely from effectiveness stats without a separate policy.
 
 Acceptance criteria:
 
 - Metrics are append-only or recomputable from run events.
-- Metrics do not alter skill matching until a later explicit policy is designed.
+- Metrics alter skill ranking only through explicit, inspectable scoring rules.
 - Runs with multiple skills do not overclaim attribution.
 - Failed, blocked-auth, and policy-denied runs are counted distinctly.
 

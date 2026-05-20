@@ -671,6 +671,90 @@ test("scoreSkills includes tag-matched skill even with no hostname match", () =>
   assert.equal(matched.length, 1, "tag overlap alone should still pass");
 });
 
+test("scoreSkills boosts skills with successful shorter cheaper runs", () => {
+  const effective: SkillMetadata = {
+    id: "skill_effective",
+    scope: "domain",
+    hostnamePatterns: ["example.com"],
+    tags: ["example"],
+    updatedAt: "2026-04-20",
+    source: "generated",
+    confidence: 0.5,
+  };
+  const unproven: SkillMetadata = {
+    id: "skill_unproven",
+    scope: "domain",
+    hostnamePatterns: ["example.com"],
+    tags: ["example"],
+    updatedAt: "2026-04-21",
+    source: "generated",
+    confidence: 0.95,
+  };
+
+  const scored = scoreSkills([unproven, effective], {
+    hostname: "example.com",
+    minScore: 6,
+    statsBySkillId: {
+      skill_effective: {
+        loadedCount: 5,
+        successCount: 5,
+        outcomeCounts: { "task-complete": 5 },
+        totalSteps: 20,
+        totalTokens: 20_000,
+        lastLoadedAt: "2026-05-20T10:00:00.000Z",
+        recentRuns: [],
+      },
+    },
+  });
+
+  assert.equal(scored[0]!.skill.id, "skill_effective");
+  assert.ok(scored[0]!.reasons.some((reason) => reason.startsWith("effective-success")));
+  assert.ok(scored[0]!.reasons.some((reason) => reason.startsWith("short-runs")));
+  assert.ok(scored[0]!.reasons.some((reason) => reason.startsWith("cheap-runs")));
+});
+
+test("scoreSkills penalizes repeatedly ineffective expensive skills", () => {
+  const weak: SkillMetadata = {
+    id: "skill_weak",
+    scope: "domain",
+    hostnamePatterns: ["example.com"],
+    tags: ["example"],
+    updatedAt: "2026-04-21",
+    source: "generated",
+    confidence: 0.95,
+  };
+  const steady: SkillMetadata = {
+    id: "skill_steady",
+    scope: "domain",
+    hostnamePatterns: ["example.com"],
+    tags: ["example"],
+    updatedAt: "2026-04-20",
+    source: "generated",
+    confidence: 0.5,
+  };
+
+  const scored = scoreSkills([weak, steady], {
+    hostname: "example.com",
+    minScore: 6,
+    statsBySkillId: {
+      skill_weak: {
+        loadedCount: 5,
+        successCount: 1,
+        outcomeCounts: { "task-complete": 1, "site-error": 4 },
+        totalSteps: 120,
+        totalTokens: 300_000,
+        lastLoadedAt: "2026-05-20T10:00:00.000Z",
+        recentRuns: [],
+      },
+    },
+  });
+
+  assert.equal(scored[0]!.skill.id, "skill_steady");
+  assert.ok(scored.find((entry) => entry.skill.id === "skill_weak")?.reasons.some((reason) =>
+    reason.startsWith("ineffective-success")
+  ));
+});
+
 test("findMatchingSkills returns more than six valid matches", async () => {
   testRoot = makeRoot();
   const dir = join(testRoot, "skills");
@@ -684,6 +768,37 @@ test("findMatchingSkills returns more than six valid matches", async () => {
 
   const matched = await findMatchingSkills(dir, undefined, ["dialogs"]);
   assert.equal(matched.length, 7);
+});
+
+test("findMatchingSkills uses persisted effectiveness stats when ranking", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  await mkdir(dir, { recursive: true });
+
+  const effective = STRIPE_SKILL_MD
+    .replace("skill_stripe-dashboard", "skill_effective")
+    .replace("updatedAt: 2026-04-24", "updatedAt: 2026-04-20")
+    .replace("source: team", "source: generated\nconfidence: 0.5");
+  const unproven = STRIPE_SKILL_MD
+    .replace("skill_stripe-dashboard", "skill_unproven")
+    .replace("updatedAt: 2026-04-24", "updatedAt: 2026-04-21")
+    .replace("source: team", "source: generated\nconfidence: 0.95");
+
+  await writeFile(join(dir, "effective.md"), effective, "utf-8");
+  await writeFile(join(dir, "unproven.md"), unproven, "utf-8");
+  await writeSkillStats(dir, "skill_effective", {
+    loadedCount: 4,
+    successCount: 4,
+    outcomeCounts: { "task-complete": 4 },
+    totalSteps: 16,
+    totalTokens: 18_000,
+    lastLoadedAt: "2026-05-20T10:00:00.000Z",
+    recentRuns: [],
+  });
+
+  const matched = await findMatchingSkills(dir, "dashboard.stripe.com");
+
+  assert.equal(matched[0]!.id, "skill_effective");
 });
 
 // ---------------------------------------------------------------------------
@@ -1101,6 +1216,7 @@ test("mergeStats increments loadedCount and successCount on success", () => {
   });
   assert.equal(result.loadedCount, 1);
   assert.equal(result.successCount, 1);
+  assert.equal(result.outcomeCounts["task-complete"], 1);
   assert.equal(result.totalSteps, 5);
   assert.equal(result.totalTokens, 8000);
 });
@@ -1114,6 +1230,7 @@ test("mergeStats increments loadedCount but not successCount on failure", () => 
   });
   assert.equal(result.loadedCount, 1);
   assert.equal(result.successCount, 0);
+  assert.equal(result.outcomeCounts.ambiguous, 1);
 });
 
 test("mergeStats accumulates across multiple runs", () => {
@@ -1126,6 +1243,8 @@ test("mergeStats accumulates across multiple runs", () => {
   assert.equal(stats.totalSteps, 18);
   assert.equal(stats.totalTokens, 21000);
   assert.equal(stats.lastLoadedAt, "2026-05-06T10:02:00Z");
+  assert.equal(stats.outcomeCounts["task-complete"], 2);
+  assert.equal(stats.outcomeCounts.ambiguous, 1);
 });
 
 test("readSkillStats returns null for missing file", async () => {
@@ -1134,14 +1253,34 @@ test("readSkillStats returns null for missing file", async () => {
   assert.equal(result, null);
 });
 
+test("readSkillStats normalizes older stats files", async () => {
+  testRoot = makeRoot();
+  await mkdir(join(testRoot, ".stats"), { recursive: true });
+  await writeFile(join(testRoot, ".stats", "skill_old.json"), JSON.stringify({
+    loadedCount: 2,
+    successCount: 1,
+    totalSteps: 10,
+    totalTokens: 1000,
+    lastLoadedAt: "2026-05-06T12:00:00Z",
+  }), "utf-8");
+
+  const stats = await readSkillStats(testRoot, "skill_old");
+
+  assert.equal(stats!.loadedCount, 2);
+  assert.deepEqual(stats!.outcomeCounts, {});
+  assert.deepEqual(stats!.recentRuns, []);
+});
+
 test("writeSkillStats and readSkillStats round-trip", async () => {
   testRoot = makeRoot();
   const stats: SkillStats = {
     loadedCount: 5,
     successCount: 4,
+    outcomeCounts: { "task-complete": 4, "site-error": 1 },
     totalSteps: 22,
     totalTokens: 32000,
     lastLoadedAt: "2026-05-06T12:00:00Z",
+    recentRuns: [],
   };
 
   await writeSkillStats(testRoot, "skill_test", stats);
@@ -1174,6 +1313,9 @@ test("updateSkillStatsFromRun writes stats for each loaded skill", async () => {
   assert.equal(statsA!.loadedCount, 1);
   assert.equal(statsA!.successCount, 1);
   assert.equal(statsB!.loadedCount, 1);
+  assert.equal(statsA!.outcomeCounts["task-complete"], 1);
+  assert.deepEqual(statsA!.recentRuns[0]!.loadedWithSkillIds, [skillB]);
+  assert.deepEqual(statsB!.recentRuns[0]!.loadedWithSkillIds, [skillA]);
 });
 
 test("updateSkillStatsFromRun is no-op when no skills loaded", async () => {

@@ -1,8 +1,13 @@
 import type { SkillMetadata } from "../shared/types.js";
+import {
+  averageStepsWhenLoaded,
+  averageTokensWhenLoaded,
+  normalizeSkillStats,
+  skillSuccessRate,
+  type SkillStats,
+} from "./stats.js";
 
-// ---------------------------------------------------------------------------
 // Hostname matching
-// ---------------------------------------------------------------------------
 
 /**
  * Return skills whose `hostnamePatterns` include a pattern that matches the
@@ -40,9 +45,7 @@ function hostnameMatches(pattern: string, hostname: string): boolean {
   return hostname === p;
 }
 
-// ---------------------------------------------------------------------------
 // Tag matching
-// ---------------------------------------------------------------------------
 
 /**
  * Return skills that have at least one tag in common with the requested tags.
@@ -61,9 +64,7 @@ export function matchSkillsByTags<T extends SkillMetadata>(
   );
 }
 
-// ---------------------------------------------------------------------------
 // Relevance sorting
-// ---------------------------------------------------------------------------
 
 /**
  * Sort skills by `updatedAt` descending (newest first). Returns a new array.
@@ -89,6 +90,51 @@ export interface ScoreSkillsOptions {
   tags?: string[];
   minScore?: number;
   limit?: number;
+  statsBySkillId?: Record<string, Partial<SkillStats>>;
+}
+
+function effectivenessScore(stats: Partial<SkillStats>): { score: number; reasons: string[] } {
+  const normalized = normalizeSkillStats(stats);
+  const loadedCount = normalized.loadedCount;
+  if (loadedCount < 3) return { score: 0, reasons: [] };
+
+  const successRate = skillSuccessRate(normalized);
+  const avgSteps = averageStepsWhenLoaded(normalized);
+  const avgTokens = averageTokensWhenLoaded(normalized);
+  let score = 0;
+  const reasons: string[] = [];
+
+  if (successRate >= 0.8) {
+    score += 10;
+    reasons.push(`effective-success:${successRate.toFixed(2)}`);
+  } else if (successRate >= 0.6) {
+    score += 4;
+    reasons.push(`some-success:${successRate.toFixed(2)}`);
+  } else if (successRate <= 0.25) {
+    score -= 20;
+    reasons.push(`ineffective-success:${successRate.toFixed(2)}`);
+  } else if (successRate <= 0.4) {
+    score -= 8;
+    reasons.push(`low-success:${successRate.toFixed(2)}`);
+  }
+
+  if (avgSteps > 0 && avgSteps <= 5) {
+    score += 2;
+    reasons.push(`short-runs:${avgSteps.toFixed(1)}-steps`);
+  } else if (avgSteps >= 20) {
+    score -= 3;
+    reasons.push(`long-runs:${avgSteps.toFixed(1)}-steps`);
+  }
+
+  if (avgTokens > 0 && avgTokens <= 8_000) {
+    score += 2;
+    reasons.push(`cheap-runs:${Math.round(avgTokens)}-tokens`);
+  } else if (avgTokens >= 50_000) {
+    score -= 3;
+    reasons.push(`expensive-runs:${Math.round(avgTokens)}-tokens`);
+  }
+
+  return { score, reasons };
 }
 
 export function scoreSkills<T extends SkillMetadata>(
@@ -134,6 +180,12 @@ export function scoreSkills<T extends SkillMetadata>(
     if (skill.source === "generated") score += Math.round((skill.confidence ?? 0.5) * 4);
     if (skill.status === "proposed") score -= 40;
     if (skill.status === "rejected" || skill.status === "superseded") score -= 100;
+    const stats = options.statsBySkillId?.[skill.id];
+    if (stats) {
+      const effectiveness = effectivenessScore(stats);
+      score += effectiveness.score;
+      reasons.push(...effectiveness.reasons);
+    }
 
     // When filters are provided, a skill must have an actual match signal
     // (hostname or tag overlap) — scope and source bonuses alone aren't a

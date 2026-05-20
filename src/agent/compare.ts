@@ -1,12 +1,8 @@
-// ABOUTME: Run comparison artifact generation for experiment evaluation.
-// ABOUTME: Produces compact, secret-free comparisons of run metrics without affecting runtime.
 
 import type { LoopResult } from "./loop.js";
 import type { RunId, SkillId, Task } from "../shared/types.js";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 export interface RunComparisonEntry {
   runId: RunId;
@@ -23,9 +19,7 @@ export interface RunComparison {
   conclusion: string;
 }
 
-// ---------------------------------------------------------------------------
 // extractRunMetrics
-// ---------------------------------------------------------------------------
 
 export function extractRunMetrics(result: LoopResult): RunComparisonEntry {
   const skillIds = extractLoadedSkills(result.events, result.run.id);
@@ -60,9 +54,7 @@ function extractLoadedSkills(events: LoopResult["events"], runId: RunId): SkillI
   return [...seen];
 }
 
-// ---------------------------------------------------------------------------
 // deriveTaskKey
-// ---------------------------------------------------------------------------
 
 export function deriveTaskKey(task: Task): string {
   return task.title
@@ -72,9 +64,7 @@ export function deriveTaskKey(task: Task): string {
     .slice(0, 80);
 }
 
-// ---------------------------------------------------------------------------
 // generateComparisonConclusion
-// ---------------------------------------------------------------------------
 
 export function generateComparisonConclusion(runs: RunComparisonEntry[]): string {
   if (runs.length < 2) {
@@ -142,9 +132,7 @@ export function generateComparisonConclusion(runs: RunComparisonEntry[]): string
   return parts.join(" ");
 }
 
-// ---------------------------------------------------------------------------
 // compareRuns
-// ---------------------------------------------------------------------------
 
 export function compareRuns(task: Task, results: LoopResult[]): RunComparison {
   const taskKey = deriveTaskKey(task);

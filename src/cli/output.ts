@@ -1,8 +1,6 @@
 import type { WireError } from "./errors.js";
 
-// ---------------------------------------------------------------------------
 // Versioned output envelope for agent-native CLI
-// ---------------------------------------------------------------------------
 
 export interface WireOutput<T = unknown> {
   schema_version: "1.0";

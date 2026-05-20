@@ -1,8 +1,6 @@
 import type { TraceEvent, RunId } from "../shared/types.js";
 
-// ---------------------------------------------------------------------------
 // Trace replay utilities
-// ---------------------------------------------------------------------------
 
 export interface ReplayTimeline {
   runId: RunId;

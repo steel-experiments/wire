@@ -1,6 +1,4 @@
-// ---------------------------------------------------------------------------
 // LLM provider contract
-// ---------------------------------------------------------------------------
 
 export type ContentPart =
   | { type: "text"; text: string }
@@ -39,9 +37,7 @@ export interface LLMProvider {
   chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResponse>;
 }
 
-// ---------------------------------------------------------------------------
 // Typed errors
-// ---------------------------------------------------------------------------
 
 export class LLMProviderError extends Error {
   constructor(
@@ -78,9 +74,7 @@ export class LLMApiError extends LLMProviderError {
   }
 }
 
-// ---------------------------------------------------------------------------
 // OpenAI provider configuration
-// ---------------------------------------------------------------------------
 
 export interface OpenAIProviderConfig {
   apiKey: string;
@@ -92,9 +86,7 @@ export interface OpenAIProviderConfig {
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_MODEL = "gpt-5.4-mini";
 
-// ---------------------------------------------------------------------------
 // OpenAI API response types
-// ---------------------------------------------------------------------------
 
 interface OpenAIOutputMessage {
   type: "message";
@@ -121,9 +113,7 @@ interface OpenAIErrorResponse {
   error?: { message?: string; type?: string; code?: string };
 }
 
-// ---------------------------------------------------------------------------
 // OpenAI provider
-// ---------------------------------------------------------------------------
 
 export class OpenAIProvider implements LLMProvider {
   private readonly apiKey: string;
@@ -243,9 +233,7 @@ export class OpenAIProvider implements LLMProvider {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Factory
-// ---------------------------------------------------------------------------
 
 export function createOpenAIProvider(
   config?: Partial<OpenAIProviderConfig>,

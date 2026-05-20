@@ -2,9 +2,7 @@ import type { BrowserObservation, JsonObject, JsonValue, SessionId } from "../sh
 
 import type { BrowserProvider, BrowserObserveInput } from "./bridge.js";
 
-// ---------------------------------------------------------------------------
 // Browser observation adapter
-// ---------------------------------------------------------------------------
 
 export interface ObserveOptions {
   provider: BrowserProvider;

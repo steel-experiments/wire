@@ -66,11 +66,11 @@ function makeLoopResult(overrides: {
   task?: Task;
   events?: TraceEvent[];
   stepCount?: number;
-  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined;
   startedAt?: string;
 }): LoopResult {
   const run = overrides.run ?? makeRun();
-  return {
+  const result: LoopResult = {
     run,
     events: overrides.events ?? [],
     classification: { kind: "task-complete", confidence: 0.95 },
@@ -78,8 +78,11 @@ function makeLoopResult(overrides: {
     sessionId: createId("session"),
     stepCount: overrides.stepCount ?? 5,
     startedAt: overrides.startedAt ?? run.startedAt ?? "2026-05-06T10:00:00.000Z",
-    usage: overrides.usage,
+    helperSource: "function noop() {}",
+    helperVersion: 0,
   };
+  if (overrides.usage !== undefined) result.usage = overrides.usage;
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,8 +134,10 @@ test("extractRunMetrics handles missing usage gracefully", () => {
 });
 
 test("extractRunMetrics handles missing finishedAt gracefully", () => {
+  const run = makeRun({ startedAt: "2026-05-06T10:00:00.000Z" });
+  delete run.finishedAt;
   const result = makeLoopResult({
-    run: makeRun({ startedAt: "2026-05-06T10:00:00.000Z", finishedAt: undefined }),
+    run,
     startedAt: "2026-05-06T10:00:00.000Z",
   });
   const metrics = extractRunMetrics(result);

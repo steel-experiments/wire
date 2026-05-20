@@ -467,6 +467,7 @@ test("executeTask surfaces LLM usage in LoopResult when provider returns it", as
 // ---------------------------------------------------------------------------
 
 function makeSkill(overrides: Partial<LoadedSkill> & { sections: Record<string, string> }): LoadedSkill {
+  const { sections, ...rest } = overrides;
   return {
     id: "skill_test",
     scope: "domain",
@@ -475,8 +476,8 @@ function makeSkill(overrides: Partial<LoadedSkill> & { sections: Record<string, 
     source: "generated",
     path: "/fake/skill.md",
     body: "",
-    sections: overrides.sections,
-    ...overrides,
+    sections,
+    ...rest,
   };
 }
 

@@ -1,0 +1,20 @@
+{
+  "loadedCount": 1,
+  "successCount": 0,
+  "outcomeCounts": {
+    "partial-success": 1
+  },
+  "totalSteps": 6,
+  "totalTokens": 24521,
+  "lastLoadedAt": "2026-05-20T15:02:22.486Z",
+  "recentRuns": [
+    {
+      "runId": "run_142e1a6b-78ff-4263-a835-22aae553a3ff",
+      "loadedAt": "2026-05-20T15:02:22.486Z",
+      "outcome": "partial-success",
+      "stepCount": 6,
+      "totalTokens": 24521,
+      "loadedWithSkillIds": []
+    }
+  ]
+}

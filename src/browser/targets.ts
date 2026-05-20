@@ -1,8 +1,6 @@
 import type { BrowserExecTarget } from "../shared/types.js";
 
-// ---------------------------------------------------------------------------
 // Target / tab routing helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Resolve a target specification to a concrete value.

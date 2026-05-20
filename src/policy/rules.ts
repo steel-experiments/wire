@@ -1,8 +1,6 @@
 import type { PolicyDecisionResult } from "../shared/types.js";
 
-// ---------------------------------------------------------------------------
 // Policy action — the shape the engine evaluates
-// ---------------------------------------------------------------------------
 
 export interface PolicyAction {
   kind: string;
@@ -10,9 +8,7 @@ export interface PolicyAction {
   payload?: Record<string, unknown>;
 }
 
-// ---------------------------------------------------------------------------
 // Policy rule — a single check
-// ---------------------------------------------------------------------------
 
 export interface PolicyRule {
   id: string;
@@ -20,9 +16,7 @@ export interface PolicyRule {
   check: (action: PolicyAction) => PolicyDecisionResult;
 }
 
-// ---------------------------------------------------------------------------
 // Baseline rule helpers — predicate-based rule factory
-// ---------------------------------------------------------------------------
 
 function makeRule(
   id: string,
@@ -39,9 +33,7 @@ function makeRule(
   };
 }
 
-// ---------------------------------------------------------------------------
 // Sensitive action keywords
-// ---------------------------------------------------------------------------
 
 const SUBMIT_KINDS = new Set([
   "submit",
@@ -113,9 +105,7 @@ function isSafeCdpMethod(method: string | undefined): boolean {
   return SAFE_CDP_METHOD_PREFIXES.includes(method);
 }
 
-// ---------------------------------------------------------------------------
 // Baseline rules
-// ---------------------------------------------------------------------------
 
 export const BASELINE_RULES: PolicyRule[] = [
   makeRule(
@@ -179,9 +169,7 @@ export const BASELINE_RULES: PolicyRule[] = [
   ),
 ];
 
-// ---------------------------------------------------------------------------
 // evaluateRules — evaluate all rules against an action
-// ---------------------------------------------------------------------------
 
 export function evaluateRules(
   action: PolicyAction,
@@ -208,9 +196,7 @@ export function evaluateRules(
   return { result: "allow", matchedRules };
 }
 
-// ---------------------------------------------------------------------------
 // Exec risk classification — pattern-based code risk detection
-// ---------------------------------------------------------------------------
 
 export type ExecRiskKind =
   | "read"

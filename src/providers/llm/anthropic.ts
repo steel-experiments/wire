@@ -1,9 +1,7 @@
 import type { ChatMessage, ChatOptions, ChatResponse, ContentPart, LLMProvider } from "./openai.js";
 import { LLMNetworkError, LLMApiError } from "./openai.js";
 
-// ---------------------------------------------------------------------------
 // Anthropic provider configuration
-// ---------------------------------------------------------------------------
 
 export type AnthropicReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -25,9 +23,7 @@ export interface AnthropicProviderConfig {
 const DEFAULT_BASE_URL = "https://api.anthropic.com/v1";
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 
-// ---------------------------------------------------------------------------
 // Anthropic API response types
-// ---------------------------------------------------------------------------
 
 interface AnthropicContentBlock {
   type: string;
@@ -53,9 +49,7 @@ interface AnthropicErrorResponse {
   error?: { message?: string; type?: string };
 }
 
-// ---------------------------------------------------------------------------
 // Anthropic provider
-// ---------------------------------------------------------------------------
 
 export class AnthropicProvider implements LLMProvider {
   private readonly apiKey: string;
@@ -178,9 +172,7 @@ export class AnthropicProvider implements LLMProvider {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Factory
-// ---------------------------------------------------------------------------
 
 export function createAnthropicProvider(
   config?: Partial<AnthropicProviderConfig>,

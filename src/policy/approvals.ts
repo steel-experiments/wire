@@ -8,15 +8,11 @@ import type {
   RunId,
 } from "../shared/types.js";
 
-// ---------------------------------------------------------------------------
 // Constants
-// ---------------------------------------------------------------------------
 
 const DEFAULT_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
-// ---------------------------------------------------------------------------
 // createApprovalRequest
-// ---------------------------------------------------------------------------
 
 export function createApprovalRequest(
   runId: RunId,
@@ -40,9 +36,7 @@ export function createApprovalRequest(
   return request;
 }
 
-// ---------------------------------------------------------------------------
 // isExpired
-// ---------------------------------------------------------------------------
 
 export function isExpired(request: ApprovalRequest): boolean {
   if (request.status === "approved" || request.status === "rejected") {
@@ -56,9 +50,7 @@ export function isExpired(request: ApprovalRequest): boolean {
   return Date.now() > Date.parse(request.expiresAt);
 }
 
-// ---------------------------------------------------------------------------
 // resolveApproval
-// ---------------------------------------------------------------------------
 
 export function resolveApproval(
   request: ApprovalRequest,

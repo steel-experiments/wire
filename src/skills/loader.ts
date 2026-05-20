@@ -4,13 +4,12 @@ import { join } from "node:path";
 import type { LoadedSkill, SkillMetadata } from "../shared/types.js";
 import { ensureDir } from "../storage/atomic.js";
 
-import { scoreSkills, sortByRelevance } from "./matcher.js";
+import { scoreSkills, sortByRelevance, type SkillMatchScore } from "./matcher.js";
 import { extractSections, parseSkillFile } from "./parser.js";
+import { readSkillStats, type SkillStats } from "./stats.js";
 import { sanitizeSkillContent } from "../agent/context.js";
 
-// ---------------------------------------------------------------------------
 // Load all skills from a directory
-// ---------------------------------------------------------------------------
 
 /**
  * Scan `dir` for `*.md` files, parse each one's frontmatter, and return
@@ -89,9 +88,7 @@ function logSkillLoadFailure(path: string, phase: "read" | "parse", err: unknown
   (skillLoadWarningSink ?? console.error)(`[skill-loader] ${phase} failed for ${path}: ${message}`);
 }
 
-// ---------------------------------------------------------------------------
 // Load and filter skills
-// ---------------------------------------------------------------------------
 
 /**
  * Load all skill files from `skillsDir` and filter by hostname and/or tags.
@@ -112,15 +109,41 @@ export async function findMatchingSkillDocs(
   hostname?: string,
   tags?: string[],
 ): Promise<LoadedSkill[]> {
-  const all = await loadSkillDocsFromDir(skillsDir);
-  return filterMatchingSkillDocs(all, hostname, tags);
+  return (await findMatchingSkillDocMatches(skillsDir, hostname, tags)).map((entry) => entry.skill);
 }
 
-function filterMatchingSkillDocs(
+export async function findMatchingSkillDocMatches(
+  skillsDir: string,
+  hostname?: string,
+  tags?: string[],
+): Promise<Array<SkillMatchScore<LoadedSkill>>> {
+  const all = await loadSkillDocsFromDir(skillsDir);
+  const statsBySkillId = await loadStatsForSkills(skillsDir, all);
+  return filterMatchingSkillDocMatches(all, hostname, tags, statsBySkillId);
+}
+
+async function loadStatsForSkills(skillsDir: string, skills: LoadedSkill[]): Promise<Record<string, SkillStats>> {
+  const entries: Array<[string, SkillStats]> = [];
+  for (const skill of skills) {
+    const stats = await readSkillStats(skillsDir, skill.id);
+    if (stats) entries.push([skill.id, stats]);
+  }
+  return Object.fromEntries(entries);
+}
+
+function sortByEffectiveness(active: LoadedSkill[], statsBySkillId: Record<string, SkillStats>): Array<SkillMatchScore<LoadedSkill>> {
+  return scoreSkills(active, {
+    minScore: Number.NEGATIVE_INFINITY,
+    statsBySkillId,
+  });
+}
+
+function filterMatchingSkillDocMatches(
   all: LoadedSkill[],
   hostname?: string,
   tags?: string[],
-): LoadedSkill[] {
+  statsBySkillId: Record<string, SkillStats> = {},
+): Array<SkillMatchScore<LoadedSkill>> {
 
   const hasHostname = hostname !== undefined && hostname.length > 0;
   const hasTags = tags !== undefined && tags.length > 0;
@@ -131,14 +154,17 @@ function filterMatchingSkillDocs(
   );
 
   if (!hasHostname && !hasTags) {
-    return sortByRelevance(active);
+    return Object.keys(statsBySkillId).length > 0
+      ? sortByEffectiveness(active, statsBySkillId)
+      : sortByRelevance(active).map((skill) => ({ skill, score: 0, reasons: ["recent-or-confident"] }));
   }
 
   const minScore = hasHostname ? 6 : 6;
-  const scoreOptions: { hostname?: string; tags?: string[]; minScore: number } = { minScore };
+  const scoreOptions: { hostname?: string; tags?: string[]; minScore: number; statsBySkillId?: Record<string, SkillStats> } = { minScore };
   if (hostname) scoreOptions.hostname = hostname;
   if (tags) scoreOptions.tags = tags;
-  return scoreSkills(active, scoreOptions).map((entry) => entry.skill);
+  if (Object.keys(statsBySkillId).length > 0) scoreOptions.statsBySkillId = statsBySkillId;
+  return scoreSkills(active, scoreOptions);
 }
 
 function toSkillMetadata(skill: LoadedSkill): SkillMetadata {

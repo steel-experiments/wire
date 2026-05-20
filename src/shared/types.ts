@@ -371,6 +371,8 @@ export interface RunCheckpoint {
   events: TraceEvent[];
   stepCount: number;
   startedAt: string;
+  helperSource?: string;
+  helperVersion?: number;
   pendingAction: ProposedAction;
   approvalRequestId: ApprovalId;
   savedAt: string;

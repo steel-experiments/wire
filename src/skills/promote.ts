@@ -192,13 +192,11 @@ export async function llmProposeSkill(
 
     const response = await llmProvider.chat(messages, { maxTokens: 500 });
 
-    const result = parseSkillProposalResponse(response.content, runId);
-    if (!result) {
-      console.error("[skill-promote] parseSkillProposalResponse returned null for content:", response.content.slice(0, 200));
-    }
-    return result;
+    return parseSkillProposalResponse(response.content, runId);
   } catch (err) {
-    console.error("[skill-promote] llmProposeSkill failed:", err instanceof Error ? err.message : err);
+    if (process.env["WIRE_DEBUG_SKILLS"]) {
+      console.error("[skill-promote] llmProposeSkill failed:", err instanceof Error ? err.message : err);
+    }
     return null;
   }
 }

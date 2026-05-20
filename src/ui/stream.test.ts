@@ -63,6 +63,16 @@ test("stream code-exec increments step counter; observations do not", () => {
   assert.match(lines[4]!, /\[ 3\/10\]/u);
 });
 
+test("stream labels common exec actions by intent", () => {
+  const { lines, sink } = captureSink();
+  sink.onEvent(ev("code-exec", { code: "location.href = 'https://example.com'" }));
+  sink.onEvent(ev("code-exec", { code: "return document.body.innerText" }));
+  sink.onEvent(ev("code-exec", { code: "document.querySelector('button').click()" }));
+  assert.match(lines[0]!, /↪ navigate/u);
+  assert.match(lines[1]!, /◆ inspect/u);
+  assert.match(lines[2]!, /● interact/u);
+});
+
 test("stream truncates long code in code-exec line", () => {
   const { lines, sink } = captureSink();
   const longCode = "x".repeat(300);
@@ -112,6 +122,17 @@ test("stream renders ↻ marker on repeat code-exec", () => {
   assert.match(lines[2]!, /↻×3/u);
   assert.ok(!lines[3]!.includes("↻"), "different code resets repeat counter");
   assert.match(lines[4]!, /↻×2/u);
+});
+
+test("stream renders raw command summaries when present", () => {
+  const { lines, sink } = captureSink();
+  sink.onEvent(ev("code-exec", {
+    rawCommands: 1,
+    methods: ["Input.dispatchMouseEvent"],
+    summaries: ["Input.dispatchMouseEvent mousePressed left @ 100,200"],
+  }));
+  assert.match(lines[0]!, /⚙ raw/u);
+  assert.match(lines[0]!, /mousePressed left @ 100,200/u);
 });
 
 test("stream hides policy-check by default, shows in verbose", () => {

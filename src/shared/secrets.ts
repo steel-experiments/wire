@@ -1,5 +1,3 @@
-// ABOUTME: Layered secret resolver for benchmark task credentials and Steel browser profiles.
-// ABOUTME: Walks providers env → pass → keychain → op (configurable via WIRE_SECRETS_PROVIDER).
 
 import { spawnSync } from 'node:child_process';
 

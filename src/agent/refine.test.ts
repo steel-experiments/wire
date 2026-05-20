@@ -6,7 +6,7 @@ import { test } from "node:test";
 
 import { createId } from "../shared/ids.js";
 import type { LoopResult, LoopState } from "./loop.js";
-import type { TraceEvent, Run, RunId, Task } from "../shared/types.js";
+import type { JsonObject, TraceEvent, Run, RunId, Task } from "../shared/types.js";
 
 import {
   classifyRunSafety,
@@ -51,9 +51,10 @@ function makeLoopResult(overrides: {
   task?: Task;
   events?: TraceEvent[];
   stepCount?: number;
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
 }): LoopResult {
   const run = overrides.run ?? makeRun();
-  return {
+  const result: LoopResult = {
     run,
     events: overrides.events ?? [],
     classification: { kind: "task-complete", confidence: 0.95 },
@@ -61,7 +62,11 @@ function makeLoopResult(overrides: {
     sessionId: createId("session"),
     stepCount: overrides.stepCount ?? 5,
     startedAt: run.startedAt ?? "2026-05-06T10:00:00.000Z",
+    helperSource: "function noop() {}",
+    helperVersion: 0,
   };
+  if (overrides.usage !== undefined) result.usage = overrides.usage;
+  return result;
 }
 
 function makeEvent(kind: string, payload: Record<string, unknown>): TraceEvent {
@@ -70,7 +75,7 @@ function makeEvent(kind: string, payload: Record<string, unknown>): TraceEvent {
     runId: createId("run"),
     ts: "2026-05-06T10:00:01.000Z",
     kind: kind as TraceEvent["kind"],
-    payload,
+    payload: payload as JsonObject,
   };
 }
 

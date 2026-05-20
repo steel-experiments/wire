@@ -1,13 +1,9 @@
-// ABOUTME: Policy-gated refinement for skill improvement via repeated task execution.
-// ABOUTME: Only re-runs safe, read-only tasks in investigate/experiment mode.
 
 import type { LoopResult } from "./loop.js";
 import type { Task, TraceEvent } from "../shared/types.js";
 import { compareRuns, type RunComparison } from "./compare.js";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 export interface RefinementOptions {
   maxIterations?: number;
@@ -22,9 +18,7 @@ export interface RefinementResult {
   stoppedEarly?: boolean;
 }
 
-// ---------------------------------------------------------------------------
 // Safety classification
-// ---------------------------------------------------------------------------
 
 const DESTRUCTIVE_CODE_PATTERNS: Array<{ re: RegExp; label: string }> = [
   { re: /form\.submit\s*\(/u, label: "form submission" },
@@ -87,9 +81,7 @@ export function classifyRunSafety(
   return { safe: reasons.length === 0, reasons };
 }
 
-// ---------------------------------------------------------------------------
 // Gate check
-// ---------------------------------------------------------------------------
 
 export function canRefineRun(
   task: Task,
@@ -114,9 +106,7 @@ export function canRefineRun(
   return { allowed: true };
 }
 
-// ---------------------------------------------------------------------------
 // Refinement loop
-// ---------------------------------------------------------------------------
 
 const DEFAULT_MAX_ITERATIONS = 2;
 
@@ -131,11 +121,12 @@ export async function refineRun(
   // Gate check
   const gate = canRefineRun(task, baseline);
   if (!gate.allowed) {
-    return {
+    const blocked: RefinementResult = {
       attempted: false,
-      gateReason: gate.reason,
       iterations: 0,
     };
+    if (gate.reason !== undefined) blocked.gateReason = gate.reason;
+    return blocked;
   }
 
   const allResults: LoopResult[] = [baseline];

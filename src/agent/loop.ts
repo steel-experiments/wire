@@ -25,7 +25,12 @@ import { stableJsonStringify } from "../shared/ids.js";
 
 import { observeBrowser, toObservationPayload } from "../browser/observe.js";
 import { execCode, isLikelyNavigationCode } from "../browser/exec.js";
-import { prependHelpers } from "../browser/helpers.js";
+import {
+  createHelperDiff,
+  DEFAULT_HELPER_SOURCE,
+  prependHelpers,
+  validateHelperSource,
+} from "../browser/helpers.js";
 import { execRaw } from "../browser/raw.js";
 import { classifyRun, generateOutcomeSummary } from "./classify.js";
 import { detectAuthWall } from "../profiles/auth.js";
@@ -37,6 +42,13 @@ const MAX_CDP_BATCH_COMMANDS = 80;
 const DEFAULT_EXEC_TIMEOUT_MS = 12_000;
 const APPROVAL_CODE_EXCERPT_MAX = 2000;
 const NAVIGATION_CDP_METHODS = new Set(["Page.navigate", "Page.reload", "Page.navigateToHistoryEntry"]);
+const INPUT_CDP_METHODS = new Set([
+  "Input.dispatchMouseEvent",
+  "Input.dispatchKeyEvent",
+  "Input.dispatchTouchEvent",
+  "Input.dispatchDragEvent",
+  "Input.insertText",
+]);
 
 function commandsIncludeNavigation(
   commands: ReadonlyArray<{ method?: unknown }>,
@@ -44,17 +56,126 @@ function commandsIncludeNavigation(
   return commands.some((c) => typeof c?.method === "string" && NAVIGATION_CDP_METHODS.has(c.method));
 }
 
-async function autoObserveAfterNavigation(
+function commandsIncludeInput(commands: ReadonlyArray<{ method?: unknown }>): boolean {
+  return commands.some((c) => typeof c?.method === "string" && INPUT_CDP_METHODS.has(c.method));
+}
+
+function isLikelyInteractionCode(code: string): boolean {
+  return /\b(clickVisibleText|fillByLabel|dispatchEvent|MouseEvent|KeyboardEvent|PointerEvent|window\.open)\b|\.click\s*\(|\.submit\s*\(/u.test(code);
+}
+
+function summarizeRawCommand(cmd: { method: string; params?: JsonObject }): string {
+  const p = cmd.params ?? {};
+  if (cmd.method === "Input.dispatchMouseEvent") {
+    const type = typeof p.type === "string" ? p.type : "mouse";
+    const x = typeof p.x === "number" ? p.x : "?";
+    const y = typeof p.y === "number" ? p.y : "?";
+    const button = typeof p.button === "string" && p.button !== "none" ? ` ${p.button}` : "";
+    return `${cmd.method} ${type}${button} @ ${x},${y}`;
+  }
+  if (cmd.method === "Input.dispatchKeyEvent") {
+    const key = typeof p.key === "string" ? p.key : typeof p.code === "string" ? p.code : "key";
+    const type = typeof p.type === "string" ? p.type : "dispatch";
+    return `${cmd.method} ${type} ${key}`;
+  }
+  if (cmd.method === "Page.navigate") {
+    const url = typeof p.url === "string" ? redactJsonObject({ url: p.url }).url : undefined;
+    return url ? `${cmd.method} ${url}` : cmd.method;
+  }
+  return cmd.method;
+}
+
+function summarizeRawCommands(commands: Array<{ method: string; params?: JsonObject }>): string[] {
+  return commands.slice(0, 6).map(summarizeRawCommand);
+}
+
+type TabSnapshot = { id: string; url: string; title: string };
+
+function latestObservationPayload(state: LoopState): JsonObject | undefined {
+  return [...state.events].reverse().find((e) => e.kind === "observation")?.payload;
+}
+
+function tabsFromPayload(payload: JsonObject | undefined): TabSnapshot[] {
+  const raw = payload?.tabs;
+  if (!Array.isArray(raw)) return [];
+  const tabs: TabSnapshot[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const tab = item as JsonObject;
+    if (typeof tab.id !== "string") continue;
+    tabs.push({
+      id: tab.id,
+      url: typeof tab.url === "string" ? tab.url : "",
+      title: typeof tab.title === "string" ? tab.title : "",
+    });
+  }
+  return tabs;
+}
+
+function buildTabDrift(previous: JsonObject | undefined, current: JsonObject): JsonObject | undefined {
+  if (!previous) return undefined;
+  const previousTargetId = typeof previous.targetId === "string" ? previous.targetId : "";
+  const currentTargetId = typeof current.targetId === "string" ? current.targetId : "";
+  const previousTabs = tabsFromPayload(previous);
+  const currentTabs = tabsFromPayload(current);
+  const previousById = new Map(previousTabs.map((tab) => [tab.id, tab]));
+  const currentById = new Map(currentTabs.map((tab) => [tab.id, tab]));
+  const newTabs = currentTabs.filter((tab) => !previousById.has(tab.id));
+  const closedTabs = previousTabs.filter((tab) => !currentById.has(tab.id));
+  const targetChanged = !!previousTargetId && !!currentTargetId && previousTargetId !== currentTargetId;
+  const countChanged = previousTabs.length !== currentTabs.length;
+  if (!targetChanged && !countChanged && newTabs.length === 0 && closedTabs.length === 0) {
+    return undefined;
+  }
+
+  const parts: string[] = [];
+  if (targetChanged) parts.push(`selected tab changed ${previousTargetId} -> ${currentTargetId}`);
+  if (countChanged) parts.push(`tab count ${previousTabs.length} -> ${currentTabs.length}`);
+  if (newTabs.length > 0) parts.push(`new tab: ${newTabs.map((t) => t.url || t.title || t.id).join(", ")}`);
+  if (closedTabs.length > 0) parts.push(`closed tab: ${closedTabs.map((t) => t.url || t.title || t.id).join(", ")}`);
+  return {
+    previousTargetId,
+    currentTargetId,
+    previousTabCount: previousTabs.length,
+    currentTabCount: currentTabs.length,
+    targetChanged,
+    newTabs: newTabs as unknown as import("../shared/types.js").JsonValue,
+    closedTabs: closedTabs as unknown as import("../shared/types.js").JsonValue,
+    message: `Tab drift detected: ${parts.join("; ")}`,
+  };
+}
+
+function withTabDrift(state: LoopState, payload: JsonObject): JsonObject {
+  const tabDrift = buildTabDrift(latestObservationPayload(state), payload);
+  if (!tabDrift) return payload;
+  return { ...payload, tabDrift };
+}
+
+async function observeAndRecord(
   state: LoopState,
   provider: BrowserProvider,
+  options: { targetId?: string; includeScreenshotArtifactId?: boolean } = {},
 ): Promise<{ authWallHit: boolean }> {
-  const observation = await observeBrowser({ provider, sessionId: state.sessionId });
+  const observeOptions: { provider: BrowserProvider; sessionId: SessionId; targetId?: string } = {
+    provider,
+    sessionId: state.sessionId,
+  };
+  if (options.targetId) observeOptions.targetId = options.targetId;
+  const observation = await observeBrowser(observeOptions);
+  const payloadOptions: { includeScreenshotArtifactId?: boolean } = {};
+  if (options.includeScreenshotArtifactId !== undefined) {
+    payloadOptions.includeScreenshotArtifactId = options.includeScreenshotArtifactId;
+  }
+  const payload = withTabDrift(
+    state,
+    toObservationPayload(observation, payloadOptions),
+  );
   state.events.push({
     id: createId("event"),
     runId: state.run.id,
     ts: nowIsoUtc(),
     kind: "observation",
-    payload: redactJsonObject(toObservationPayload(observation)),
+    payload: redactJsonObject(payload),
   });
   if (observation.screenshotBase64) {
     state.latestScreenshotBase64 = observation.screenshotBase64;
@@ -62,10 +183,6 @@ async function autoObserveAfterNavigation(
   return { authWallHit: detectAuthWall(observation).detected };
 }
 
-// Build a ProposedActionDetail to attach to an approval request so a human
-// reviewing the gate can see the actual code/CDP methods and the policy reason
-// — not just a canned "Execute action kind X" string. Code is redacted and
-// length-capped before it lands on disk or in the trace.
 function buildProposedActionDetail(
   action: ProposedAction,
   policyKind: string,
@@ -126,6 +243,9 @@ interface StepCounter {
 export interface LoopState extends TaskContext, RunTrace, StepCounter {
   /** Ephemeral screenshot from the latest observation — not persisted in traces. */
   latestScreenshotBase64?: string;
+  /** Task-local browser helper module source used as the exec preamble. */
+  helperSource: string;
+  helperVersion: number;
 }
 
 export interface LoopResult {
@@ -137,6 +257,8 @@ export interface LoopResult {
   sessionLiveUrl?: string;
   stepCount: number;
   startedAt: string;
+  helperSource: string;
+  helperVersion: number;
   pendingApproval?: ApprovalRequest;
   pendingAction?: ProposedAction;
   usage?: LlmUsage;
@@ -170,6 +292,8 @@ export function createLoopState(
     events: [],
     stepCount: 0,
     startedAt: nowIsoUtc(),
+    helperSource: DEFAULT_HELPER_SOURCE,
+    helperVersion: 0,
   };
 
   if (sessionLiveUrl !== undefined) {
@@ -244,7 +368,6 @@ export async function executeStep(
 
   const actionId = createId("action");
 
-  // Policy check for non-trivial actions (everything except observe/finish)
   if (action.kind !== "observe" && action.kind !== "finish" && !options.skipPolicyCheck) {
     const execRisk = action.kind === "exec" && typeof action.payload?.code === "string"
       ? (await import("../policy/rules.js")).classifyExecRisk(action.payload.code)
@@ -261,7 +384,6 @@ export async function executeStep(
     }
     const decision = policyEngine.check(actionId, policyAction);
 
-    // Record policy check event
     const policyPayload: JsonObject = { actionKind: action.kind, policyKind, result: decision.result };
     if (execRisk) {
       policyPayload.execRisk = {
@@ -300,7 +422,6 @@ export async function executeStep(
         proposedDetail,
       );
 
-      // Record approval request event
       const approvalEventPayload: JsonObject = {
         actionId,
         approvalId: approvalRequest.id,
@@ -326,36 +447,14 @@ export async function executeStep(
     }
   }
 
-  // Execute the action
   switch (action.kind) {
     case "observe": {
-      const observeOptions: { provider: BrowserProvider; sessionId: SessionId; targetId?: string } = {
-        provider,
-        sessionId: state.sessionId,
-      };
       const tid = action.payload?.targetId as string | undefined;
-      if (tid) {
-        observeOptions.targetId = tid;
-      }
-
-      const observation = await observeBrowser(observeOptions);
-
-      const obsPayload = toObservationPayload(observation, { includeScreenshotArtifactId: true });
-
-      state.events.push({
-        id: createId("event"),
-        runId: state.run.id,
-        ts: nowIsoUtc(),
-        kind: "observation",
-        payload: redactJsonObject(obsPayload),
+      const obs = await observeAndRecord(state, provider, {
+        includeScreenshotArtifactId: true,
+        ...(tid ? { targetId: tid } : {}),
       });
-
-      // Store screenshot ephemerally for multimodal LLM context
-      if (observation.screenshotBase64) {
-        state.latestScreenshotBase64 = observation.screenshotBase64;
-      }
-
-      authWallHit = detectAuthWall(observation).detected;
+      authWallHit = obs.authWallHit;
       break;
     }
 
@@ -373,7 +472,7 @@ export async function executeStep(
         const result = await execCode({
           provider,
           sessionId: state.sessionId,
-          code: prependHelpers(code),
+          code: prependHelpers(code, state.helperSource),
           timeoutMs: Math.min(
             DEFAULT_EXEC_TIMEOUT_MS,
             Math.max(
@@ -408,7 +507,6 @@ export async function executeStep(
           payload: redactJsonObject(resultPayload),
         });
 
-        // Check for wireActions: exec code returning CDP commands to execute
         if (result.ok && result.returnValue !== undefined) {
           try {
             const parsed = typeof result.returnValue === "string"
@@ -472,30 +570,67 @@ export async function executeStep(
           } catch { /* returnValue wasn't valid JSON — ignore */ }
         }
 
-        // Auto-observe after navigation. Triggers on either:
-        //   (1) exec code containing location.href/assign/replace, or
-        //   (2) wireActions that included a Page.navigate/reload CDP command.
-        // Without (2), agents using the wireActions envelope to navigate fly
-        // blind — see grants.gov run_48b5ae4d (27 execs, 2 observations).
-        const wireActionsNavigated = (() => {
+        const wireActionsSignal = (() => {
           if (!result.ok || result.returnValue === undefined) return false;
           try {
             const parsed = typeof result.returnValue === "string"
               ? JSON.parse(result.returnValue)
               : result.returnValue;
-            return Array.isArray(parsed?.wireActions) && commandsIncludeNavigation(parsed.wireActions);
+            return Array.isArray(parsed?.wireActions) &&
+              (commandsIncludeNavigation(parsed.wireActions) || commandsIncludeInput(parsed.wireActions));
           } catch { return false; }
         })();
-        if (isLikelyNavigationCode(code) || wireActionsNavigated) {
-          const obs = await autoObserveAfterNavigation(state, provider);
+        if (isLikelyNavigationCode(code) || wireActionsSignal || (result.ok && isLikelyInteractionCode(code))) {
+          const obs = await observeAndRecord(state, provider);
           if (obs.authWallHit) authWallHit = true;
         }
       }
       break;
     }
 
+    case "edit-helper": {
+      const source = typeof action.payload?.source === "string"
+        ? action.payload.source
+        : typeof action.payload?.code === "string"
+          ? action.payload.code
+          : "";
+      const validation = validateHelperSource(source);
+      if (!validation.ok) {
+        state.events.push({
+          id: createId("event"),
+          runId: state.run.id,
+          ts: nowIsoUtc(),
+          kind: "error",
+          payload: {
+            message: `Helper edit rejected: ${validation.reason}`,
+            code: "EHELPER",
+          },
+        });
+        break;
+      }
+
+      const before = state.helperSource;
+      state.helperSource = source.trimStart();
+      state.helperVersion += 1;
+      const artifactId = createId("artifact");
+      state.events.push({
+        id: createId("event"),
+        runId: state.run.id,
+        ts: nowIsoUtc(),
+        kind: "artifact",
+        payload: {
+          artifactId,
+          kind: "helper-diff",
+          mimeType: "text/x-diff",
+          path: `artifacts/${artifactId}.diff`,
+          helperVersion: state.helperVersion,
+          content: createHelperDiff(before, state.helperSource),
+        },
+      });
+      break;
+    }
+
     case "raw": {
-      // Support both single command (method/params) and batch (commands array)
       const commands: Array<{ method: string; params?: JsonObject }> = [];
       const singleMethod = action.payload?.method as string | undefined;
       if (singleMethod) {
@@ -523,14 +658,17 @@ export async function executeStep(
           runId: state.run.id,
           ts: nowIsoUtc(),
           kind: "code-exec",
-          payload: redactJsonObject({ rawCommands: commandsToRun.length, methods: commandsToRun.map((c) => c.method) }),
+          payload: redactJsonObject({
+            rawCommands: commandsToRun.length,
+            methods: commandsToRun.map((c) => c.method),
+            summaries: summarizeRawCommands(commandsToRun),
+          }),
         });
 
         let lastResult: unknown;
         let ok = true;
         const startedAt = Date.now();
 
-        // Use batch method if provider supports it (single connection for all commands)
         const steelProvider = provider as unknown as { rawBatch?(sessionId: SessionId, commands: Array<{ method: string; params?: Record<string, unknown> }>): Promise<unknown> };
         if (commandsToRun.length > 1 && steelProvider.rawBatch) {
           try {
@@ -573,8 +711,8 @@ export async function executeStep(
           },
         });
 
-        if (ok && commandsIncludeNavigation(commandsToRun)) {
-          const obs = await autoObserveAfterNavigation(state, provider);
+        if (ok && (commandsIncludeNavigation(commandsToRun) || commandsIncludeInput(commandsToRun))) {
+          const obs = await observeAndRecord(state, provider);
           if (obs.authWallHit) authWallHit = true;
         }
       }
@@ -593,7 +731,6 @@ export async function executeStep(
         if (result.authWallHit) authWallHit = true;
         break;
       }
-      // Unknown action: record thought-summary
       state.events.push({
         id: createId("event"),
         runId: state.run.id,
@@ -607,10 +744,6 @@ export async function executeStep(
   state.stepCount++;
   return { state, policyDenied, authWallHit };
 }
-
-// ---------------------------------------------------------------------------
-// Finalize a run
-// ---------------------------------------------------------------------------
 
 export interface FinalizeOptions {
   authWallHit?: boolean;
@@ -820,6 +953,8 @@ export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): Lo
     sessionId: state.sessionId,
     stepCount: state.stepCount,
     startedAt: state.startedAt,
+    helperSource: state.helperSource,
+    helperVersion: state.helperVersion,
   };
 
   if (state.sessionLiveUrl !== undefined) {

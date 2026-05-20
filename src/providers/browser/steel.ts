@@ -536,9 +536,7 @@ function wrapUserCode(code: string): string {
   return `(async () => { ${code} })()`;
 }
 
-// ---------------------------------------------------------------------------
 // Code validation — reject dangerous patterns before browser execution
-// ---------------------------------------------------------------------------
 
 type CodeToken =
   | { kind: "identifier"; value: string }
@@ -1011,9 +1009,7 @@ export function createSteelProvider(
   return new SteelProvider(providerConfig);
 }
 
-// ---------------------------------------------------------------------------
 // Steel action handlers — provider-specific actions for the action registry
-// ---------------------------------------------------------------------------
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

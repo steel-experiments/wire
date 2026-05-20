@@ -438,6 +438,8 @@ export const runCheckpointSchema = z
     events: z.array(traceEventSchema),
     stepCount: z.number().int().nonnegative(),
     startedAt: isoUtcTimestampSchema,
+    helperSource: z.string().min(1).optional(),
+    helperVersion: z.number().int().nonnegative().optional(),
     pendingAction: proposedActionSchema,
     approvalRequestId: approvalIdSchema,
     savedAt: isoUtcTimestampSchema,

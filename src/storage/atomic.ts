@@ -2,9 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-// ---------------------------------------------------------------------------
 // Error types
-// ---------------------------------------------------------------------------
 
 export class StorageError extends Error {
   constructor(
@@ -37,9 +35,7 @@ export class CorruptError extends StorageError {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Directory helpers
-// ---------------------------------------------------------------------------
 
 export async function ensureDir(dir: string): Promise<void> {
   await mkdir(dir, { recursive: true });
@@ -53,9 +49,7 @@ export function entityPath(root: string, kind: string, id: string): string {
   return join(entityDir(root, kind), `${id}.json`);
 }
 
-// ---------------------------------------------------------------------------
 // Atomic write
-// ---------------------------------------------------------------------------
 
 export async function atomicWriteJson(path: string, data: unknown): Promise<void> {
   const dir = join(path, "..");
@@ -76,9 +70,7 @@ export async function atomicWriteJson(path: string, data: unknown): Promise<void
   }
 }
 
-// ---------------------------------------------------------------------------
 // Read helpers
-// ---------------------------------------------------------------------------
 
 export async function readJsonFile(path: string): Promise<unknown> {
   let raw: string;

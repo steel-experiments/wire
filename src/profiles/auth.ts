@@ -1,8 +1,6 @@
 import type { BrowserObservation, TraceEvent } from "../shared/types.js";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 export interface AuthWallResult {
   detected: boolean;
@@ -10,9 +8,7 @@ export interface AuthWallResult {
   evidenceUrl?: string;
 }
 
-// ---------------------------------------------------------------------------
 // Auth-wall URL patterns
-// ---------------------------------------------------------------------------
 
 export const AUTH_WALL_PATTERNS: string[] = [
   "/login",
@@ -26,9 +22,7 @@ export const AUTH_WALL_PATTERNS: string[] = [
   "auth.",
 ];
 
-// ---------------------------------------------------------------------------
 // Keyword sets
-// ---------------------------------------------------------------------------
 
 const TITLE_KEYWORDS: ReadonlySet<string> = new Set([
   "sign in",
@@ -45,9 +39,7 @@ const FORM_KEYWORDS: ReadonlySet<string> = new Set([
   "username",
 ]);
 
-// ---------------------------------------------------------------------------
 // Detection helpers
-// ---------------------------------------------------------------------------
 
 function urlMatchesAuthPattern(url: string): string | null {
   const lower = url.toLowerCase();
@@ -116,9 +108,7 @@ function pageLooksLikeLoginForm(observation: BrowserObservation): boolean {
   return noTables && fewButtons && inputs <= 3;
 }
 
-// ---------------------------------------------------------------------------
 // Public API
-// ---------------------------------------------------------------------------
 
 /**
  * Detect whether the current page is an authentication wall / login page.

@@ -1,4 +1,5 @@
 import { parseArgs, formatHelp, type CliArgs } from "./args.js";
+import { readFile } from "node:fs/promises";
 import { approveRun, runTask, type RunOptions } from "./runner.js";
 import { loadConfig, resolveLlmConfig } from "./config.js";
 import { formatReview } from "../ui/review.js";
@@ -18,6 +19,11 @@ function defaultStorageRoot(): string {
 
 export async function main(argv: string[]): Promise<void> {
   const args = parseArgs(argv);
+
+  if (args.version) {
+    console.log(await packageVersion());
+    return;
+  }
 
   if (args.help || argv.length <= 2) {
     console.log(formatHelp());
@@ -68,6 +74,11 @@ export async function main(argv: string[]): Promise<void> {
       process.exitCode = 1;
     }
   }
+}
+
+async function packageVersion(): Promise<string> {
+  const pkg = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf-8")) as { version?: string };
+  return pkg.version ?? "0.0.0";
 }
 
 async function handleRun(

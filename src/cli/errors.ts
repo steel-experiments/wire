@@ -1,8 +1,6 @@
 import { NotFoundError, CorruptError, StorageError } from "../storage/atomic.js";
 
-// ---------------------------------------------------------------------------
 // Error taxonomy for agent-native CLI
-// ---------------------------------------------------------------------------
 
 export type WireErrorClass =
   | "input"
@@ -21,9 +19,7 @@ export interface WireError {
   details?: unknown;
 }
 
-// ---------------------------------------------------------------------------
 // classifyError — maps unknown errors to structured WireError
-// ---------------------------------------------------------------------------
 
 export function classifyError(error: unknown): WireError {
   // NotFoundError → map based on entity kind

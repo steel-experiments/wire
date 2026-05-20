@@ -1,12 +1,10 @@
-// ABOUTME: Browser-side helper functions injected as a preamble into every exec call.
-// ABOUTME: Provides clickVisibleText, fillByLabel, extractTable, waitForSelector as plain JS.
 
 /**
  * Plain browser-side JavaScript helpers available in every exec code block.
  * These are function definitions only — they execute only when called.
  * Thin by design: if a helper hides causal structure, write querySelector directly.
  */
-export const HELPER_PREAMBLE = `
+export const DEFAULT_HELPER_SOURCE = `
 async function clickVisibleText(text) {
   const lower = text.toLowerCase().trim();
   const sel = 'button, a, [role="button"], [role="link"], input[type="submit"], input[type="button"], [type="reset"]';
@@ -78,10 +76,81 @@ function waitForSelector(selector, timeoutMs = 5000) {
 }
 `.trimStart();
 
+export const HELPER_PREAMBLE = DEFAULT_HELPER_SOURCE;
+
+const FORBIDDEN_HELPER_PATTERNS = [
+  /\brequire\s*\(/u,
+  /\bprocess\s*\./u,
+  /\bBuffer\s*\./u,
+  /\b__dirname\b/u,
+  /\b__filename\b/u,
+  /\bimport\s+[^("'`]/u,
+];
+
+const EXPORT_KEYWORD_PATTERN =
+  /^\s*export\s+(?=(?:async\s+)?function\b|class\b|const\b|let\b|var\b)/gmu;
+
+/**
+ * Convert a browser helper module into executable page-context code.
+ *
+ * The runtime accepts JS-compatible module source so helper edits remain
+ * inspectable. We strip top-level `export` keywords because CDP evaluates the
+ * helpers as a script preamble inside the async exec wrapper.
+ */
+export function helperSourceToPreamble(source: string): string {
+  return source.trimStart().replace(EXPORT_KEYWORD_PATTERN, "");
+}
+
+export function validateHelperSource(source: string): { ok: true } | { ok: false; reason: string } {
+  if (source.trim().length === 0) {
+    return { ok: false, reason: "helper source is empty" };
+  }
+
+  for (const pattern of FORBIDDEN_HELPER_PATTERNS) {
+    if (pattern.test(source)) {
+      return { ok: false, reason: `helper source uses forbidden pattern ${pattern.source}` };
+    }
+  }
+
+  try {
+    // Validate after export stripping. Wrapping mirrors provider execution.
+    // eslint-disable-next-line no-new-func
+    new Function(`return (async () => {\n${helperSourceToPreamble(source)}\n})();`);
+  } catch (err) {
+    return {
+      ok: false,
+      reason: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  return { ok: true };
+}
+
+function diffLines(before: string, after: string): string {
+  const beforeLines = before.split("\n");
+  const afterLines = after.split("\n");
+  const lines = ["--- helpers/before.js", "+++ helpers/after.js"];
+  const max = Math.max(beforeLines.length, afterLines.length);
+
+  for (let i = 0; i < max; i++) {
+    const oldLine = beforeLines[i];
+    const newLine = afterLines[i];
+    if (oldLine === newLine) continue;
+    if (oldLine !== undefined) lines.push(`-${oldLine}`);
+    if (newLine !== undefined) lines.push(`+${newLine}`);
+  }
+
+  return lines.join("\n");
+}
+
+export function createHelperDiff(before: string, after: string): string {
+  return diffLines(before.trimEnd(), after.trimEnd());
+}
+
 /**
  * Prepend browser-side helpers before user-authored exec code.
  * The combined string runs inside the provider's async IIFE wrapper.
  */
-export function prependHelpers(code: string): string {
-  return `${HELPER_PREAMBLE}\n${code}`;
+export function prependHelpers(code: string, helperSource: string = DEFAULT_HELPER_SOURCE): string {
+  return `${helperSourceToPreamble(helperSource)}\n${code}`;
 }

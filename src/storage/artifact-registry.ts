@@ -1,9 +1,7 @@
 import type { Artifact, ArtifactId, ArtifactKind, RunId } from "../shared/types.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
 
-// ---------------------------------------------------------------------------
 // In-memory artifact registry
-// ---------------------------------------------------------------------------
 
 export interface ArtifactRegistry {
   register(runId: RunId, kind: ArtifactKind, path: string, mimeType?: string): Artifact;

@@ -1,5 +1,3 @@
-// ABOUTME: Minimal ANSI color helpers with TTY/NO_COLOR/FORCE_COLOR detection.
-// ABOUTME: Zero-dep replacement for chalk/picocolors used by the live trace renderer.
 
 const ESC = "\x1b[";
 

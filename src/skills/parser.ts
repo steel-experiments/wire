@@ -1,9 +1,7 @@
 import { parseBoundary, skillFrontmatterSchema } from "../shared/schemas.js";
 import type { SkillFrontmatter } from "../shared/types.js";
 
-// ---------------------------------------------------------------------------
 // Frontmatter extraction
-// ---------------------------------------------------------------------------
 
 /**
  * Extract the YAML-like frontmatter block (text between `---` delimiters)
@@ -35,9 +33,7 @@ function splitFrontmatter(
   return { frontmatter, body };
 }
 
-// ---------------------------------------------------------------------------
 // Minimal YAML-like parser
-// ---------------------------------------------------------------------------
 
 /**
  * Parse a very small subset of YAML: top-level string, number, boolean, and
@@ -119,9 +115,7 @@ function parseScalar(value: string): unknown {
   return value;
 }
 
-// ---------------------------------------------------------------------------
 // Public API
-// ---------------------------------------------------------------------------
 
 /**
  * Parse a markdown skill file's frontmatter and return validated

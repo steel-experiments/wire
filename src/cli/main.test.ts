@@ -356,6 +356,26 @@ test("main with no args prints help instead of error", async () => {
   assert.ok(lines.some((line) => line.includes("--objective")));
 });
 
+test("main prints version for -V and --version", async () => {
+  const lines: string[] = [];
+  const errors: string[] = [];
+  const originalLog = console.log;
+  const originalError = console.error;
+  console.log = (value?: unknown) => { lines.push(String(value ?? "")); };
+  console.error = (value?: unknown) => { errors.push(String(value ?? "")); };
+
+  try {
+    await main(["node", "wire", "-V"]);
+    await main(["node", "wire", "--version"]);
+  } finally {
+    console.log = originalLog;
+    console.error = originalError;
+  }
+
+  assert.deepEqual(errors, []);
+  assert.deepEqual(lines, ["0.1.0", "0.1.0"]);
+});
+
 test("parseArgs treats positional arg as objective", () => {
   const args = parseArgs(["node", "wire", "get", "the", "title", "of", "steel.dev"]);
 
@@ -420,6 +440,11 @@ test("parseArgs parses --json flag as true", () => {
   const args = parseArgs(["node", "wire", "review", "--run-id", "run_test123", "--json"]);
 
   assert.equal(args.json, true);
+});
+
+test("parseArgs parses version flags", () => {
+  assert.equal(parseArgs(["node", "wire", "-V"]).version, true);
+  assert.equal(parseArgs(["node", "wire", "--version"]).version, true);
 });
 
 test("parseArgs defaults json to undefined when --json is absent", () => {

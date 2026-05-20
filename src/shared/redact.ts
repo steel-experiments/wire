@@ -1,8 +1,6 @@
 import type { JsonValue, JsonObject } from "./types.js";
 
-// ---------------------------------------------------------------------------
 // Secret patterns — used for prompt and trace payload redaction
-// ---------------------------------------------------------------------------
 
 export const SECRET_PATTERNS = [
   /sk-[a-zA-Z0-9]{20,}/gu,
@@ -16,9 +14,7 @@ export const SECRET_PATTERNS = [
   /apiKey=[^&\s]+/giu,
 ];
 
-// ---------------------------------------------------------------------------
 // String redaction
-// ---------------------------------------------------------------------------
 
 export function redactSecrets(text: string): string {
   let result = text;
@@ -28,9 +24,7 @@ export function redactSecrets(text: string): string {
   return result;
 }
 
-// ---------------------------------------------------------------------------
 // Recursive JSON object redaction
-// ---------------------------------------------------------------------------
 
 export function redactJsonObject(obj: JsonObject): JsonObject {
   const result: JsonObject = {};

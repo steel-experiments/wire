@@ -391,9 +391,7 @@ function applyStagnationDowngrade(
   };
 }
 
-// ---------------------------------------------------------------------------
 // Outcome summary from trace
-// ---------------------------------------------------------------------------
 
 export function generateOutcomeSummary(
   classification: RunClassification,

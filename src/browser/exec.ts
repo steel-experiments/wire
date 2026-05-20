@@ -7,9 +7,7 @@ import type {
 
 import { resolveTarget } from "./targets.js";
 
-// ---------------------------------------------------------------------------
 // Code execution adapter
-// ---------------------------------------------------------------------------
 
 export interface ExecOptions {
   provider: { exec(input: BrowserExecRequest): Promise<BrowserExecResult> };
