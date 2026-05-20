@@ -32,14 +32,12 @@ Small surface. Boundaries are functions and types, not infrastructure.
 
 | Metric | Current |
 |---|---|
-| Source LOC | ~14,500 |
-| Source files | 65 |
+| Source LOC | ~15,000 |
+| Source files | 66 |
 | Tests | 630+ |
 | Test-to-source ratio | ~1:1 LOC |
 | Runtime deps | 1 (`zod`) |
 | Dev deps | 3 |
-
-Every PR argues against deletion before adding. LLMs made code cheap to write — the bottleneck is *should we*.
 
 ---
 
@@ -326,7 +324,7 @@ Cited in `SPECS.md:31`. We borrowed minimal-core ethos + file-based skill format
 | Sessions | Tree-JSONL (`/fork`, `/clone`) | `events.jsonl` + classification |
 | Policy | **None** — "run in a container" | Deterministic engine |
 | Training export | None | `wire export` (4 formats) |
-| Size | ~40k LOC, 142 files, 17 deps | ~14.5k LOC, 65 files, 1 dep |
+| Size | ~40k LOC, 142 files, 17 deps | ~15k LOC, 66 files, 1 dep |
 
 ---
 
@@ -336,56 +334,13 @@ Cited in `SPECS.md:31`. We borrowed code-as-action + agent-authored skills.
 
 | | browser-harness | **Wire** |
 |---|---|---|
-| Substrate | Local Chrome via CDP | Steel cloud Chrome |
+| Substrate | Local Chrome via CDP (+ BU Cloud) | Steel cloud Chrome |
 | Action model | **Python heredoc** | Typed TS `exec` |
 | Helpers | Agent edits per task | Same, via `edit-helper` |
-| Skills | Markdown, agent-authored | Same + promotion lifecycle |
+| Skills | Markdown, opt-in (`BH_DOMAIN_SKILLS=1`) | Loaded by hostname, promoted by run |
 | Policy | Prompt-level only | Deterministic engine |
 | Training export | None | `wire export` (4 formats) |
-| Size | ~1k LOC, 4 deps | ~14.5k LOC, 1 dep |
-
----
-
-## Lineage — inherited vs ours (1/2)
-
-| Concept | Inherited | Wire contribution |
-|---|---|---|
-| Minimal-core ethos | pi + harness | Enforced as review discipline |
-| Progressive-disclosure skills | pi | — |
-| Agent-authored skills | harness | Promotion lifecycle, dedup, secret-scan |
-| Code-as-action | harness | Typed TS `exec`, schema'd payload |
-| Closed verb set | harness spirit | The 5-verb taxonomy itself |
-| Real-browser CDP | harness | Steel cloud sessions |
-
----
-
-## Lineage — inherited vs ours (2/2)
-
-| Concept | Inherited | Wire contribution |
-|---|---|---|
-| Deterministic policy engine | neither | Original |
-| Run classification (7 kinds) | neither | Original |
-| Decomposed run scoring | neither | Original |
-| Training-data export (SFT/rewards/DPO) | neither | Original |
-| Bench harness with persisted JSON | neither | Original |
-| Single-dep budget | harness spirit | Stricter execution |
-
-> pi: "what if Claude Code had less?"
-> Harness: "what if the agent wrote the framework?"
-> **Wire: both, + policy + classification, as a deployable runtime.**
-
----
-
-## Open questions
-
-From `SPECS.md:29`. Live debates.
-
-1. Should `exec` allow Python in a sidecar, or stay JS/TS-only?
-2. How much raw CDP should be exposed in v1?
-3. Minimal compare view that makes experiment mode useful?
-4. Skill promotion: always require human review in team contexts?
-5. Session replay — Wire's job or Steel UI's?
-6. When does Wire auto-branch into experiment mode vs ask?
+| Size | ~2k LOC, 4 deps | ~15k LOC, 1 dep |
 
 ---
 
