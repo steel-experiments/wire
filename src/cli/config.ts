@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { JsonObject, SessionConfig } from "../shared/types.js";
-import { wireHome } from "./paths.js";
+import { wireHome } from "../shared/paths.js";
 
 // Config types
 

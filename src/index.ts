@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-export * from "./shared/ids.js"; export * from "./shared/schemas.js"; export * from "./shared/types.js";
+export * from "./shared/ids.js"; export * from "./shared/paths.js"; export * from "./shared/schemas.js"; export * from "./shared/types.js";
 export * from "./storage/atomic.js"; export * from "./storage/tasks.js"; export * from "./storage/runs.js"; export * from "./storage/sessions.js"; export * from "./storage/artifacts.js"; export * from "./storage/artifact-registry.js"; export * from "./storage/events.js"; export * from "./storage/approvals.js"; export * from "./storage/checkpoints.js";
 export * from "./browser/bridge.js"; export * from "./browser/session.js"; export * from "./browser/observe.js"; export * from "./browser/exec.js"; export * from "./browser/raw.js"; export * from "./browser/targets.js";
 export * from "./providers/browser/steel.js"; export * from "./providers/llm/openai.js"; export * from "./providers/llm/anthropic.js";

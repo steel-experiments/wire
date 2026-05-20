@@ -13,7 +13,7 @@ import { createOpenAIProvider } from "../providers/llm/openai.js";
 import { createAnthropicProvider } from "../providers/llm/anthropic.js";
 import { nowIsoUtc } from "../shared/ids.js";
 import { atomicWriteJson, ensureDir, entityDir, entityPath, listJsonFiles, readJsonFile } from "../storage/atomic.js";
-import { defaultStorageRoot } from "../cli/paths.js";
+import { defaultStorageRoot } from "../shared/paths.js";
 
 // Types
 

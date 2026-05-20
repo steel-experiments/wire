@@ -19,7 +19,7 @@ import { scoreRun } from "../eval/scoring.js";
 import { classifyError } from "./errors.js";
 import { success, failure } from "./output.js";
 import { buildTimeline, summarizeTimeline } from "../trace/replay.js";
-import { defaultStorageRoot } from "./paths.js";
+import { defaultStorageRoot } from "../shared/paths.js";
 
 export async function main(argv: string[]): Promise<void> {
   const args = parseArgs(argv);

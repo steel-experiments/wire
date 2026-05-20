@@ -16,6 +16,7 @@ import type {
   TraceEvent,
 } from "../shared/types.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
+import { defaultSkillDir } from "../shared/paths.js";
 import { basename } from "node:path";
 
 import type { BrowserProvider } from "../browser/bridge.js";
@@ -131,6 +132,16 @@ export interface TraceSink {
 
 function isCancelled(config: RuntimeConfig): boolean {
   return config.cancelSignal?.aborted ?? false;
+}
+
+// Programmatic callers (supervisor's WireRuntimeAdapter, embedded SDKs) build
+// a RuntimeConfig without setting skillDir. Without this fallback every such
+// caller silently runs with zero domain knowledge even when ~/.wire/skills is
+// populated. The CLI used to apply this default in its own layer; lifting it
+// into the runtime makes the default uniform across entry points.
+function withResolvedSkillDir(config: RuntimeConfig): RuntimeConfig {
+  if (config.skillDir !== undefined) return config;
+  return { ...config, skillDir: defaultSkillDir() };
 }
 
 function createCancelledState(task: Task, config: RuntimeConfig): LoopState {
@@ -685,6 +696,7 @@ export async function executeTask(
   config: RuntimeConfig,
   agentTurn?: AgentTurnFn,
 ): Promise<LoopResult> {
+  config = withResolvedSkillDir(config);
   const registry = buildActionRegistry(config);
   const turn = agentTurn ?? defaultAgentTurn(config.llmProvider, config.maxSteps, registry, config);
 
@@ -708,6 +720,7 @@ export async function resumeTask(
   config: RuntimeConfig,
   agentTurn?: AgentTurnFn,
 ): Promise<LoopResult> {
+  config = withResolvedSkillDir(config);
   const registry = buildActionRegistry(config);
   const turn = agentTurn ?? defaultAgentTurn(config.llmProvider, config.maxSteps, registry, config);
   const state: LoopState = {

@@ -70,6 +70,12 @@ function makeConfig(overrides: Partial<RuntimeConfig> = {}): RuntimeConfig {
     provider: mockProvider,
     policyEngine: mockPolicy,
     maxSteps: 10,
+    // Default tests off the host filesystem: the runtime now defaults skillDir
+    // to ~/.wire/skills, which would make every test do real I/O against the
+    // developer's skill library and races sensitive to load time (the pause
+    // test, for example) become flaky. Tests that exercise skill loading
+    // override this explicitly.
+    skillDir: "",
     ...overrides,
   };
 }
@@ -262,6 +268,74 @@ test("executeTask emits skill-empty warning when skillDir resolves to a director
   const result = await executeTask(makeTask(), config);
   const hasWarning = result.events.some((e) => e.kind === "skill-empty");
   assert.ok(hasWarning, "expected a skill-empty event when skillDir is empty");
+});
+
+test("executeTask falls back to default skill dir when config.skillDir is undefined", async () => {
+  // Programmatic callers (e.g. supervisor's WireRuntimeAdapter) build a
+  // RuntimeConfig without setting skillDir. Previously this meant zero skill
+  // loading even though `~/.wire/skills` existed and was populated. The runtime
+  // now applies the default skill-dir resolver itself, so any caller gets
+  // domain knowledge out of the box. WIRE_SKILLS overrides the home default
+  // and is the cleanest hook for this test.
+  const { mkdtemp, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const skillDir = await mkdtemp(join(tmpdir(), "wire-default-skills-"));
+  await writeFile(join(skillDir, "example.md"), [
+    "---",
+    "id: skill_example-default",
+    "scope: domain",
+    "hostnamePatterns:",
+    '  - "example.com"',
+    "tags:",
+    "  - example.com",
+    "updatedAt: 2026-05-20",
+    "source: generated",
+    "---",
+    "",
+    "# Example",
+    "",
+    "## Facts",
+    "",
+    "- Example domain reserved for documentation.",
+  ].join("\n"), "utf-8");
+
+  const previousSkills = process.env["WIRE_SKILLS"];
+  process.env["WIRE_SKILLS"] = skillDir;
+  try {
+    let callCount = 0;
+    const mockLlm: LLMProvider = {
+      model: "test-model",
+      async chat(): Promise<ChatResponse> {
+        callCount++;
+        const action = callCount === 1
+          ? { kind: "exec", summary: "Probe", payload: { code: "1" } }
+          : { kind: "finish", summary: "Done" };
+        return { content: JSON.stringify(action), model: "test-model" };
+      },
+    };
+
+    // No skillDir in the config — the runtime should default to WIRE_SKILLS.
+    // We override makeConfig's empty-string default by deleting the key so the
+    // runtime sees genuinely undefined and applies its fallback.
+    const config = makeConfig({ llmProvider: mockLlm, maxSteps: 3 });
+    delete (config as { skillDir?: string }).skillDir;
+    const result = await executeTask(makeTask(), config);
+
+    const skillLoad = result.events.find((e) => e.kind === "skill-load");
+    assert.ok(skillLoad, "expected a skill-load event from the default skills directory");
+    const skills = skillLoad!.payload["skills"];
+    assert.ok(
+      Array.isArray(skills) && skills.includes("skill_example-default"),
+      "expected the default skill dir's skill to load",
+    );
+  } finally {
+    if (previousSkills === undefined) {
+      delete process.env["WIRE_SKILLS"];
+    } else {
+      process.env["WIRE_SKILLS"] = previousSkills;
+    }
+  }
 });
 
 test("recentTraces summary truncates large exec stdout before reaching the LLM", async () => {

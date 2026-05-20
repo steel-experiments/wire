@@ -34,7 +34,7 @@ import type { SessionConfig } from "../shared/types.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { createConsoleTraceSink } from "../ui/stream.js";
-import { defaultSkillDir, defaultStorageRoot } from "./paths.js";
+import { defaultSkillDir, defaultStorageRoot } from "../shared/paths.js";
 
 // Result types
 
