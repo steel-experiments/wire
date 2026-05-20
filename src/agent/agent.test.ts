@@ -776,6 +776,41 @@ test("finalizeRun keeps task-mode observation-only runs as partial-success", () 
   assert.ok(result.outcomeSummary.includes("partial-success"));
 });
 
+test("finalizeRun exposes a RunScore with 5 components on LoopResult", () => {
+  // The score lets programmatic callers (supervisor, dashboards, A/B
+  // tooling) see why a run was classified as it was without re-running
+  // the evaluator. It's the same scoreRun() that powers `wire export`
+  // and `wire review`, surfaced as a first-class field.
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  state.events.push(
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "observation",
+      payload: { url: "https://example.com", title: "Example" },
+    },
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, durationMs: 10, stdout: "Final answer" },
+    },
+  );
+
+  const result = finalizeRun(state);
+
+  assert.ok(result.score, "expected LoopResult.score to be present");
+  assert.equal(typeof result.score!.total, "number");
+  assert.ok(result.score!.total >= 0 && result.score!.total <= 1, "total in [0,1]");
+  // The 5 weighted components from scoring.ts WEIGHTS.
+  for (const key of ["classification", "contract", "evidence", "efficiency", "policy"] as const) {
+    assert.equal(typeof result.score!.components[key], "number", `component ${key} missing`);
+  }
+});
+
 test("finalizeRun persists final result from successful code output", () => {
   const task = makeTask();
   const state = createLoopState(task, makeSessionId());

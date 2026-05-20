@@ -38,6 +38,7 @@ import { redactJsonObject } from "../shared/redact.js";
 import { countConsecutiveUnchanged } from "./state-helpers.js";
 import type { ActionExecutionContext } from "./actions.js";
 import { createTaskContract, type TaskContract } from "./contract.js";
+import { scoreRun, type RunScore } from "../eval/scoring.js";
 
 const MAX_CDP_BATCH_COMMANDS = 80;
 const DEFAULT_EXEC_TIMEOUT_MS = 12_000;
@@ -265,6 +266,11 @@ export interface LoopResult {
   pendingApproval?: ApprovalRequest;
   pendingAction?: ProposedAction;
   usage?: LlmUsage;
+  // Total + per-component evaluation score (classification, contract,
+  // evidence, efficiency, policy). Same shape as `wire export` and
+  // `wire review`, surfaced here so programmatic consumers don't have to
+  // re-run scoreRun against persisted events.
+  score?: RunScore;
 }
 
 export { type ProposedAction } from "../shared/types.js";
@@ -959,6 +965,11 @@ export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): Lo
     startedAt: state.startedAt,
     helperSource: state.helperSource,
     helperVersion: state.helperVersion,
+    // Pass an empty artifacts list: scoring.ts evidenceScore reads from
+    // events via OR-style fallbacks, so artifact-event presence still
+    // contributes. The eval/CLI paths that have persisted Artifact records
+    // can call scoreRun directly with the richer input.
+    score: scoreRun(state.task, finishedRun, state.events, []),
   };
 
   if (state.sessionLiveUrl !== undefined) {
