@@ -12,6 +12,7 @@ import type {
   BrowserSession,
   ExperimentBundle,
   Hypothesis,
+  JsonValue,
   Run,
   Task,
   TraceEvent,
@@ -37,6 +38,12 @@ import {
 } from "./runs.js";
 import { listSessions, loadSession, saveSession } from "./sessions.js";
 import { listArtifacts, loadArtifact, saveArtifact } from "./artifacts.js";
+import {
+  hashTraceBlobValue,
+  loadTraceBlob,
+  saveTraceBlobValue,
+  traceBlobPath,
+} from "./blobs.js";
 import { listTraceEvents, loadTraceEvent, saveTraceEvents } from "./events.js";
 
 // ---------------------------------------------------------------------------
@@ -700,6 +707,40 @@ test("loadArtifact throws CorruptError for schema-invalid file", async () => {
 
   await assert.rejects(() => loadArtifact(testRoot, id), {
     name: "CorruptError",
+  } as Error);
+});
+
+// ---------------------------------------------------------------------------
+// blobs.ts
+// ---------------------------------------------------------------------------
+
+test("hashTraceBlobValue uses canonical JSON ordering", () => {
+  const left: JsonValue = { b: 2, a: { d: 4, c: 3 } };
+  const right: JsonValue = { a: { c: 3, d: 4 }, b: 2 };
+
+  assert.equal(hashTraceBlobValue(left), hashTraceBlobValue(right));
+});
+
+test("saveTraceBlobValue writes one run-scoped blob for duplicate content", async () => {
+  testRoot = makeRoot();
+  const runId = createId("run");
+  const value = "same artifact body";
+
+  const first = await saveTraceBlobValue(testRoot, runId, "artifact-content", value, "text/plain");
+  const second = await saveTraceBlobValue(testRoot, runId, "artifact-content", value, "text/plain");
+  const loaded = await loadTraceBlob(testRoot, runId, first.hash);
+
+  assert.equal(first.hash, second.hash);
+  assert.equal(loaded.value, value);
+  assert.equal(loaded.contentType, "text/plain");
+  assert.equal(traceBlobPath(testRoot, runId, first.hash), join(testRoot, "blobs", runId, `${first.hash}.json`));
+});
+
+test("loadTraceBlob throws NotFoundError for missing blob", async () => {
+  testRoot = makeRoot();
+
+  await assert.rejects(() => loadTraceBlob(testRoot, createId("run"), "0".repeat(64)), {
+    name: "NotFoundError",
   } as Error);
 });
 

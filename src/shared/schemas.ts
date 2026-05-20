@@ -19,6 +19,8 @@ import type {
   SkillId,
   TaskId,
   TraceEventId,
+  TraceBlob,
+  TraceBlobKind,
 } from "./types.js";
 
 const isoUtcTimestampSchema = z.string().refine(isIsoUtcTimestamp, {
@@ -124,6 +126,7 @@ export const traceEventKindSchema = z.enum([
 export const approvalStatusSchema = z.enum(["pending", "approved", "rejected", "expired"]);
 export const policyDecisionResultSchema = z.enum(["allow", "deny", "require-approval"]);
 export const artifactKindSchema = z.string().min(1) as z.ZodType<ArtifactKind>;
+export const traceBlobKindSchema = z.string().min(1) as z.ZodType<TraceBlobKind>;
 export const comparisonDimensionSchema = z.enum([
   "latency",
   "path",
@@ -381,6 +384,18 @@ export const artifactSchema = z
     metadata: z.record(z.string(), jsonValueSchema).optional(),
   })
   .strict();
+
+export const traceBlobSchema = z
+  .object({
+    hash: z.string().regex(/^[a-f0-9]{64}$/u),
+    runId: runIdSchema,
+    kind: traceBlobKindSchema,
+    createdAt: isoUtcTimestampSchema,
+    size: z.number().int().nonnegative(),
+    value: jsonValueSchema,
+    contentType: z.string().min(1).optional(),
+  })
+  .strict() as z.ZodType<TraceBlob>;
 
 export const comparisonSpecSchema = z
   .object({

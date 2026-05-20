@@ -910,7 +910,11 @@ export interface Artifact {
 }
 ```
 
-### 15.4 Minimum trace policy
+### 15.4 Trace content storage
+
+Trace spans must not repeatedly persist full immutable message arrays or large content payloads inline. Store large trace content as run-scoped blobs keyed by a hash of canonical JSON, then keep compact refs in events and metadata. Reconstruct full content at read time when a review/debug command needs it.
+
+### 15.5 Minimum trace policy
 Every run must capture at least:
 - task id,
 - run id,
@@ -923,7 +927,7 @@ Every run must capture at least:
 - final classification,
 - created artifacts.
 
-### 15.5 Compare views
+### 15.6 Compare views
 The data model must support comparing runs by:
 - end state,
 - step count,

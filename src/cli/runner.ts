@@ -1,10 +1,11 @@
-import type { ComparisonDimension, ExperimentBundle, Run, RunClassification, RunId, Task, TaskId, ActionId, PolicyDecision } from "../shared/types.js";
+import type { ActionId, Artifact, ComparisonDimension, ExperimentBundle, PolicyDecision, Run, RunClassification, RunId, Task, TaskId, TraceEvent } from "../shared/types.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
 import { saveTask, loadTask } from "../storage/tasks.js";
 import { saveExperimentBundle, saveHypothesis, saveRun } from "../storage/runs.js";
 import { saveSession } from "../storage/sessions.js";
 import { saveTraceEvents } from "../storage/events.js";
 import { saveArtifact } from "../storage/artifacts.js";
+import { saveTraceBlobValue } from "../storage/blobs.js";
 import {
   loadApprovalRequest,
   listApprovalRequests,
@@ -31,8 +32,7 @@ import { buildExperimentSummary, formatExperimentSummary } from "../experiments/
 import type { LlmProvider } from "./config.js";
 import type { SessionConfig } from "../shared/types.js";
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import type { Artifact, TraceEvent } from "../shared/types.js";
+import { dirname, join, resolve } from "node:path";
 import { createConsoleTraceSink } from "../ui/stream.js";
 
 // Result types
@@ -46,9 +46,18 @@ export interface RunResult {
   result?: string | undefined;
   summary?: string | undefined;
   debugUrl?: string | undefined;
+  artifacts?: ArtifactSummary[] | undefined;
   approval?: { id: string; runId: RunId } | undefined;
   branches?: number | undefined;
   experimentId?: string | undefined;
+}
+
+export interface ArtifactSummary {
+  id: string;
+  filename?: string;
+  kind: string;
+  mimeType?: string;
+  path: string;
 }
 
 export interface ApproveResult {
@@ -57,6 +66,7 @@ export interface ApproveResult {
   runId: RunId;
   status: string;
   result?: string | undefined;
+  artifacts?: ArtifactSummary[] | undefined;
 }
 
 // Run options
@@ -248,6 +258,41 @@ function fallbackClassification(): RunClassification {
   return { kind: "ambiguous", confidence: 0.3, notes: ["No classification returned"] };
 }
 
+function artifactSummaries(artifacts: Artifact[]): ArtifactSummary[] | undefined {
+  if (artifacts.length === 0) {
+    return undefined;
+  }
+
+  return artifacts.map((artifact) => {
+    const summary: ArtifactSummary = {
+      id: artifact.id,
+      kind: artifact.kind,
+      path: artifact.path,
+    };
+    if (typeof artifact.metadata?.filename === "string") {
+      summary.filename = artifact.metadata.filename;
+    }
+    if (artifact.mimeType !== undefined) {
+      summary.mimeType = artifact.mimeType;
+    }
+    return summary;
+  });
+}
+
+function printArtifacts(artifacts: Artifact[]): void {
+  const summaries = artifactSummaries(artifacts);
+  if (!summaries) {
+    return;
+  }
+
+  console.log("Artifacts:");
+  for (const artifact of summaries) {
+    const filename = artifact.filename ? `${artifact.filename}: ` : "";
+    const mime = artifact.mimeType ? ` (${artifact.mimeType})` : "";
+    console.log(`  - ${filename}${artifact.path}${mime}`);
+  }
+}
+
 export function createExperimentBundleFromRuns(
   taskId: Task["id"],
   runs: Run[],
@@ -285,8 +330,8 @@ async function persistExecutionArtifacts(
   root: string,
   task: Task,
   result: Awaited<ReturnType<typeof executeTask>>,
-): Promise<void> {
-  await persistTraceArtifacts(root, result.events);
+): Promise<Artifact[]> {
+  const artifacts = await persistTraceArtifacts(root, result.events);
   await saveTask(root, task);
   await saveRun(root, result.run);
   await saveTraceEvents(root, result.events);
@@ -310,9 +355,13 @@ async function persistExecutionArtifacts(
   } else {
     await deleteRunCheckpoint(root, result.run.id);
   }
+
+  return artifacts;
 }
 
-async function persistTraceArtifacts(root: string, events: TraceEvent[]): Promise<void> {
+async function persistTraceArtifacts(root: string, events: TraceEvent[]): Promise<Artifact[]> {
+  const artifacts: Artifact[] = [];
+
   for (const event of events) {
     if (event.kind !== "artifact") {
       continue;
@@ -322,12 +371,13 @@ async function persistTraceArtifacts(root: string, events: TraceEvent[]): Promis
     const kind = typeof event.payload.kind === "string" ? event.payload.kind : undefined;
     const path = typeof event.payload.path === "string" ? event.payload.path : undefined;
     const createdAt = typeof event.payload.createdAt === "string" ? event.payload.createdAt : event.ts;
+    const mimeType = typeof event.payload.mimeType === "string" ? event.payload.mimeType : undefined;
 
     if (!artifactId || !kind || !path) {
       continue;
     }
 
-    const absolutePath = join(root, path);
+    const absolutePath = resolve(root, path);
     const content = typeof event.payload.content === "string" ? event.payload.content : undefined;
     if (content !== undefined) {
       await mkdir(dirname(absolutePath), { recursive: true });
@@ -342,20 +392,29 @@ async function persistTraceArtifacts(root: string, events: TraceEvent[]): Promis
       createdAt,
     };
 
-    if (typeof event.payload.mimeType === "string") {
-      artifact.mimeType = event.payload.mimeType;
+    if (mimeType !== undefined) {
+      artifact.mimeType = mimeType;
     }
 
     artifact.metadata = {
       source: "trace-artifact",
     };
+    if (typeof event.payload.filename === "string") {
+      artifact.metadata.filename = event.payload.filename;
+    }
 
     if (content !== undefined) {
-      artifact.metadata.content = content;
+      const blob = await saveTraceBlobValue(root, event.runId, "artifact-content", content, mimeType);
+      artifact.metadata.contentHash = blob.hash;
+      artifact.metadata.contentSize = Buffer.byteLength(content, "utf8");
+      artifact.metadata.contentPreview = content.length > 500 ? `${content.slice(0, 500)}...` : content;
     }
 
     await saveArtifact(root, artifact);
+    artifacts.push(artifact);
   }
+
+  return artifacts;
 }
 
 // Release Steel sessions abandoned at an approval gate past their expiresAt.
@@ -419,10 +478,11 @@ export async function runTask(options: RunOptions): Promise<RunResult> {
   }
 
   const result = await executeTask(task, config);
-  await persistExecutionArtifacts(root, task, result);
+  const artifacts = await persistExecutionArtifacts(root, task, result);
 
   const runResults = [result];
   const runs = [result.run];
+  let latestArtifacts = artifacts;
 
   if (mode === "experiment") {
     const maxRuns = task.budget?.maxRuns ?? 3;
@@ -451,7 +511,7 @@ export async function runTask(options: RunOptions): Promise<RunResult> {
       branch.run.branchLabel = decision.branchLabel ?? `branch-${runCount}`;
       branch.run.hypothesisId = hypothesis.id;
 
-      await persistExecutionArtifacts(root, task, branch);
+      latestArtifacts = await persistExecutionArtifacts(root, task, branch);
       runResults.push(branch);
       runs.push(branch.run);
       parentRun = branch.run;
@@ -475,6 +535,7 @@ export async function runTask(options: RunOptions): Promise<RunResult> {
       if (last.run.outcomeSummary) {
         console.log(`Summary:      ${last.run.outcomeSummary}`);
       }
+      printArtifacts(latestArtifacts);
       console.log(`Branches:     ${runResults.length}`);
       console.log(`Experiment:   ${bundle.id}`);
       if (bundle.summary) {
@@ -492,6 +553,7 @@ export async function runTask(options: RunOptions): Promise<RunResult> {
       result: last.run.result,
       summary: last.run.outcomeSummary,
       debugUrl: last.sessionLiveUrl,
+      artifacts: artifactSummaries(latestArtifacts),
       branches: runResults.length,
       experimentId: bundle.id,
     };
@@ -509,6 +571,7 @@ export async function runTask(options: RunOptions): Promise<RunResult> {
     if (result.run.outcomeSummary) {
       console.log(`Summary:      ${result.run.outcomeSummary}`);
     }
+    printArtifacts(artifacts);
     if (result.pendingApproval) {
       console.log(`Approval:     ${result.pendingApproval.id} pending for run ${result.run.id}`);
     }
@@ -523,6 +586,7 @@ export async function runTask(options: RunOptions): Promise<RunResult> {
     result: result.run.result,
     summary: result.run.outcomeSummary,
     debugUrl: result.sessionLiveUrl,
+    artifacts: artifactSummaries(artifacts),
     approval: result.pendingApproval
       ? { id: result.pendingApproval.id, runId: result.run.id }
       : undefined,
@@ -611,7 +675,7 @@ export async function approveRun(runId: RunId, jsonOutput?: boolean): Promise<Ap
     undefined,
   );
 
-  await persistExecutionArtifacts(root, task, resumed);
+  const artifacts = await persistExecutionArtifacts(root, task, resumed);
 
   if (!jsonOutput) {
     console.log(`Approved:     ${approvedRequest.id}`);
@@ -622,6 +686,7 @@ export async function approveRun(runId: RunId, jsonOutput?: boolean): Promise<Ap
       console.log(`Result:       ${resumed.run.result}`);
     }
     console.log(`Summary:      ${resumed.run.outcomeSummary ?? ""}`);
+    printArtifacts(artifacts);
   }
 
   return {
@@ -630,5 +695,6 @@ export async function approveRun(runId: RunId, jsonOutput?: boolean): Promise<Ap
     runId,
     status: resumed.run.status,
     result: resumed.run.result,
+    artifacts: artifactSummaries(artifacts),
   };
 }

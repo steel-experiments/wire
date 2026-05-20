@@ -209,9 +209,20 @@ Every run leaves:
 ```
 .wire/runs/run_abc123/
   events.jsonl    # observe/exec/result/policy-check/approval
-  artifacts/      # screenshots, HTML, downloads, extracted data
+  artifacts/      # screenshots, HTML, downloads + model-named files
   run.json        # classification + outcome summary
 ```
+
+Agents can emit named artifacts directly from `exec`:
+
+```js
+return {
+  artifacts: [{ filename: 'comparison.md', kind: 'markdown',
+                mimeType: 'text/markdown', content: '...' }]
+}
+```
+
+`ArtifactKind` is an open union — runtime persists, model picks the format.
 
 ```bash
 wire replay --run-id run_abc123     # full timeline
@@ -381,8 +392,9 @@ wire run --objective "Open the pricing pages of vercel.com, netlify.com,
                       comparison table in markdown."
 # → run_abc123 created, Steel live URL printed, trace streams to terminal
 
-# 2. Result
-wire result --run-id run_abc123     # final markdown table on stdout
+# 2. Result — the agent emitted comparison.md as a named artifact
+cat .wire/runs/run_abc123/artifacts/comparison.md
+wire result --run-id run_abc123     # or: final value on stdout
 
 # 3. Inspect
 wire review --run-id run_abc123     # classification + artifacts + skills loaded

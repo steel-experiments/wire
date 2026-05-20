@@ -52,6 +52,11 @@ export type ArtifactKind =
   | "table"
   | "note"
   | (string & {});
+export type TraceBlobKind =
+  | "artifact-content"
+  | "llm-message"
+  | "llm-response"
+  | (string & {});
 export type ComparisonDimension = "latency" | "path" | "profile" | "artifacts" | "outcome";
 export type BrowserExecTarget = "active-tab" | "all-tabs" | { tabId: string };
 export type ActionKind =
@@ -332,6 +337,16 @@ export interface Artifact {
   mimeType?: string;
   createdAt: string;
   metadata?: JsonObject;
+}
+
+export interface TraceBlob {
+  hash: string;
+  runId: RunId;
+  kind: TraceBlobKind;
+  createdAt: string;
+  size: number;
+  value: JsonValue;
+  contentType?: string;
 }
 
 export interface ComparisonSpec {
