@@ -101,6 +101,10 @@ function formatEvent(event: TraceEvent, state: RendererState): string | null {
       return `${contPrefix(state)} ${tag} ${p.dim(kind)}`;
     }
 
+    case "contract-check": return formatContractCheck(event, state);
+
+    case "artifact-review": return formatArtifactReview(event, state);
+
     case "approval-request": return `${contPrefix(state)} ${p.yellow("⚠ approval")} ${truncate(String(event.payload["summary"] ?? ""), 120)}`;
 
     case "skill-load": {
@@ -136,6 +140,44 @@ function formatEvent(event: TraceEvent, state: RendererState): string | null {
 
     default: return null;
   }
+}
+
+function formatArtifactReview(event: TraceEvent, state: RendererState): string {
+  const p = state.palette;
+  if (event.payload["passed"] === true) {
+    const skipped = event.payload["skipped"] === true ? " skipped" : "passed";
+    return `${donePrefix(state)} ${p.bold(p.green("✓ review  "))} ${skipped}`;
+  }
+  const problems = Array.isArray(event.payload["problems"])
+    ? event.payload["problems"].map(String).filter((item) => item.length > 0)
+    : ["quality issue"];
+  const detail = problems.slice(0, state.verbose ? 6 : 3).join("; ");
+  return `${checkPrefix(state)} ${p.bold(p.red("✗ review  "))} ${truncate(detail, state.verbose ? 300 : 180)}`;
+}
+
+function formatContractCheck(event: TraceEvent, state: RendererState): string {
+  const p = state.palette;
+  if (event.payload["phase"] === "created") {
+    const summary = String(event.payload["summary"] ?? "no extra completion contract");
+    if (!state.verbose) {
+      return `${initPrefix(state)} ${p.yellow("⛳ contract")} ${truncate(summary, 160)}`;
+    }
+    const contract = event.payload["contract"];
+    const detail = typeof contract === "object" && contract !== null
+      ? stringifyReturn(contract)
+      : summary;
+    return `${initPrefix(state)} ${p.yellow("⛳ contract")} ${truncate(detail, 300)}`;
+  }
+
+  if (event.payload["passed"] === true) {
+    return `${donePrefix(state)} ${p.bold(p.green("✓ contract"))} passed`;
+  }
+
+  const missing = Array.isArray(event.payload["missing"])
+    ? event.payload["missing"].map(String).filter((item) => item.length > 0)
+    : ["missing evidence"];
+  const detail = missing.slice(0, state.verbose ? 6 : 3).join("; ");
+  return `${checkPrefix(state)} ${p.bold(p.red("✗ contract"))} ${truncate(detail, state.verbose ? 300 : 180)}`;
 }
 
 function preferredDetail(ok: boolean, ret: unknown, stdout: string, stderr: string): string {
@@ -184,6 +226,7 @@ function contPrefix(state: RendererState): string {
 }
 
 function donePrefix(state: RendererState): string { return state.palette.dim(state.maxSteps ? "[done  ]" : "[done]"); }
+function checkPrefix(state: RendererState): string { return state.palette.dim(state.maxSteps ? "[check ]" : "[check]"); }
 function initPrefix(state: RendererState): string { return state.palette.dim(state.maxSteps ? "[init  ]" : "[init]"); }
 function truncate(s: string, max: number): string { return s.length <= max ? s : `${s.slice(0, Math.max(0, max - 1))}…`; }
 function hostnameOf(url: string): string {

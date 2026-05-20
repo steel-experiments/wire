@@ -74,6 +74,8 @@ test("validateTaskContract rejects placeholder multi-site extraction artifacts",
 
   const validation = validateTaskContract(contract, events);
   assert.equal(validation.passed, false);
+  assert.ok(validation.totalChecks > validation.missing.length);
+  assert.ok(validation.satisfied.some((item) => item.includes("Visited vercel.com")));
   assert.ok(validation.missing.some((item) => item.includes("see open")));
   assert.ok(validation.missing.some((item) => item.includes("included in prior")));
 });

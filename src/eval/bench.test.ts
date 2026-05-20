@@ -12,6 +12,7 @@ import {
   saveBenchReport,
   loadBenchReport,
   listBenchReports,
+  evaluateBenchmarkPass,
   type BenchReport,
   type BenchResult,
 } from "./bench.js";
@@ -167,6 +168,12 @@ test("formatBenchReport formats multiple results with aggregate stats", () => {
   assert.ok(text.includes("Avg judge: 0.90"));
   assert.ok(text.includes("Avg steps: 4.0"));
   assert.ok(text.includes("Avg time: 4.2s"));
+});
+
+test("evaluateBenchmarkPass accepts high judge score despite metric mismatch", () => {
+  assert.equal(evaluateBenchmarkPass(false, 1, 1.0), true);
+  assert.equal(evaluateBenchmarkPass(true, 0.5, 0.9), true);
+  assert.equal(evaluateBenchmarkPass(false, 1, 0.7), false);
 });
 
 // ---------------------------------------------------------------------------

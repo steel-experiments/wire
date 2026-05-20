@@ -1,5 +1,6 @@
 import { parseArgs, formatHelp, type CliArgs } from "./args.js";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { approveRun, runTask, type RunOptions } from "./runner.js";
 import { loadConfig, resolveLlmConfig } from "./config.js";
 import { formatReview } from "../ui/review.js";
@@ -9,6 +10,12 @@ import { loadTask, listTasks } from "../storage/tasks.js";
 import { listTraceEvents } from "../storage/events.js";
 import { deriveRunResult } from "../agent/loop.js";
 import { bench as runBench, formatBenchReport } from "../eval/bench.js";
+import {
+  exportRows,
+  toTraceTrajectory,
+  type TrajectoryExportFormat,
+} from "../eval/trajectories.js";
+import { scoreRun } from "../eval/scoring.js";
 import { classifyError } from "./errors.js";
 import { success, failure } from "./output.js";
 import { buildTimeline, summarizeTimeline } from "../trace/replay.js";
@@ -27,6 +34,22 @@ export async function main(argv: string[]): Promise<void> {
 
   if (args.help || argv.length <= 2) {
     console.log(formatHelp());
+    return;
+  }
+
+  if (args.command === "run" && args.runId && args.objective && !args.taskFile) {
+    const hint = `Unknown command after --run-id: "${args.objective}". Use one of: review, result, replay, approve, export.`;
+    if (args.json) {
+      console.log(JSON.stringify(failure("run", {
+        error_class: "input",
+        error_code: "UNKNOWN_RUN_COMMAND",
+        retryable: false,
+        hint,
+      })));
+    } else {
+      console.error(`Error: ${hint}`);
+    }
+    process.exitCode = 1;
     return;
   }
 
@@ -57,6 +80,10 @@ export async function main(argv: string[]): Promise<void> {
     }
     case "bench": {
       await handleBench(args);
+      break;
+    }
+    case "export": {
+      await handleExport(args);
       break;
     }
     default: {
@@ -203,10 +230,12 @@ async function handleReview(
     for (const run of runs) {
       const artifacts = await listArtifacts(root, run.id);
       const events = await listTraceEvents(root, run.id);
+      const task = await loadTask(root, run.taskId);
+      const score = scoreRun(task, run, events, artifacts);
       if (args.json) {
-        console.log(JSON.stringify(success("review", { run, events, artifacts })));
+        console.log(JSON.stringify(success("review", { run, task, events, artifacts, score })));
       } else {
-        console.log(formatReview({ run, events, artifacts }));
+        console.log(formatReview({ run, task, events, artifacts, score }));
         console.log("");
       }
     }
@@ -248,13 +277,15 @@ async function handleReview(
   try {
     const runId = args.runId as `run_${string}`;
     const run = await loadRun(root, runId);
+    const task = await loadTask(root, run.taskId);
     const artifacts = await listArtifacts(root, runId);
     const events = await listTraceEvents(root, runId);
+    const score = scoreRun(task, run, events, artifacts);
 
     if (args.json) {
-      console.log(JSON.stringify(success("review", { run, events, artifacts })));
+      console.log(JSON.stringify(success("review", { run, task, events, artifacts, score }, runId)));
     } else {
-      console.log(formatReview({ run, events, artifacts }));
+      console.log(formatReview({ run, task, events, artifacts, score }));
     }
   } catch (err) {
     if (args.json) {
@@ -474,4 +505,64 @@ async function handleBench(
     }
     process.exitCode = 1;
   }
+}
+
+async function handleExport(args: CliArgs): Promise<void> {
+  try {
+    const root = defaultStorageRoot();
+    const format: TrajectoryExportFormat = args.exportFormat ?? "trajectory";
+    const runs = await selectRunsForExport(root, args);
+    const trajectories = [];
+
+    for (const run of runs) {
+      const task = await loadTask(root, run.taskId);
+      const events = await listTraceEvents(root, run.id);
+      const artifacts = await listArtifacts(root, run.id);
+      trajectories.push(toTraceTrajectory(task, run, events, artifacts));
+    }
+
+    const exportOptions: { minScore?: number; minPreferenceDelta?: number } = {};
+    if (args.minScore !== undefined) exportOptions.minScore = args.minScore;
+    if (args.minPreferenceDelta !== undefined) exportOptions.minPreferenceDelta = args.minPreferenceDelta;
+    const rows = exportRows(trajectories, format, exportOptions);
+    const jsonl = rows.map((row) => JSON.stringify(row)).join("\n") + (rows.length > 0 ? "\n" : "");
+
+    if (args.outFile) {
+      await mkdir(dirname(args.outFile), { recursive: true });
+      await writeFile(args.outFile, jsonl, "utf-8");
+      if (args.json) {
+        console.log(JSON.stringify(success("export", {
+          format,
+          rows: rows.length,
+          outFile: args.outFile,
+        })));
+      } else {
+        console.log(`Exported ${rows.length} ${format} rows to ${args.outFile}`);
+      }
+      return;
+    }
+
+    if (args.json) {
+      console.log(JSON.stringify(success("export", { format, rows })));
+    } else {
+      process.stdout.write(jsonl);
+    }
+  } catch (err) {
+    if (args.json) {
+      console.log(JSON.stringify(failure("export", classifyError(err))));
+    } else {
+      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    process.exitCode = 1;
+  }
+}
+
+async function selectRunsForExport(root: string, args: CliArgs) {
+  if (args.runId) {
+    return [await loadRun(root, args.runId as `run_${string}`)];
+  }
+  if (args.taskId) {
+    return listRuns(root, args.taskId as `task_${string}`);
+  }
+  return listRuns(root);
 }

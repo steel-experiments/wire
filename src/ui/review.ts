@@ -1,13 +1,17 @@
-import type { Artifact, Run, TraceEvent } from "../shared/types.js";
+import type { Artifact, Run, Task, TraceEvent } from "../shared/types.js";
+import { scoreRun, type RunScore } from "../eval/scoring.js";
 
 export interface ReviewData {
   run: Run;
+  task?: Task;
   events: TraceEvent[];
   artifacts: Artifact[];
+  score?: RunScore;
 }
 
 export function formatReview(data: ReviewData): string {
-  const { run, events, artifacts } = data;
+  const { run, task, events, artifacts } = data;
+  const score = data.score ?? (task ? scoreRun(task, run, events, artifacts) : undefined);
   const lines: string[] = [];
 
   lines.push("=== Run Review ===");
@@ -40,6 +44,23 @@ export function formatReview(data: ReviewData): string {
     if (run.classification.notes && run.classification.notes.length > 0) {
       lines.push(`Notes:`);
       for (const note of run.classification.notes) {
+        lines.push(`  - ${note}`);
+      }
+    }
+    lines.push("");
+  }
+
+  if (score) {
+    lines.push("--- Score ---");
+    lines.push(`Total:        ${(score.total * 100).toFixed(1)}%`);
+    lines.push(`Classification ${(score.components.classification * 100).toFixed(0)}%`);
+    lines.push(`Contract       ${(score.components.contract * 100).toFixed(0)}%`);
+    lines.push(`Evidence       ${(score.components.evidence * 100).toFixed(0)}%`);
+    lines.push(`Efficiency     ${(score.components.efficiency * 100).toFixed(0)}%`);
+    lines.push(`Policy         ${(score.components.policy * 100).toFixed(0)}%`);
+    if (score.notes.length > 0) {
+      lines.push("Notes:");
+      for (const note of score.notes.slice(0, 6)) {
         lines.push(`  - ${note}`);
       }
     }
@@ -135,6 +156,26 @@ function summarizeEventPayload(event: TraceEvent): string {
       const action = p["actionKind"];
       const result = p["result"];
       return `${action ?? "?"} -> ${result ?? "?"}`;
+    }
+    case "contract-check": {
+      if (p["phase"] === "created") {
+        const summary = p["summary"];
+        return typeof summary === "string" ? truncate(summary, 120) : "created";
+      }
+      if (p["passed"] === true) return "passed";
+      const missing = p["missing"];
+      if (Array.isArray(missing) && missing.length > 0) {
+        return `failed: ${truncate(missing.map(String).join("; "), 120)}`;
+      }
+      return "failed";
+    }
+    case "artifact-review": {
+      if (p["passed"] === true) return p["skipped"] === true ? "skipped" : "passed";
+      const problems = p["problems"];
+      if (Array.isArray(problems) && problems.length > 0) {
+        return `failed: ${truncate(problems.map(String).join("; "), 120)}`;
+      }
+      return "failed";
     }
     case "approval-request": {
       const s = p["summary"];

@@ -21,6 +21,8 @@ export interface TaskContract {
 export interface ContractValidation {
   passed: boolean;
   missing: string[];
+  satisfied: string[];
+  totalChecks: number;
 }
 
 const PLACEHOLDER_PHRASES = [
@@ -132,6 +134,49 @@ export function contractToPrompt(contract: TaskContract): string {
   return lines.length > 0 ? lines.join("\n") : "- No extra completion contract inferred.";
 }
 
+export function contractSummary(contract: TaskContract): string {
+  const parts: string[] = [];
+  if (contract.mustVisit.length > 0) parts.push(`visit: ${contract.mustVisit.join(", ")}`);
+  if (contract.mustProduce) {
+    const produce: string[] = [];
+    if (contract.mustProduce.format) produce.push(contract.mustProduce.format);
+    if (contract.mustProduce.table) produce.push("table");
+    else if (contract.mustProduce.artifact) produce.push("artifact");
+    if (contract.mustProduce.minItems !== undefined) produce.push(`${contract.mustProduce.minItems} items`);
+    if (produce.length > 0) parts.push(produce.join(" "));
+  }
+  if (contract.mustReach.length > 0) {
+    const reach = contract.mustReach.map((item) =>
+      item.kind === "contains-number" ? String(item.value) : `${item.value} items`
+    );
+    parts.push(`evidence: ${reach.join(", ")}`);
+  }
+  if (contract.mustMention.length > 0) parts.push(`mention: ${contract.mustMention.join(", ")}`);
+  if (contract.mustNotContain.length > 0) parts.push("no placeholders");
+  return parts.length > 0 ? parts.join(" · ") : "no extra completion contract";
+}
+
+function contractToJson(contract: TaskContract): JsonObject {
+  const value: JsonObject = {
+    mustVisit: contract.mustVisit,
+    mustMention: contract.mustMention,
+    mustReach: contract.mustReach.map((item) => ({ kind: item.kind, value: item.value })),
+    mustNotContain: contract.mustNotContain,
+  };
+  if (contract.mustProduce) {
+    value.mustProduce = { ...contract.mustProduce };
+  }
+  return value;
+}
+
+export function contractCreatedPayload(contract: TaskContract): JsonObject {
+  return {
+    phase: "created",
+    summary: contractSummary(contract),
+    contract: contractToJson(contract),
+  };
+}
+
 function eventText(event: TraceEvent): string {
   const parts: string[] = [event.kind];
   const payload = event.payload;
@@ -240,6 +285,7 @@ export function validateTaskContract(
   result?: string,
 ): ContractValidation {
   const missing: string[] = [];
+  const satisfied: string[] = [];
   const answerText = combinedAnswerText(events, result);
   const answerLower = answerText.toLowerCase();
   const artifacts = artifactEvents(events);
@@ -247,6 +293,8 @@ export function validateTaskContract(
   for (const domain of contract.mustVisit) {
     if (!hasVisitedDomain(events, domain)) {
       missing.push(`Missing visited evidence for ${domain}`);
+    } else {
+      satisfied.push(`Visited ${domain}`);
     }
   }
 
@@ -254,47 +302,71 @@ export function validateTaskContract(
     const labelLower = label.toLowerCase();
     if (!answerLower.includes(labelLower) && !answerLower.includes(labelLower.replace(/\s+/gu, ""))) {
       missing.push(`Final result does not mention ${label}`);
+    } else {
+      satisfied.push(`Final result mentions ${label}`);
     }
   }
 
   if (contract.mustProduce?.artifact && artifacts.length === 0) {
     missing.push("Missing non-summary artifact");
+  } else if (contract.mustProduce?.artifact) {
+    satisfied.push("Produced non-summary artifact");
   }
 
   if (contract.mustProduce?.format && !artifacts.some((event) => artifactMatchesFormat(event, contract.mustProduce!.format!))) {
     missing.push(`Missing ${contract.mustProduce.format} artifact`);
+  } else if (contract.mustProduce?.format) {
+    satisfied.push(`Produced ${contract.mustProduce.format} artifact`);
   }
 
   if (contract.mustProduce?.table && markdownTableRows(answerText).length < 3) {
     missing.push("Missing markdown table with meaningful rows");
+  } else if (contract.mustProduce?.table) {
+    satisfied.push("Produced markdown table with meaningful rows");
   }
 
   const minItems = contract.mustProduce?.minItems;
   if (minItems !== undefined && countItems(answerText) < minItems) {
     missing.push(`Expected at least ${minItems} items in final result`);
+  } else if (minItems !== undefined) {
+    satisfied.push(`Produced at least ${minItems} items in final result`);
   }
 
   for (const reach of contract.mustReach) {
     if (reach.kind === "contains-number" && !new RegExp(`\\b${reach.value}\\b`, "u").test(answerText)) {
       missing.push(`Missing evidence containing ${reach.value}`);
+    } else if (reach.kind === "contains-number") {
+      satisfied.push(`Found evidence containing ${reach.value}`);
     }
     if (reach.kind === "min-count" && countItems(answerText) < reach.value) {
       missing.push(`Expected at least ${reach.value} items in final result`);
+    } else if (reach.kind === "min-count") {
+      satisfied.push(`Found at least ${reach.value} items in final result`);
     }
   }
 
   for (const phrase of contract.mustNotContain) {
     if (answerLower.includes(phrase)) {
       missing.push(`Final result contains placeholder text: ${phrase}`);
+    } else {
+      satisfied.push(`Final result avoids placeholder text: ${phrase}`);
     }
   }
 
-  return { passed: missing.length === 0, missing };
+  return {
+    passed: missing.length === 0,
+    missing,
+    satisfied,
+    totalChecks: missing.length + satisfied.length,
+  };
 }
 
 export function contractValidationPayload(validation: ContractValidation): JsonObject {
   return {
+    phase: "validated",
     passed: validation.passed,
     missing: validation.missing,
+    satisfied: validation.satisfied,
+    totalChecks: validation.totalChecks,
   };
 }

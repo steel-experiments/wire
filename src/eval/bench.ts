@@ -64,6 +64,18 @@ export interface BenchOptions {
   json?: boolean | undefined;
 }
 
+const JUDGE_PASS_THRESHOLD = 0.8;
+
+export function evaluateBenchmarkPass(
+  classificationMatch: boolean,
+  answerRelevance: number,
+  judgeScore: number | null,
+): boolean {
+  const metricPassed = classificationMatch && answerRelevance >= 1;
+  const judgePassed = judgeScore !== null && judgeScore >= JUDGE_PASS_THRESHOLD;
+  return metricPassed || judgePassed;
+}
+
 // Main runner
 
 export async function bench(options: BenchOptions): Promise<BenchReport> {
@@ -170,8 +182,6 @@ async function runBenchmark(
     ? Math.min(1, bm.expected.maxSteps / metrics.stepCount)
     : 1;
 
-  const passed = classificationMatch && answerRelevance >= 1;
-
   if (!classificationMatch) {
     notes.push(`Expected ${bm.expected.classification}, got ${actualClassification}`);
   }
@@ -183,6 +193,11 @@ async function runBenchmark(
   let judgeScore: number | null = null;
   if (judgeProvider && extractedResult) {
     judgeScore = await judgeResult(judgeProvider, bm.objective, extractedResult);
+  }
+
+  const passed = evaluateBenchmarkPass(classificationMatch, answerRelevance, judgeScore);
+  if (passed && judgeScore !== null && judgeScore >= JUDGE_PASS_THRESHOLD && (!classificationMatch || answerRelevance < 1)) {
+    notes.push(`Judge accepted output with score ${judgeScore.toFixed(1)}`);
   }
 
   return {

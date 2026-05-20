@@ -120,6 +120,7 @@ export const traceEventKindSchema = z.enum([
   "skill-empty",
   "skill-proposal",
   "contract-check",
+  "artifact-review",
   "llm-call",
   "llm-usage",
   "user-message",

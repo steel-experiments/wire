@@ -43,6 +43,7 @@ import { detectAuthWall } from "../profiles/auth.js";
 import { llmProposeSkill, generateSkillProposal, manageSkillPromotion } from "../skills/promote.js";
 import { findMatchingSkillDocMatches, loadSkillDocsFromDir } from "../skills/loader.js";
 import { parseActionFromLlm, registerActionKind } from "./llm-parse.js";
+import { extractFirstJsonObject } from "./llm-parse.js";
 import {
   latestObservation,
   latestError,
@@ -69,6 +70,7 @@ import {
 import { ActionRegistry, type ActionHandler } from "./actions.js";
 import { updateSkillStatsFromRun } from "../skills/stats.js";
 import {
+  contractCreatedPayload,
   contractToPrompt,
   contractValidationPayload,
   createTaskContract,
@@ -453,10 +455,21 @@ export function defaultAgentTurn(
           summary = `user said: ${String(e.payload.message ?? "")}`;
           break;
         case "contract-check":
+          if (e.payload.phase === "created") {
+            summary = `completion contract: ${String(e.payload.summary ?? "")}`;
+          } else {
+            summary = e.payload.passed === true
+              ? "completion contract passed"
+              : `completion contract failed: ${
+                Array.isArray(e.payload.missing) ? e.payload.missing.slice(0, 3).join("; ") : "missing evidence"
+              }`;
+          }
+          break;
+        case "artifact-review":
           summary = e.payload.passed === true
-            ? "completion contract passed"
-            : `completion contract failed: ${
-              Array.isArray(e.payload.missing) ? e.payload.missing.slice(0, 3).join("; ") : "missing evidence"
+            ? "artifact review passed"
+            : `artifact review failed: ${
+              Array.isArray(e.payload.problems) ? e.payload.problems.slice(0, 3).join("; ") : "quality issue"
             }`;
           break;
         default:
@@ -738,6 +751,117 @@ interface LoopSignals {
   flushedEvents: number;
 }
 
+interface ArtifactReviewResult {
+  passed: boolean;
+  problems: string[];
+}
+
+function taskArtifactEvents(state: LoopState): TraceEvent[] {
+  return state.events.filter((event) =>
+    event.kind === "artifact" &&
+    event.payload.source !== "task-summary" &&
+    typeof event.payload.content === "string" &&
+    event.payload.content.trim().length > 0
+  );
+}
+
+function latestReviewedArtifactCount(state: LoopState): number {
+  const review = [...state.events].reverse().find((event) =>
+    event.kind === "artifact-review" &&
+    typeof event.payload.artifactCount === "number"
+  );
+  return typeof review?.payload.artifactCount === "number" ? review.payload.artifactCount : 0;
+}
+
+function hasReviewableContract(state: LoopState): boolean {
+  return state.contract.mustVisit.length > 0 ||
+    state.contract.mustMention.length > 0 ||
+    state.contract.mustProduce !== undefined ||
+    state.contract.mustReach.length > 0 ||
+    state.contract.mustNotContain.length > 0;
+}
+
+function shouldReviewArtifacts(state: LoopState, config: RuntimeConfig): boolean {
+  if (!config.llmProvider) return false;
+  if (state.task.mode !== "task") return false;
+  if (!hasReviewableContract(state)) return false;
+  return taskArtifactEvents(state).length > latestReviewedArtifactCount(state);
+}
+
+function artifactReviewPrompt(state: LoopState): string {
+  const artifacts = taskArtifactEvents(state).slice(-2).map((event) => {
+    const filename = String(event.payload.filename ?? event.payload.path ?? "artifact");
+    const content = String(event.payload.content ?? "");
+    return `Artifact: ${filename}\n${capForPrompt(content)}`;
+  }).join("\n\n");
+  const result = deriveRunResult(state.events, state.task.mode);
+  const evidence = result ? capForPrompt(result) : "(none)";
+  return [
+    "Review the final artifact against the objective and completion contract.",
+    "Return strict JSON only: {\"passed\": boolean, \"problems\": string[]}.",
+    "Flag concrete artifact quality problems, wrong-field values, obvious misplaced text, placeholders, missing requested data, or tables that do not answer the task.",
+    "Do not require perfection or external browsing. Do not invent facts. Use only the artifact and trace evidence below.",
+    "",
+    `Objective: ${state.task.objective}`,
+    `Completion contract:\n${contractToPrompt(state.contract)}`,
+    `Recent extracted evidence:\n${evidence}`,
+    `Final artifact content:\n${artifacts}`,
+  ].join("\n");
+}
+
+function parseArtifactReview(content: string): ArtifactReviewResult | undefined {
+  const candidates = [content.trim(), extractFirstJsonObject(content)];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+      const obj = parsed as Record<string, unknown>;
+      if (typeof obj.passed !== "boolean") continue;
+      const problems = Array.isArray(obj.problems)
+        ? obj.problems.map(String).filter((item) => item.trim().length > 0).slice(0, 8)
+        : [];
+      return { passed: obj.passed, problems };
+    } catch {
+      // Try next candidate.
+    }
+  }
+  return undefined;
+}
+
+async function reviewArtifacts(state: LoopState, config: RuntimeConfig): Promise<ArtifactReviewResult | undefined> {
+  if (!config.llmProvider) return undefined;
+  const messages: ChatMessage[] = [
+    {
+      role: "system",
+      content: "You are a terse artifact reviewer for a browser agent. Return only strict JSON.",
+    },
+    { role: "user", content: artifactReviewPrompt(state) },
+  ];
+  const response = await config.llmProvider.chat(messages, { maxTokens: 700 });
+  return parseArtifactReview(response.content);
+}
+
+function artifactReviewPayload(
+  review: ArtifactReviewResult | undefined,
+  artifactCount: number,
+): JsonObject {
+  if (!review) {
+    return {
+      passed: true,
+      problems: [],
+      artifactCount,
+      skipped: true,
+      reason: "Artifact review response could not be parsed",
+    };
+  }
+  return {
+    passed: review.passed,
+    problems: review.problems,
+    artifactCount,
+  };
+}
+
 async function flushTraceSink(
   state: LoopState,
   config: RuntimeConfig,
@@ -778,6 +902,16 @@ async function initializeState(
 
   if (isCancelled(config)) {
     return signals;
+  }
+
+  if (!initialState) {
+    state.events.push({
+      id: createId("event"),
+      runId: state.run.id,
+      ts: nowIsoUtc(),
+      kind: "contract-check",
+      payload: contractCreatedPayload(state.contract),
+    });
   }
 
   if (approvedPendingAction) {
@@ -1025,6 +1159,23 @@ async function runMainLoop(
           state.stepCount++;
           await flushTraceSink(state, config, signals);
           continue;
+        }
+        if (shouldReviewArtifacts(state, config)) {
+          const artifactCount = taskArtifactEvents(state).length;
+          const review = await reviewArtifacts(state, config);
+          const payload = artifactReviewPayload(review, artifactCount);
+          state.events.push({
+            id: createId("event"),
+            runId: state.run.id,
+            ts: nowIsoUtc(),
+            kind: "artifact-review",
+            payload,
+          });
+          if (payload.passed === false && state.stepCount < config.maxSteps) {
+            state.stepCount++;
+            await flushTraceSink(state, config, signals);
+            continue;
+          }
         }
         state.events.push({
           id: createId("event"),

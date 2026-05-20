@@ -146,6 +146,60 @@ test("stream hides policy-check by default, shows in verbose", () => {
   assert.match(loud.lines[0]!, /⛔ deny/u);
 });
 
+test("stream renders created completion contract", () => {
+  const { lines, sink } = captureSink({ maxSteps: 30 });
+  sink.onEvent(ev("contract-check", {
+    phase: "created",
+    summary: "visit: vercel.com, netlify.com · markdown table · no placeholders",
+    contract: {
+      mustVisit: ["vercel.com", "netlify.com"],
+      mustMention: ["Vercel", "Netlify"],
+      mustNotContain: ["see open"],
+      mustReach: [],
+    },
+  }));
+
+  assert.equal(lines.length, 1);
+  assert.match(lines[0]!, /\[init  \]/u);
+  assert.match(lines[0]!, /⛳ contract/u);
+  assert.match(lines[0]!, /vercel\.com/u);
+  assert.match(lines[0]!, /markdown table/u);
+});
+
+test("stream renders passed and failed completion contract checks", () => {
+  const { lines, sink } = captureSink({ maxSteps: 30 });
+  sink.onEvent(ev("contract-check", { phase: "validated", passed: true, missing: [] }));
+  sink.onEvent(ev("contract-check", {
+    phase: "validated",
+    passed: false,
+    missing: ["Missing markdown table", "Final result contains placeholder text: see open"],
+  }));
+
+  assert.match(lines[0]!, /\[done  \]/u);
+  assert.match(lines[0]!, /✓ contract/u);
+  assert.match(lines[0]!, /passed/u);
+  assert.match(lines[1]!, /\[check \]/u);
+  assert.match(lines[1]!, /✗ contract/u);
+  assert.match(lines[1]!, /Missing markdown table/u);
+  assert.match(lines[1]!, /see open/u);
+});
+
+test("stream renders artifact review pass and failure", () => {
+  const { lines, sink } = captureSink({ maxSteps: 30 });
+  sink.onEvent(ev("artifact-review", { passed: true, problems: [], artifactCount: 1 }));
+  sink.onEvent(ev("artifact-review", {
+    passed: false,
+    artifactCount: 1,
+    problems: ["Enterprise price appears to be navigation text."],
+  }));
+
+  assert.match(lines[0]!, /\[done  \]/u);
+  assert.match(lines[0]!, /✓ review/u);
+  assert.match(lines[1]!, /\[check \]/u);
+  assert.match(lines[1]!, /✗ review/u);
+  assert.match(lines[1]!, /navigation text/u);
+});
+
 test("stream shows skill-load by default with friendly labels when available", () => {
   const { lines, sink } = captureSink();
   sink.onEvent(ev("skill-load", {

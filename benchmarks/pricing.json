@@ -1,0 +1,13 @@
+[
+  {
+    "id": "pricing-compare-paas",
+    "objective": "Open the pricing pages of vercel.com, netlify.com, and railway.app. Extract plan names, monthly prices, included build minutes or bandwidth, and any free-tier limits. Return a markdown comparison table as a named artifact (filename: comparison.md, kind: markdown).",
+    "mode": "task",
+    "maxSteps": 30,
+    "expected": {
+      "classification": "task-complete",
+      "answerContains": ["Vercel", "Netlify", "Railway"],
+      "maxSteps": 24
+    }
+  }
+]

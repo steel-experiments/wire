@@ -8,6 +8,7 @@ import type {
 } from "../shared/types.js";
 import { computeTaskMetrics, aggregateMetrics, formatEvaluationReport } from "./metrics.js";
 import type { TaskMetrics, AggregateMetrics } from "./metrics.js";
+import { scoreRun, type RunScore } from "./scoring.js";
 
 // Benchmark task definition
 
@@ -28,6 +29,7 @@ export interface EvaluationResult {
   id: string;
   benchmarkId: string;
   metrics: TaskMetrics;
+  score: RunScore;
   passed: boolean;
   notes: string[];
 }
@@ -41,6 +43,16 @@ export function evaluateRun(
   artifacts: Artifact[],
 ): EvaluationResult {
   const metrics = computeTaskMetrics(run, events, artifacts.length);
+  const task: Task = {
+    id: run.taskId,
+    title: benchmark.title,
+    mode: benchmark.mode,
+    objective: benchmark.objective,
+    constraints: benchmark.constraints,
+    successCriteria: benchmark.successCriteria,
+    createdAt: run.startedAt ?? "",
+  };
+  const score = scoreRun(task, run, events, artifacts, { maxSteps: benchmark.maxSteps });
   const notes: string[] = [];
   let passed = true;
 
@@ -65,10 +77,15 @@ export function evaluateRun(
     notes.push(`High error count: ${metrics.errors}`);
   }
 
+  if (score.notes.length > 0) {
+    notes.push(...score.notes);
+  }
+
   return {
     id: createId("experiment"),
     benchmarkId: benchmark.id,
     metrics,
+    score,
     passed,
     notes,
   };
@@ -80,6 +97,7 @@ export interface BatchEvaluationResult {
   results: EvaluationResult[];
   aggregate: AggregateMetrics;
   passRate: number;
+  avgScore: number;
   report: string;
 }
 
@@ -106,12 +124,25 @@ export function evaluateBatch(
   const passRate = results.length > 0
     ? results.filter((r) => r.passed).length / results.length
     : 0;
+  const avgScore = results.length > 0
+    ? results.reduce((sum, result) => sum + result.score.total, 0) / results.length
+    : 0;
+  const scoreLines = [
+    "",
+    `Avg score:      ${(avgScore * 100).toFixed(1)}%`,
+    "Score components:",
+    ...results.map((result) =>
+      `  ${result.benchmarkId}: ${(result.score.total * 100).toFixed(1)}% ` +
+      `(contract ${(result.score.components.contract * 100).toFixed(0)}%, evidence ${(result.score.components.evidence * 100).toFixed(0)}%)`
+    ),
+  ];
 
   return {
     results,
     aggregate,
     passRate,
-    report: formatEvaluationReport(metrics, aggregate),
+    avgScore,
+    report: formatEvaluationReport(metrics, aggregate) + scoreLines.join("\n"),
   };
 }
 

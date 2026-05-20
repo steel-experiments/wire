@@ -32,9 +32,9 @@ Small surface. Boundaries are functions and types, not infrastructure.
 
 | Metric | Current |
 |---|---|
-| Source LOC | ~13,000 |
-| Source files | 60 |
-| Tests | 630 |
+| Source LOC | ~14,500 |
+| Source files | 65 |
+| Tests | 630+ |
 | Test-to-source ratio | ~1:1 LOC |
 | Runtime deps | 1 (`zod`) |
 | Dev deps | 3 |
@@ -204,13 +204,14 @@ Deterministic. Pre-execution. Logged as `policy-check` events in the trace.
 
 ## Trace + artifacts
 
-Every run leaves:
+Every run writes to flat per-entity stores under `.wire/`:
 
 ```
-.wire/runs/run_abc123/
-  events.jsonl    # observe/exec/result/policy-check/approval
-  artifacts/      # screenshots, HTML, downloads + model-named files
-  run.json        # classification + outcome summary
+.wire/
+  runs/       run_<id>.json      # classification, outcome, result envelope
+  events/     event_<id>.json    # one file per trace event
+  artifacts/  artifact_<id>-<filename>.<ext>
+  tasks/  sessions/  approvals/  benchmarks/
 ```
 
 Agents can emit named artifacts directly from `exec`:
@@ -225,7 +226,8 @@ return {
 `ArtifactKind` is an open union — runtime persists, model picks the format.
 
 ```bash
-wire replay --run-id run_abc123     # full timeline
+wire review --run-id run_abc123     # classification + artifact paths
+wire replay --run-id run_abc123     # step-by-step timeline
 wire compare run_a run_b            # diff two runs
 ```
 
@@ -244,6 +246,35 @@ wire compare run_a run_b            # diff two runs
 | `ambiguous` | Insufficient evidence |
 
 "Failed" is not a useful word. Classification is the contract that evals, skills, and humans speak.
+
+---
+
+## Decomposed scoring + training export
+
+Beyond the categorical 7 kinds, every run gets a decomposed score:
+
+```ts
+RunScoreComponents {
+  classification  // how the run was judged
+  contract        // satisfied / total task-contract checks
+  evidence        // artifact + observation richness
+  efficiency      // step count vs ideal
+  policy          // denials, approval violations
+}
+```
+
+Traces become training data via `wire export`:
+
+```bash
+wire export --format trajectory --out data/traces.jsonl
+wire export --format sft        --min-score 0.8 --out data/sft.jsonl
+wire export --format rewards    --out data/rewards.jsonl
+wire export --format preferences --min-delta 0.2 --out data/prefs.jsonl
+```
+
+**Wire does not train models.** It produces scored, redacted trajectories that SFT / reward / DPO pipelines consume. Score is a *diagnostic signal first* — verify against human review before using as reward.
+
+See `TRAINING_DATA.md`.
 
 ---
 
@@ -270,7 +301,8 @@ Same browser. Different jobs.
 | Policy | Permission on tool calls | Deterministic check on *exec code* |
 | Eval | Eyeballing | `wire bench --json` |
 | Multi-run experiments | Manual, lost | `branching`, `ComparisonSpec` are types |
-| Replay weeks later | Session-scoped | `events.jsonl` per run |
+| Replay weeks later | Session-scoped | Persisted runs/events/artifacts |
+| Training-data export | None | `wire export` → trajectory / sft / rewards / preferences |
 
 > Claude Code is an agent you *use*. Wire is an agent you *deploy*.
 
@@ -289,7 +321,8 @@ Cited in `SPECS.md:31`. We borrowed minimal-core ethos + file-based skill format
 | Skills | **User-authored** | **Agent-authored + promoted** |
 | Sessions | Tree-JSONL (`/fork`, `/clone`) | `events.jsonl` + classification |
 | Policy | **None** — "run in a container" | Deterministic engine |
-| Size | ~40k LOC, 142 files, 17 deps | ~13k LOC, 60 files, 1 dep |
+| Training export | None | `wire export` → trajectory / sft / rewards / preferences |
+| Size | ~40k LOC, 142 files, 17 deps | ~14.5k LOC, 65 files, 1 dep |
 
 What pi does better: branching session UX is ahead of our `branching.ts`.
 
@@ -306,8 +339,9 @@ Cited in `SPECS.md:31`. We borrowed code-as-action + agent-authored skills.
 | Helpers | Agent edits per task | Agent edits per task (`edit-helper` action) |
 | Skills | Markdown, agent-authored | Same, + promotion lifecycle |
 | Policy | Prompt-level only | Deterministic engine |
-| Trace | Daemon log + screenshots | `events.jsonl` + classification |
-| Size | ~1k LOC, 6 files, 4 deps | ~13k LOC, 60 files, 1 dep |
+| Trace | Daemon log + screenshots | Structured events + classification |
+| Training export | None | `wire export` → trajectory / sft / rewards / preferences |
+| Size | ~1k LOC, 6 files, 4 deps | ~14.5k LOC, 65 files, 1 dep |
 | Language | Python | TypeScript |
 
 ---
@@ -331,6 +365,8 @@ Cited in `SPECS.md:31`. We borrowed code-as-action + agent-authored skills.
 |---|---|---|
 | Deterministic policy engine | neither | Original |
 | Run classification (7 kinds) | neither | Original |
+| Decomposed run scoring | neither | Original |
+| Training-data export (SFT/rewards/DPO) | neither | Original |
 | Bench harness with persisted JSON | neither | Original |
 | Single-dep budget | harness spirit | Stricter execution |
 
@@ -390,36 +426,31 @@ Make lessons durable.
 wire run --objective "Open the pricing pages of vercel.com, netlify.com,
                       and railway.app. Extract everything and save as a
                       comparison table in markdown."
-# → run_abc123 created, Steel live URL printed, trace streams to terminal
+# → run_<id> created, Steel debug URL printed, trace streams live
 
-# 2. Result — the agent emitted comparison.md as a named artifact
-cat .wire/runs/run_abc123/artifacts/comparison.md
-wire result --run-id run_abc123     # or: final value on stdout
+# 2. Inspect — classification, artifacts, timeline
+wire review --run-id run_<id>       # prints path of each emitted artifact
 
-# 3. Inspect
-wire review --run-id run_abc123     # classification + artifacts + skills loaded
-wire replay --run-id run_abc123     # step-by-step timeline
+# 3. Open the artifact the agent emitted
+cat .wire/artifacts/artifact_*-vercel-pricing-comparison.md
 
-# 4. Learn
-ls skills/.proposals/               # vercel_com-skill_*, netlify_com-skill_*, ...
+# 4. Replay the step-by-step trace
+wire replay --run-id run_<id>
+
+# 5. Learn — what reusable knowledge did Wire propose?
+ls skills/.proposals/               # vercel_com-skill_*, ...
 cat skills/.proposals/vercel_com-skill_*.md
 
-# 5. Lock it in as a regression
-wire bench --benchmarks benchmarks/pricing.json --json
+# 6. Lock it in as a regression
+wire bench --benchmarks benchmarks/pricing.json --json --provider openai
                                     # exits 1 on future regression
 
-# 6. Compare across changes
+# 7. Compare bench reports across changes
 diff <(jq '.' .wire/benchmarks/bench-2026-05.json) \
      <(jq '.' .wire/benchmarks/bench-2026-06.json)
+
+# 8. Export traces as training data
+wire export --format sft --min-score 0.8 --out data/sft.jsonl
 ```
-
----
-
-## Q&A — openers
-
-1. Which principle bends first under pressure?
-2. Where does the small-core discipline break? First feature we'd refuse?
-3. Steal agent-edited helpers from harness? Cost?
-4. What bench task do you actually want to see Wire pass?
 
 End.

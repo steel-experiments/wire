@@ -31,6 +31,7 @@ import {
 import type { LoopState, StopConditions } from "./loop.js";
 import { ActionRegistry } from "./actions.js";
 import { writeSkillStats } from "../skills/stats.js";
+import type { LLMProvider } from "../providers/llm/openai.js";
 import {
   isNavigationOnlyResult,
   appendExtractedResultArtifact,
@@ -1499,6 +1500,70 @@ test("executeTask blocks finish until numeric objective evidence is present", as
   assert.equal(result.run.status, "succeeded");
 });
 
+test("executeTask blocks finish when artifact review finds problems", async () => {
+  const task = makeTask({ objective: "Extract pricing and save as markdown table in md format" });
+  const sessionId = makeSessionId();
+  let execCount = 0;
+  let reviewCount = 0;
+  const provider = createMockProvider({
+    async createSession() {
+      return { id: sessionId, provider: "custom", createdAt: new Date().toISOString(), status: "ready" };
+    },
+    async exec(): Promise<BrowserExecResult> {
+      execCount++;
+      const enterprisePrice = execCount === 1 ? "Pricing Ask AI" : "Custom";
+      const content = [
+        "| Plan | Price |",
+        "|---|---|",
+        "| Hobby | Free |",
+        "| Pro | $20/mo |",
+        `| Enterprise | ${enterprisePrice} |`,
+      ].join("\n");
+      return {
+        ok: true,
+        durationMs: 10,
+        returnValue: {
+          artifacts: [{ filename: "pricing.md", kind: "markdown", mimeType: "text/markdown", content }],
+        },
+      };
+    },
+    async stopSession() {},
+  });
+  const llmProvider: LLMProvider = {
+    model: "reviewer",
+    async chat() {
+      reviewCount++;
+      return {
+        model: "reviewer",
+        content: reviewCount === 1
+          ? JSON.stringify({ passed: false, problems: ["Enterprise price appears to be navigation text."] })
+          : JSON.stringify({ passed: true, problems: [] }),
+      };
+    },
+  };
+
+  const result = await executeTask(
+    task,
+    { provider, policyEngine: createMockPolicyEngine(), llmProvider, maxSteps: 6 },
+    async (state) => {
+      const reviews = state.events.filter((event) => event.kind === "artifact-review");
+      if (state.stepCount === 0) return { kind: "exec", summary: "Extract bad artifact", payload: { code: "return bad" } };
+      if (reviews.some((event) => event.payload.passed === false) && execCount === 1) {
+        return { kind: "exec", summary: "Fix artifact", payload: { code: "return fixed" } };
+      }
+      return { kind: "finish", summary: "Done" };
+    },
+  );
+
+  const reviews = result.events.filter((event) => event.kind === "artifact-review");
+  assert.equal(execCount, 2);
+  assert.equal(reviewCount, 2);
+  assert.equal(reviews.length, 2);
+  assert.equal(reviews[0]!.payload.passed, false);
+  assert.equal(reviews[1]!.payload.passed, true);
+  assert.equal(result.run.status, "succeeded");
+});
+
 test("executeTask streams trace events to an optional sink", async () => {
   const task = makeTask({ objective: "Observe and finish" });
   const sessionId = makeSessionId();
@@ -1532,7 +1597,8 @@ test("executeTask streams trace events to an optional sink", async () => {
 
   assert.ok(streamed.length > 0);
   assert.equal(streamed.length, result.events.length);
-  assert.equal(streamed[0]!.kind, "observation");
+  assert.equal(streamed[0]!.kind, "contract-check");
+  assert.equal(streamed[1]!.kind, "observation");
 });
 
 test("executeTask leaves browser session open when requested", async () => {

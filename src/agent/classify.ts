@@ -134,6 +134,13 @@ function latestFailedContractCheck(events: TraceEvent[]): string[] {
   return Array.isArray(missing) ? missing.map(String).filter((item) => item.length > 0) : ["Completion contract failed"];
 }
 
+function latestFailedArtifactReview(events: TraceEvent[]): string[] {
+  const latest = [...events].reverse().find((event) => event.kind === "artifact-review");
+  if (!latest || latest.payload.passed !== false) return [];
+  const problems = latest.payload.problems;
+  return Array.isArray(problems) ? problems.map(String).filter((item) => item.length > 0) : ["Artifact review failed"];
+}
+
 export interface ClassificationInput {
   mode: TaskMode;
   events: TraceEvent[];
@@ -302,6 +309,8 @@ export function classifyRun(input: ClassificationInput): RunClassification {
   const addressesObjective = !objectiveRelevant || resultAddressesObjective(finalResultText, objective!);
   const contractFailures = latestFailedContractCheck(events);
   const contractPassed = contractFailures.length === 0;
+  const artifactReviewFailures = latestFailedArtifactReview(events);
+  const artifactReviewPassed = artifactReviewFailures.length === 0;
 
   if (codeSuccessCount > 0 && codeFailCount === 0) {
     const hasAnswerArtifact = answerArtifactCount > 0 || (terminalEventHasExtractedAnswer && !terminalIsNavOnly);
@@ -315,6 +324,13 @@ export function classifyRun(input: ClassificationInput): RunClassification {
           kind: "partial-success",
           confidence: 0.55,
           notes: ["Completion contract failed", ...contractFailures.slice(0, 3)],
+        };
+      }
+      if (!artifactReviewPassed) {
+        return {
+          kind: "partial-success",
+          confidence: 0.55,
+          notes: ["Artifact review failed", ...artifactReviewFailures.slice(0, 3)],
         };
       }
       if (addressesObjective) {
@@ -363,6 +379,17 @@ export function classifyRun(input: ClassificationInput): RunClassification {
           `Recovered after ${codeFailCount} failed code execution${codeFailCount === 1 ? "" : "s"}`,
           "Completion contract failed",
           ...contractFailures.slice(0, 3),
+        ],
+      };
+    }
+    if (mode === "task" && hasAnswerArtifact && !artifactReviewPassed) {
+      return {
+        kind: "partial-success",
+        confidence: 0.55,
+        notes: [
+          `Recovered after ${codeFailCount} failed code execution${codeFailCount === 1 ? "" : "s"}`,
+          "Artifact review failed",
+          ...artifactReviewFailures.slice(0, 3),
         ],
       };
     }

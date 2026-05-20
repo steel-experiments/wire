@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -8,6 +8,7 @@ import { createId, nowIsoUtc } from "../shared/ids.js";
 import { saveTask } from "../storage/tasks.js";
 import { saveRun } from "../storage/runs.js";
 import { saveTraceEvent } from "../storage/events.js";
+import { saveArtifact } from "../storage/artifacts.js";
 import { main } from "./main.js";
 import { parseArgs } from "./args.js";
 
@@ -222,6 +223,83 @@ test("main result falls back to finish summary when task output is missing", asy
 
   assert.deepEqual(lines, ["Completed search for San Francisco and New York"]);
   assert.deepEqual(errors, []);
+});
+
+test("main export writes scored trajectory JSONL", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wire-cli-"));
+  const out = join(root, "exports", "traces.jsonl");
+  const previousRoot = process.env.WIRE_ROOT;
+  const previousExitCode = process.exitCode;
+  process.env.WIRE_ROOT = root;
+
+  const task = {
+    id: createId("task"),
+    title: "Export task",
+    mode: "task" as const,
+    objective: "Open example.com and save markdown",
+    constraints: [],
+    successCriteria: ["Saved markdown"],
+    createdAt: nowIsoUtc(),
+  };
+
+  const run = {
+    id: createId("run"),
+    taskId: task.id,
+    status: "succeeded" as const,
+    startedAt: nowIsoUtc(),
+    finishedAt: nowIsoUtc(),
+    result: "Example markdown",
+    classification: { kind: "task-complete" as const, confidence: 1 },
+  };
+
+  const lines: string[] = [];
+  const originalLog = console.log;
+  console.log = (value?: unknown) => {
+    lines.push(String(value ?? ""));
+  };
+
+  try {
+    await saveTask(root, task);
+    await saveRun(root, run);
+    await saveTraceEvent(root, {
+      id: createId("event"),
+      runId: run.id,
+      ts: nowIsoUtc(),
+      kind: "observation",
+      payload: { url: "https://example.com", title: "Example Domain" },
+    });
+    await saveTraceEvent(root, {
+      id: createId("event"),
+      runId: run.id,
+      ts: nowIsoUtc(),
+      kind: "code-exec",
+      payload: { code: "return document.title" },
+    });
+    await saveArtifact(root, {
+      id: createId("artifact"),
+      runId: run.id,
+      kind: "markdown",
+      path: "example.md",
+      mimeType: "text/markdown",
+      createdAt: nowIsoUtc(),
+    });
+
+    await main(["node", "wire", "export", "--run-id", run.id, "--format", "trajectory", "--out", out]);
+  } finally {
+    console.log = originalLog;
+    process.exitCode = previousExitCode;
+    if (previousRoot === undefined) {
+      delete process.env.WIRE_ROOT;
+    } else {
+      process.env.WIRE_ROOT = previousRoot;
+    }
+  }
+
+  const exported = await readFile(out, "utf-8");
+  const row = JSON.parse(exported.trim()) as { run: { id: string; score: { total: number } } };
+  assert.equal(row.run.id, run.id);
+  assert.ok(row.run.score.total > 0);
+  assert.ok(lines.some((line) => line.includes("Exported 1 trajectory rows")));
 });
 
 test("main result falls back to persisted note artifacts for task runs", async () => {
@@ -466,4 +544,23 @@ test("parseArgs parses --json flag for result command", () => {
   assert.equal(args.json, true);
   assert.equal(args.command, "result");
   assert.equal(args.runId, "run_test123");
+});
+
+test("main rejects unknown run-id subcommand instead of running it as a task", async () => {
+  const previousExitCode = process.exitCode;
+  const errors: string[] = [];
+  const originalError = console.error;
+  console.error = (value?: unknown) => {
+    errors.push(String(value ?? ""));
+  };
+
+  try {
+    process.exitCode = undefined;
+    await main(["node", "wire", "--run-id", "run_test123", "reply"]);
+  } finally {
+    console.error = originalError;
+    process.exitCode = previousExitCode;
+  }
+
+  assert.ok(errors.some((line) => /Unknown command after --run-id/u.test(line)));
 });

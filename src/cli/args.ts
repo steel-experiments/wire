@@ -1,8 +1,9 @@
 import type { TaskMode } from "../shared/types.js";
 import type { LlmProvider } from "./config.js";
+import type { TrajectoryExportFormat } from "../eval/trajectories.js";
 
 export interface CliArgs {
-  command: "run" | "review" | "result" | "list" | "approve" | "bench" | "replay";
+  command: "run" | "review" | "result" | "list" | "approve" | "bench" | "replay" | "export";
   taskFile?: string;
   objective?: string;
   mode?: TaskMode;
@@ -19,6 +20,10 @@ export interface CliArgs {
   region?: string;
   userAgent?: string;
   benchmarksFile?: string;
+  exportFormat?: TrajectoryExportFormat;
+  outFile?: string;
+  minScore?: number;
+  minPreferenceDelta?: number;
   json?: boolean;
   yes?: boolean;
   strict?: boolean;
@@ -30,7 +35,7 @@ export interface CliArgs {
   version?: boolean;
 }
 
-const VALID_COMMANDS = new Set(["run", "review", "result", "list", "approve", "bench", "replay"]);
+const VALID_COMMANDS = new Set(["run", "review", "result", "list", "approve", "bench", "replay", "export"]);
 
 export function parseArgs(argv: string[]): CliArgs {
   const args = argv.slice(2); // drop node and script path
@@ -206,6 +211,52 @@ export function parseArgs(argv: string[]): CliArgs {
       continue;
     }
 
+    if (arg === "--format") {
+      i++;
+      const val = args[i];
+      if (val === "trajectory" || val === "sft" || val === "rewards" || val === "preferences") {
+        result.exportFormat = val;
+      }
+      i++;
+      continue;
+    }
+
+    if (arg === "--out") {
+      i++;
+      const val = args[i];
+      if (val !== undefined) {
+        result.outFile = val;
+      }
+      i++;
+      continue;
+    }
+
+    if (arg === "--min-score") {
+      i++;
+      const val = args[i];
+      if (val !== undefined) {
+        const n = Number(val);
+        if (Number.isFinite(n)) {
+          result.minScore = Math.max(0, Math.min(1, n));
+        }
+      }
+      i++;
+      continue;
+    }
+
+    if (arg === "--min-delta") {
+      i++;
+      const val = args[i];
+      if (val !== undefined) {
+        const n = Number(val);
+        if (Number.isFinite(n)) {
+          result.minPreferenceDelta = Math.max(0, Math.min(1, n));
+        }
+      }
+      i++;
+      continue;
+    }
+
     if (arg === "--json") {
       result.json = true;
       i++;
@@ -286,6 +337,7 @@ export function formatHelp(): string {
     "  approve   Approve pending actions",
     "  replay    Replay a run and show timeline",
     "  bench     Run benchmark suite",
+    "  export    Export scored trace trajectories for eval/training",
     "",
     "Run options:",
     "  <objective>              Shorthand: first non-flag, non-command argument",
@@ -323,6 +375,14 @@ export function formatHelp(): string {
     "  --benchmarks <path>      Benchmark file (default: benchmarks/default.json)",
     "  --provider <provider>    LLM provider for agent and judge",
     "  --model <model-id>       LLM model for agent and judge",
+    "",
+    "Export options:",
+    "  --format <format>        trajectory | sft | rewards | preferences",
+    "  --out <path>             Write JSONL rows to a file instead of stdout",
+    "  --run-id <id>            Export one run",
+    "  --task-id <id>           Export runs for one task",
+    "  --min-score <n>          Minimum score for SFT rows (0..1)",
+    "  --min-delta <n>          Minimum score gap for preference pairs (0..1)",
     "",
     "General:",
     "  --json                   Output machine-readable JSON",
