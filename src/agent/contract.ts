@@ -97,7 +97,8 @@ function inferMinItems(text: string): number | undefined {
 function inferWinTargetNumbers(text: string): number[] {
   const values: number[] = [];
   const patterns = [
-    /\b(?:play|beat|solve|win)\s+(?:the\s+)?(\d{2,6})(?:\s+(?:game|puzzle))?/giu,
+    /\b(?:play|beat|solve)\s+(?:the\s+)?(\d{2,6})(?:\s+(?:game|puzzle))?\b/giu,
+    /\bwin\s+(?:the\s+)?(\d{2,6})\s+(?:game|puzzle)\b/giu,
     /\b(\d{2,6})\s+(?:game|puzzle)\b[^\n.;:,]*\bwin\b/giu,
   ];
   for (const pattern of patterns) {
