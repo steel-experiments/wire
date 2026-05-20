@@ -45,12 +45,26 @@ function hostnameMatches(pattern: string, hostname: string): boolean {
   return hostname === p || hostname === `www.${p}`;
 }
 
+const GENERIC_HOSTNAME_PARTS = new Set([
+  "app",
+  "co",
+  "com",
+  "dev",
+  "edu",
+  "gov",
+  "io",
+  "net",
+  "org",
+  "www",
+]);
+
 function hostnamePatternParts(pattern: string): string[] {
-  return pattern
+  const parts = pattern
     .toLowerCase()
     .replace(/^\*\./u, "")
     .split(".")
-    .filter((part) => part.length >= 3 && part !== "www" && part !== "com");
+    .filter((part) => part.length >= 3 && !GENERIC_HOSTNAME_PARTS.has(part));
+  return [...new Set(parts)];
 }
 
 // Tag matching
@@ -182,7 +196,7 @@ export function scoreSkills<T extends SkillMetadata>(
 
       const hostnamePartOverlap = (skill.hostnamePatterns ?? [])
         .flatMap(hostnamePatternParts)
-        .filter((part) => tags.has(part)).length;
+        .filter((part, index, parts) => parts.indexOf(part) === index && tags.has(part)).length;
       if (hostnamePartOverlap > 0) {
         score += hostnamePartOverlap * 6;
         hasMatchSignal = true;

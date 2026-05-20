@@ -47,6 +47,16 @@ test("createTaskContract infers domains and markdown table output", () => {
   assert.match(contractToPrompt(contract), /Must visit: vercel\.com, netlify\.com, railway\.app/u);
 });
 
+test("createTaskContract does not treat filenames as domains", () => {
+  const contract = createTaskContract(makeTask({
+    objective: "Save data to output.json from package.json and summarize vue.js notes in markdown.",
+  }));
+
+  assert.deepEqual(contract.mustVisit, []);
+  assert.deepEqual(contract.mustMention, []);
+  assert.equal(contract.mustProduce?.format, "markdown");
+});
+
 test("validateTaskContract rejects placeholder multi-site extraction artifacts", () => {
   const contract = createTaskContract(makeTask({
     objective: "Open the pricing pages of vercel.com, netlify.com, and railway.app. Extract everything and save as comparison table in md format.",
@@ -111,6 +121,14 @@ test("createTaskContract requires 2048 evidence for win objective", () => {
   assert.deepEqual(contract.mustReach, [{ kind: "contains-number", value: 2048 }]);
   assert.equal(validateTaskContract(contract, [], "max tile is 1024").passed, false);
   assert.equal(validateTaskContract(contract, [], "board: [2,4,1024,2048]").passed, true);
+});
+
+test("createTaskContract does not require unrelated numbers for generic win objectives", () => {
+  const contract = createTaskContract(makeTask({
+    objective: "Win the 100m sprint by 2024 under 5000 budget",
+  }));
+
+  assert.deepEqual(contract.mustReach, []);
 });
 
 test("classifyRun downgrades completion when contract check failed", () => {

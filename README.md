@@ -147,3 +147,11 @@ src/
 | `pnpm check` | typecheck + test |
 
 Node.js 22+, pnpm, strict TypeScript, ESM only. One dependency: `zod` (boundary validation only). Source capped at 12,000 lines.
+
+## Documentation
+
+```bash
+npx docsify-cli serve docs
+```
+
+Full docs at [`docs/`](docs/README.md) — architecture, domain objects, agent runtime, policy engine, skills system, CLI reference, and more.

@@ -9,6 +9,7 @@ import {
   toRewardExamples,
   toSftExamples,
   toTraceTrajectory,
+  type TraceTrajectory,
 } from "./trajectories.js";
 
 function makeTask(): Task {
@@ -85,4 +86,130 @@ test("exportRows creates preference pairs across same-task runs", () => {
   assert.ok(pair);
   const rows = exportRows([good, bad], "preferences", { minPreferenceDelta: 0.1 });
   assert.equal(rows.length, 1);
+});
+
+test("format converters preserve fixture output shapes", () => {
+  const score = {
+    total: 0.92,
+    components: {
+      classification: 1,
+      contract: 1,
+      evidence: 0.85,
+      efficiency: 0.9,
+      policy: 1,
+    },
+    notes: [],
+    contract: {
+      passed: true,
+      missing: [],
+      satisfied: ["Visited example.com"],
+      totalChecks: 1,
+    },
+  };
+  const trajectory: TraceTrajectory = {
+    version: 1,
+    task: {
+      id: "task_export" as Task["id"],
+      mode: "task",
+      objective: "Open example.com and extract title",
+      constraints: ["Use the active tab"],
+      successCriteria: ["Return the page title"],
+    },
+    run: {
+      id: "run_good" as Run["id"],
+      status: "succeeded",
+      classification: "task-complete",
+      score,
+    },
+    trajectory: [
+      {
+        kind: "observation",
+        ts: "2026-05-20T10:00:00.000Z",
+        payload: { url: "https://example.com", title: "Example Domain" },
+      },
+      {
+        kind: "code-exec",
+        ts: "2026-05-20T10:00:01.000Z",
+        payload: { code: "return document.title;" },
+      },
+      {
+        kind: "code-result",
+        ts: "2026-05-20T10:00:02.000Z",
+        payload: { ok: true, stdout: "Example Domain", durationMs: 4 },
+      },
+    ],
+    artifacts: [],
+  };
+  const prompt = [
+    "Objective: Open example.com and extract title",
+    "Constraints: Use the active tab",
+    "Success criteria: Return the page title",
+    "Recent trace:",
+    "observation: https://example.com title=Example Domain",
+  ].join("\n");
+
+  assert.deepEqual(toSftExamples(trajectory), [{
+    messages: [
+      {
+        role: "system",
+        content: "You are Wire, a zero-weight browser agent. Act through concise, inspectable browser code. Preserve evidence and respect explicit policy boundaries.",
+      },
+      { role: "user", content: prompt },
+      { role: "assistant", content: "return document.title;" },
+    ],
+    metadata: {
+      taskId: "task_export",
+      runId: "run_good",
+      score: 0.92,
+      classification: "task-complete",
+      eventIndex: 1,
+    },
+  }]);
+
+  assert.deepEqual(toRewardExamples(trajectory), [{
+    prompt,
+    completion: "return document.title;",
+    reward: 0.92,
+    components: score.components,
+    metadata: {
+      taskId: "task_export",
+      runId: "run_good",
+      classification: "task-complete",
+      eventIndex: 1,
+    },
+  }]);
+
+  const rejected: TraceTrajectory = {
+    ...trajectory,
+    run: {
+      ...trajectory.run,
+      id: "run_bad" as Run["id"],
+      classification: "ambiguous",
+      score: { ...score, total: 0.3 },
+    },
+    trajectory: [
+      {
+        kind: "thought-summary",
+        ts: "2026-05-20T10:00:01.000Z",
+        payload: { text: "Could not finish" },
+      },
+    ],
+  };
+
+  assert.deepEqual(toPreferencePair(trajectory, rejected, 0.2), {
+    prompt: [
+      "Objective: Open example.com and extract title",
+      "Constraints: Use the active tab",
+      "Success criteria: Return the page title",
+    ].join("\n"),
+    chosen: "return document.title;",
+    rejected: "{\"text\":\"Could not finish\"}",
+    chosenScore: 0.92,
+    rejectedScore: 0.3,
+    metadata: {
+      taskId: "task_export",
+      chosenRunId: "run_good",
+      rejectedRunId: "run_bad",
+    },
+  });
 });

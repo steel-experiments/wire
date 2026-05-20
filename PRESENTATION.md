@@ -239,6 +239,26 @@ return {
 
 ---
 
+## Completion contracts
+
+A run isn't done because the agent says so — it's done when the trace satisfies the contract. Inferred from the task objective + success criteria.
+
+```ts
+TaskContract {
+  mustVisit:      string[]    // domains / URLs
+  mustMention:    string[]    // entities, keywords
+  mustProduce:    { format, table, minItems }
+  mustReach:      { contains-number | min-count }[]
+  mustNotContain: string[]
+}
+```
+
+Validation emits `contract-check` events → `{ passed, missing[], satisfied[], totalChecks }`. Drives the `contract` score dimension.
+
+Placeholder phrases (`"see open"`, `"included in prior"`) flagged as fake completion — agents can't talk past the validator.
+
+---
+
 ## Decomposed scoring + training export
 
 Beyond the 7 categorical kinds, every run gets a decomposed score:

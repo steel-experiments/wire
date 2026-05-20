@@ -116,13 +116,16 @@ When any guard fires, the loop breaks with a `thought-summary` event explaining 
 
 ## Anti-bot recovery
 
-When an observation detects a captcha or anti-bot challenge:
-1. Check if the `reconfigure` action is registered (Steel provider)
-2. Create a new session with `useProxy: true` and `solveCaptcha: true`
-3. Execute the reconfiguration
-4. Continue the loop with the new session
+Anti-bot recovery is skill-guided rather than a generic captcha detector. On each loop iteration, the runtime checks the latest observation URL against loaded skills. If a matched skill's `Known Traps`, `Traps`, `Workflow`, or `Facts` section mentions a recoverable barrier such as captcha, anti-bot, verification, interstitial, or challenge, Wire can attempt recovery.
 
-This is automatic — the agent does not request it explicitly.
+When those conditions match:
+
+1. Check if the `reconfigure` action is registered (Steel provider)
+2. Execute `reconfigure` with `useProxy: true` and `solveCaptcha: true`
+3. Sync skills for the new session state
+4. Continue the loop
+
+The runtime attempts this at most once per run. Without a matching loaded skill, Wire records the barrier through normal observations, policy, and classification paths instead of automatically reconfiguring.
 
 ## User message handling
 

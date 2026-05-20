@@ -34,6 +34,27 @@ const PLACEHOLDER_PHRASES = [
 ];
 
 const DOMAIN_PATTERN = /\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b/giu;
+const FILE_EXTENSION_DOMAIN_SUFFIXES = new Set([
+  "csv",
+  "css",
+  "gif",
+  "html",
+  "jpeg",
+  "jpg",
+  "js",
+  "json",
+  "md",
+  "pdf",
+  "png",
+  "svg",
+  "ts",
+  "txt",
+  "webp",
+  "xml",
+  "yaml",
+  "yml",
+  "zip",
+]);
 
 function unique(values: string[]): string[] {
   return [...new Set(values.filter((value) => value.trim().length > 0))];
@@ -41,6 +62,12 @@ function unique(values: string[]): string[] {
 
 function normalizeDomain(domain: string): string {
   return domain.toLowerCase().replace(/^www\./u, "");
+}
+
+function isLikelyVisitDomain(domain: string): boolean {
+  const parts = normalizeDomain(domain).split(".");
+  const suffix = parts.at(-1);
+  return suffix !== undefined && !FILE_EXTENSION_DOMAIN_SUFFIXES.has(suffix);
 }
 
 function labelFromDomain(domain: string): string {
@@ -67,10 +94,25 @@ function inferMinItems(text: string): number | undefined {
   return Number.isFinite(count) && count > 0 ? count : undefined;
 }
 
+function inferWinTargetNumbers(text: string): number[] {
+  const values: number[] = [];
+  const patterns = [
+    /\b(?:play|beat|solve|win)\s+(?:the\s+)?(\d{2,6})(?:\s+(?:game|puzzle))?/giu,
+    /\b(\d{2,6})\s+(?:game|puzzle)\b[^\n.;:,]*\bwin\b/giu,
+  ];
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const value = Number(match[1]);
+      if (Number.isFinite(value)) values.push(value);
+    }
+  }
+  return [...new Set(values)];
+}
+
 export function createTaskContract(task: Task): TaskContract {
   const text = objectiveText(task);
   const lower = text.toLowerCase();
-  const mustVisit = unique((text.match(DOMAIN_PATTERN) ?? []).map(normalizeDomain));
+  const mustVisit = unique((text.match(DOMAIN_PATTERN) ?? []).filter(isLikelyVisitDomain).map(normalizeDomain));
   const mustMention = unique(mustVisit.map(labelFromDomain));
   const format = inferFormat(text);
   const wantsArtifact = /\b(?:save|write|export|download|artifact|file|md|markdown|json|csv|txt|text)\b/iu.test(text);
@@ -79,12 +121,8 @@ export function createTaskContract(task: Task): TaskContract {
   const mustReach: TaskContract["mustReach"] = [];
 
   if (/\bwin\b/iu.test(text)) {
-    const numbers = text.match(/\b\d{2,6}\b/gu) ?? [];
-    for (const raw of numbers) {
-      const value = Number(raw);
-      if (Number.isFinite(value)) {
-        mustReach.push({ kind: "contains-number", value });
-      }
+    for (const value of inferWinTargetNumbers(text)) {
+      mustReach.push({ kind: "contains-number", value });
     }
   }
 

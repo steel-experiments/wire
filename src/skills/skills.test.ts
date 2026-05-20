@@ -397,6 +397,26 @@ test("scoreSkills prefers precise hostname skills over tag-only skills", () => {
   assert.equal(scored[0]!.skill.id, "skill_precise");
 });
 
+test("scoreSkills ignores generic hostname parts when matching task tags", () => {
+  const appSkill = makeSkillMeta({
+    id: "skill_generic-app" as SkillMetadata["id"],
+    hostnamePatterns: ["*.example.app"],
+    tags: ["mobile"],
+  });
+  const specificSkill = makeSkillMeta({
+    id: "skill_example" as SkillMetadata["id"],
+    hostnamePatterns: ["*.example.app", "example.com"],
+    tags: ["mobile"],
+  });
+
+  const appOnly = scoreSkills([appSkill], { tags: ["app"] });
+  const specific = scoreSkills([specificSkill], { tags: ["example"] });
+
+  assert.deepEqual(appOnly, []);
+  assert.equal(specific.length, 1);
+  assert.deepEqual(specific[0]!.reasons, ["hostname-tag-overlap:1"]);
+});
+
 // ---------------------------------------------------------------------------
 // loader.ts — loadSkillsFromDir
 // ---------------------------------------------------------------------------
