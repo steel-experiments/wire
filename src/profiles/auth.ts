@@ -15,6 +15,10 @@ export const AUTH_WALL_PATTERNS: string[] = [
   "/signin",
   "/auth",
   "/oauth",
+  "/sorry/index",
+  "/captcha",
+  "/recaptcha",
+  "/cdn-cgi/challenge",
   "accounts.google.com",
   "auth0.com",
   "login.",
@@ -31,6 +35,11 @@ const TITLE_KEYWORDS: ReadonlySet<string> = new Set([
   "sign up",
   "authenticate",
   "authentication required",
+  "captcha",
+  "recaptcha",
+  "verify you are human",
+  "unusual traffic",
+  "checking your browser",
 ]);
 
 const FORM_KEYWORDS: ReadonlySet<string> = new Set([

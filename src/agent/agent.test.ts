@@ -1531,7 +1531,11 @@ test("executeTask blocks finish when artifact review finds problems", async () =
   });
   const llmProvider: LLMProvider = {
     model: "reviewer",
-    async chat() {
+    async chat(messages) {
+      const prompt = messages.map((message) => message.content).join("\n");
+      if (!prompt.includes("Review the final artifact against the objective")) {
+        return { model: "reviewer", content: "{}" };
+      }
       reviewCount++;
       return {
         model: "reviewer",

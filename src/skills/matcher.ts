@@ -45,6 +45,14 @@ function hostnameMatches(pattern: string, hostname: string): boolean {
   return hostname === p;
 }
 
+function hostnamePatternParts(pattern: string): string[] {
+  return pattern
+    .toLowerCase()
+    .replace(/^\*\./u, "")
+    .split(".")
+    .filter((part) => part.length >= 3 && part !== "www" && part !== "com");
+}
+
 // Tag matching
 
 /**
@@ -170,6 +178,15 @@ export function scoreSkills<T extends SkillMetadata>(
         score += overlap * 6;
         hasMatchSignal = true;
         reasons.push(`tag-overlap:${overlap}`);
+      }
+
+      const hostnamePartOverlap = (skill.hostnamePatterns ?? [])
+        .flatMap(hostnamePatternParts)
+        .filter((part) => tags.has(part)).length;
+      if (hostnamePartOverlap > 0) {
+        score += hostnamePartOverlap * 6;
+        hasMatchSignal = true;
+        reasons.push(`hostname-tag-overlap:${hostnamePartOverlap}`);
       }
     }
 

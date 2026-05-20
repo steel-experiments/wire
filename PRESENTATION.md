@@ -98,12 +98,10 @@ Implementation: `src/agent/loop.ts:225` — `executeStep()`. 856 LOC, one switch
 
 ## The action set
 
+Closed 5-verb contract. Most stacks ship 30–50 growing tools.
+
 ```ts
-type ProposedAction = {
-  kind: 'observe' | 'edit-helper' | 'exec' | 'raw' | 'finish'
-  summary: string
-  payload?: Record<string, unknown>
-}
+kind: 'observe' | 'edit-helper' | 'exec' | 'raw' | 'finish'
 ```
 
 | Verb | Purpose |
@@ -113,8 +111,6 @@ type ProposedAction = {
 | `exec` | Run agent-written JS |
 | `raw` | Direct CDP escape hatch |
 | `finish` | Terminate, requires code evidence |
-
-Typical agent stacks: 30–50 tools, growing. Wire's verb set is the contract.
 
 ---
 
@@ -225,12 +221,6 @@ return {
 
 `ArtifactKind` is an open union — runtime persists, model picks the format.
 
-```bash
-wire review --run-id run_abc123     # classification + artifact paths
-wire replay --run-id run_abc123     # step-by-step timeline
-wire compare run_a run_b            # diff two runs
-```
-
 ---
 
 ## Run classification — 7 outcome kinds
@@ -263,18 +253,14 @@ RunScoreComponents {
 }
 ```
 
-Traces become training data via `wire export`:
+Traces become training data via `wire export` in four formats:
+`trajectory` · `sft` · `rewards` · `preferences`
 
 ```bash
-wire export --format trajectory --out data/traces.jsonl
-wire export --format sft        --min-score 0.8 --out data/sft.jsonl
-wire export --format rewards    --out data/rewards.jsonl
-wire export --format preferences --min-delta 0.2 --out data/prefs.jsonl
+wire export --format sft --min-score 0.8 --out data/sft.jsonl
 ```
 
-**Wire does not train models.** It produces scored, redacted trajectories that SFT / reward / DPO pipelines consume. Score is a *diagnostic signal first* — verify against human review before using as reward.
-
-See `TRAINING_DATA.md`.
+**Wire does not train models.** It produces scored, redacted trajectories for SFT / reward / DPO pipelines. Score is diagnostic — verify before using as reward.
 
 ---
 
@@ -419,7 +405,7 @@ Make lessons durable.
 
 ---
 
-## End to end — a real example
+## End to end — run and inspect
 
 ```bash
 # 1. Run
@@ -436,7 +422,13 @@ cat .wire/artifacts/artifact_*-vercel-pricing-comparison.md
 
 # 4. Replay the step-by-step trace
 wire replay --run-id run_<id>
+```
 
+---
+
+## End to end — learn, bench, export
+
+```bash
 # 5. Learn — what reusable knowledge did Wire propose?
 ls skills/.proposals/               # vercel_com-skill_*, ...
 cat skills/.proposals/vercel_com-skill_*.md

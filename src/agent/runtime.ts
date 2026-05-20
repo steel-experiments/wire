@@ -42,8 +42,7 @@ import { observeBrowser, toObservationPayload } from "../browser/observe.js";
 import { detectAuthWall } from "../profiles/auth.js";
 import { llmProposeSkill, generateSkillProposal, manageSkillPromotion } from "../skills/promote.js";
 import { findMatchingSkillDocMatches, loadSkillDocsFromDir } from "../skills/loader.js";
-import { parseActionFromLlm, registerActionKind } from "./llm-parse.js";
-import { extractFirstJsonObject } from "./llm-parse.js";
+import { extractFirstJsonObject, parseActionFromLlm, registerActionKind } from "./llm-parse.js";
 import {
   latestObservation,
   latestError,
@@ -765,6 +764,16 @@ function taskArtifactEvents(state: LoopState): TraceEvent[] {
   );
 }
 
+function hasUnrecordedLatestTaskResult(state: LoopState): boolean {
+  if (!hasExtractedTaskResult(state)) return false;
+  const latestResultIndex = state.events.findLastIndex((event) => event.kind === "code-result");
+  const latestArtifactIndex = state.events.findLastIndex((event) =>
+    event.kind === "artifact" &&
+    event.payload.source !== "task-summary"
+  );
+  return latestResultIndex > latestArtifactIndex;
+}
+
 function latestReviewedArtifactCount(state: LoopState): number {
   const review = [...state.events].reverse().find((event) =>
     event.kind === "artifact-review" &&
@@ -1138,7 +1147,10 @@ async function runMainLoop(
         // Agent extracted a navigation-only result but no real content — force extraction
         action = buildVerificationAction();
       } else if (state.task.mode === "task") {
-        if (hasExtractedTaskResult(state) && !hasRecordedTaskArtifact(state)) {
+        if (
+          hasExtractedTaskResult(state) &&
+          (!hasRecordedTaskArtifact(state) || hasUnrecordedLatestTaskResult(state))
+        ) {
           appendExtractedResultArtifact(state);
         } else if (!hasRecordedTaskArtifact(state)) {
           appendTaskNoteArtifact(state, action.summary);
