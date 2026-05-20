@@ -105,6 +105,31 @@ function isSafeCdpMethod(method: string | undefined): boolean {
   return SAFE_CDP_METHOD_PREFIXES.includes(method);
 }
 
+function rawCdpRequiresApproval(action: PolicyAction): boolean {
+  if (action.kind !== "raw") return false;
+
+  const methods: string[] = [];
+  if (typeof action.payload?.method === "string") {
+    methods.push(action.payload.method);
+  }
+
+  const commands = action.payload?.commands;
+  if (Array.isArray(commands)) {
+    for (const command of commands) {
+      if (!command || typeof command !== "object" || Array.isArray(command)) {
+        return true;
+      }
+      const method = (command as Record<string, unknown>)["method"];
+      if (typeof method !== "string") {
+        return true;
+      }
+      methods.push(method);
+    }
+  }
+
+  return methods.length === 0 || methods.some((method) => !isSafeCdpMethod(method));
+}
+
 // Baseline rules
 
 export const BASELINE_RULES: PolicyRule[] = [
@@ -154,7 +179,7 @@ export const BASELINE_RULES: PolicyRule[] = [
     "baseline-raw-cdp",
     "Raw CDP access requires approval, except safe input methods.",
     "require-approval",
-    (a) => a.kind === "raw" && !isSafeCdpMethod(a.payload?.method as string | undefined),
+    rawCdpRequiresApproval,
   ),
   makeRule(
     "baseline-reconfigure-custom-proxy",

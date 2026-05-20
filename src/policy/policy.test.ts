@@ -125,6 +125,39 @@ test("evaluateRules requires approval for privileged profile usage", () => {
   assert.ok(matchedRules.includes("baseline-privileged-profile"));
 });
 
+test("evaluateRules allows raw CDP batches with only safe input methods", () => {
+  const action = makeAction({
+    kind: "raw",
+    payload: {
+      commands: [
+        { method: "Input.dispatchMouseEvent", params: { type: "mousePressed", x: 10, y: 20 } },
+        { method: "Input.insertText", params: { text: "hello" } },
+      ],
+    },
+  });
+
+  const { result } = evaluateRules(action);
+
+  assert.equal(result, "allow");
+});
+
+test("evaluateRules requires approval when raw CDP batch mixes safe and unsafe methods", () => {
+  const action = makeAction({
+    kind: "raw",
+    payload: {
+      method: "Input.insertText",
+      commands: [
+        { method: "Page.navigate", params: { url: "https://example.com" } },
+      ],
+    },
+  });
+
+  const { result, matchedRules } = evaluateRules(action);
+
+  assert.equal(result, "require-approval");
+  assert.ok(matchedRules.includes("baseline-raw-cdp"));
+});
+
 test("evaluateRules: deny wins over require-approval", () => {
   // If an action matches both a deny rule and a require-approval rule,
   // deny should win.

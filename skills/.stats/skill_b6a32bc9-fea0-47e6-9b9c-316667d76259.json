@@ -1,7 +1,20 @@
 {
-  "loadedCount": 2,
-  "successCount": 0,
-  "totalSteps": 11,
-  "totalTokens": 39961,
-  "lastLoadedAt": "2026-05-20T14:55:36.725Z"
+  "loadedCount": 3,
+  "successCount": 1,
+  "outcomeCounts": {
+    "task-complete": 1
+  },
+  "totalSteps": 13,
+  "totalTokens": 51567,
+  "lastLoadedAt": "2026-05-20T16:31:35.211Z",
+  "recentRuns": [
+    {
+      "runId": "run_d44b08a0-a921-4406-9416-24bea92bf192",
+      "loadedAt": "2026-05-20T16:31:35.211Z",
+      "outcome": "task-complete",
+      "stepCount": 2,
+      "totalTokens": 11606,
+      "loadedWithSkillIds": []
+    }
+  ]
 }

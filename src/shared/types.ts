@@ -50,7 +50,8 @@ export type ArtifactKind =
   | "json-output"
   | "plot"
   | "table"
-  | "note";
+  | "note"
+  | (string & {});
 export type ComparisonDimension = "latency" | "path" | "profile" | "artifacts" | "outcome";
 export type BrowserExecTarget = "active-tab" | "all-tabs" | { tabId: string };
 export type ActionKind =

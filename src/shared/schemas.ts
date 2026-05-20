@@ -5,6 +5,7 @@ import type {
   ActionId,
   ApprovalId,
   ArtifactId,
+  ArtifactKind,
   BrowserExecTarget,
   ComparisonId,
   EntityId,
@@ -116,24 +117,13 @@ export const traceEventKindSchema = z.enum([
   "skill-load",
   "skill-empty",
   "skill-proposal",
+  "llm-usage",
+  "user-message",
   "error",
 ]);
 export const approvalStatusSchema = z.enum(["pending", "approved", "rejected", "expired"]);
 export const policyDecisionResultSchema = z.enum(["allow", "deny", "require-approval"]);
-export const artifactKindSchema = z.enum([
-  "screenshot",
-  "html",
-  "markdown",
-  "pdf",
-  "download",
-  "helper-diff",
-  "skill-proposal",
-  "json-output",
-  "plot",
-  "table",
-  "note",
-  "comparison",
-]);
+export const artifactKindSchema = z.string().min(1) as z.ZodType<ArtifactKind>;
 export const comparisonDimensionSchema = z.enum([
   "latency",
   "path",
@@ -206,6 +196,7 @@ export const browserSessionSchema = z
     provider: providerKindSchema,
     profileId: profileIdSchema.optional(),
     liveUrl: z.url().optional(),
+    debugUrl: z.url().optional(),
     wsUrl: z.url().optional(),
     createdAt: isoUtcTimestampSchema,
     status: sessionStatusSchema,

@@ -876,8 +876,25 @@ export type ArtifactKind =
   | 'json-output'
   | 'plot'
   | 'table'
-  | 'note';
+  | 'note'
+  | (string & {});
 ```
+
+Agents may return explicit text file artifacts from browser exec as:
+
+```ts
+{
+  artifacts: [{
+    filename: 'comparison.md',
+    kind: 'markdown',
+    mimeType: 'text/markdown',
+    content: '...complete file content...'
+  }],
+  data: {}
+}
+```
+
+Core persists the envelope generically; the model chooses format details for Markdown, CSV, JSON, TXT, HTML, code files, and similar text artifacts.
 
 ### 15.3 Artifact metadata
 
@@ -1389,4 +1406,3 @@ This spec is informed by:
 - Browser Harness’s emphasis on code-as-interface, raw escape hatches, and durable site knowledge.
 - Remote cloud browser infrastructure patterns such as persistent sessions, profiles, replay, and managed browser lifecycle.
 - The view that AI research and agentic work increasingly become about **experiment throughput**, with the human supervising which questions are worth spending real-world budget on.
-

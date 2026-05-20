@@ -19,6 +19,7 @@ export interface SteelProviderConfig {
   baseUrl?: string;
   webSocketFactory?: (url: string) => WebSocketLike;
   cdpCommandTimeoutMs?: number;
+  createSessionMaxRetries?: number;
   onRetry?: (event: SteelRetryEvent) => void | Promise<void>;
   logger?: SteelLogger;
 }
@@ -268,6 +269,7 @@ export class SteelProvider implements BrowserProvider {
   private readonly baseUrl: string;
   private readonly webSocketFactory: (url: string) => WebSocketLike;
   private readonly cdpCommandTimeoutMs: number;
+  private readonly createSessionMaxRetries: number;
   private readonly onRetry: ((event: SteelRetryEvent) => void | Promise<void>) | undefined;
   private readonly logger: SteelLogger | undefined;
 
@@ -276,13 +278,14 @@ export class SteelProvider implements BrowserProvider {
     this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
     this.webSocketFactory = config.webSocketFactory ?? ((url) => new WebSocket(url) as unknown as WebSocketLike);
     this.cdpCommandTimeoutMs = config.cdpCommandTimeoutMs ?? DEFAULT_CDP_COMMAND_TIMEOUT_MS;
+    this.createSessionMaxRetries = config.createSessionMaxRetries ?? 0;
     this.onRetry = config.onRetry;
     this.logger = config.logger;
   }
 
   async createSession(input: CreateSessionInput = {}): Promise<BrowserSession> {
     const body = buildCreateSessionBody(input);
-    const maxRetries = 3;
+    const maxRetries = Math.max(0, Math.floor(this.createSessionMaxRetries));
     let lastError: unknown;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {

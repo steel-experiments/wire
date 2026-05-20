@@ -1,4 +1,4 @@
-import type { ArtifactId, JsonObject, ProposedAction, TraceEvent } from "../shared/types.js";
+import type { ArtifactId, ArtifactKind, JsonObject, JsonValue, ProposedAction, TraceEvent } from "../shared/types.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
 import { isLikelyNavigationCode } from "../browser/exec.js";
 import type { LoopState } from "./loop.js";
@@ -237,43 +237,61 @@ export function countConsecutiveUnchanged(events: TraceEvent[]): number {
   return count;
 }
 
-export function appendExtractedResultArtifact(state: LoopState): void {
-  const result = latestCodeResult(state);
-  if (!result || result.payload.ok !== true) {
-    return;
+interface ArtifactEnvelope {
+  filename?: string;
+  kind?: string;
+  mimeType?: string;
+  content: string;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function artifactEnvelopesFromValue(value: unknown): ArtifactEnvelope[] {
+  if (!isObject(value)) {
+    return [];
   }
 
-  const artifactId = createId("artifact") as ArtifactId;
-  let kind: "json-output" | "note" = "note";
-  let mimeType = "text/plain";
-  let extension = "txt";
-  let content: string | undefined;
+  const candidates = Array.isArray(value.artifacts)
+    ? value.artifacts
+    : value.artifact !== undefined
+      ? [value.artifact]
+      : [];
 
-  if (result.payload.returnValue !== undefined) {
-    kind = "json-output";
-    mimeType = "application/json";
-    extension = "json";
-    content = JSON.stringify(result.payload.returnValue, null, 2);
-  } else if (typeof result.payload.stdout === "string" && result.payload.stdout.trim().length > 0) {
-    const stdout = result.payload.stdout.trim();
-    try {
-      const parsed = JSON.parse(stdout) as unknown;
-      if (parsed !== null && typeof parsed === "object") {
-        kind = "json-output";
-        mimeType = "application/json";
-        extension = "json";
-        content = JSON.stringify(parsed, null, 2);
-      } else {
-        content = stdout;
-      }
-    } catch {
-      content = stdout;
+  return candidates.flatMap((candidate) => {
+    if (!isObject(candidate) || typeof candidate.content !== "string" || candidate.content.length === 0) {
+      return [];
     }
-  }
 
-  if (!content) {
-    return;
-  }
+    const envelope: ArtifactEnvelope = { content: candidate.content };
+    if (typeof candidate.filename === "string") {
+      envelope.filename = candidate.filename;
+    }
+    if (typeof candidate.kind === "string") {
+      envelope.kind = candidate.kind;
+    }
+    if (typeof candidate.mimeType === "string") {
+      envelope.mimeType = candidate.mimeType;
+    }
+    return [envelope];
+  });
+}
+
+function sanitizeArtifactFilename(filename: string | undefined, fallback: string): string {
+  const base = (filename ?? fallback).split(/[\\/]/u).pop()?.trim() ?? "";
+  const cleaned = base
+    .replace(/[\u0000-\u001f\u007f]/gu, "")
+    .replace(/[^A-Za-z0-9._ -]/gu, "_")
+    .replace(/\s+/gu, " ")
+    .slice(0, 120)
+    .trim();
+  return cleaned && cleaned !== "." && cleaned !== ".." ? cleaned : fallback;
+}
+
+function appendArtifactEnvelope(state: LoopState, envelope: ArtifactEnvelope): void {
+  const artifactId = createId("artifact") as ArtifactId;
+  const filename = sanitizeArtifactFilename(envelope.filename, "artifact.txt");
 
   state.events.push({
     id: createId("event"),
@@ -282,12 +300,87 @@ export function appendExtractedResultArtifact(state: LoopState): void {
     kind: "artifact",
     payload: {
       artifactId,
-      kind,
-      mimeType,
-      path: `artifacts/${artifactId}.${extension}`,
+      filename,
+      kind: (envelope.kind ?? "download") as ArtifactKind,
+      mimeType: envelope.mimeType ?? "text/plain",
+      path: `artifacts/${artifactId}-${filename}`,
+      content: envelope.content,
+    },
+  });
+}
+
+function appendExtractedJsonArtifact(state: LoopState, value: JsonValue): void {
+  const artifactId = createId("artifact") as ArtifactId;
+
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: nowIsoUtc(),
+    kind: "artifact",
+    payload: {
+      artifactId,
+      kind: "json-output",
+      mimeType: "application/json",
+      path: `artifacts/${artifactId}-output.json`,
+      content: JSON.stringify(value, null, 2),
+    },
+  });
+}
+
+function appendExtractedNoteArtifact(state: LoopState, content: string): void {
+  const artifactId = createId("artifact") as ArtifactId;
+
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: nowIsoUtc(),
+    kind: "artifact",
+    payload: {
+      artifactId,
+      kind: "note",
+      mimeType: "text/plain",
+      path: `artifacts/${artifactId}.txt`,
       content,
     },
   });
+}
+
+export function appendExtractedResultArtifact(state: LoopState): void {
+  const result = latestCodeResult(state);
+  if (!result || result.payload.ok !== true) {
+    return;
+  }
+
+  if (result.payload.returnValue !== undefined) {
+    const envelopes = artifactEnvelopesFromValue(result.payload.returnValue);
+    if (envelopes.length > 0) {
+      envelopes.forEach((envelope) => appendArtifactEnvelope(state, envelope));
+      return;
+    }
+
+    appendExtractedJsonArtifact(state, result.payload.returnValue);
+    return;
+  }
+
+  if (typeof result.payload.stdout === "string" && result.payload.stdout.trim().length > 0) {
+    const stdout = result.payload.stdout.trim();
+    try {
+      const parsed = JSON.parse(stdout) as unknown;
+      const envelopes = artifactEnvelopesFromValue(parsed);
+      if (envelopes.length > 0) {
+        envelopes.forEach((envelope) => appendArtifactEnvelope(state, envelope));
+        return;
+      }
+
+      if (parsed !== null && typeof parsed === "object") {
+        appendExtractedJsonArtifact(state, parsed as JsonValue);
+      } else {
+        appendExtractedNoteArtifact(state, stdout);
+      }
+    } catch {
+      appendExtractedNoteArtifact(state, stdout);
+    }
+  }
 }
 
 export function appendTaskNoteArtifact(state: LoopState, summary: string): void {

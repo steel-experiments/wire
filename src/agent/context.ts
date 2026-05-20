@@ -238,6 +238,7 @@ const BASE_ACTION_GUIDANCE = [
   'For "observe", omit payload unless you need {"targetId":"..."}',
   'For "edit-helper", set payload.source to the complete JS-compatible helper module for this task. Use it only when a reusable helper would reduce repeated code in later exec steps.',
   'For "exec", set payload.code to JavaScript that runs in the browser. Code is auto-wrapped as (async () => { YOUR_CODE })(). Do NOT wrap your code in another IIFE; use top-level `return` to output results.',
+  'When the user asks to save or produce a file, return an artifact envelope from exec: `{artifacts:[{filename:"result.md",kind:"markdown",mimeType:"text/markdown",content:"..."}],data:{...}}`. Choose the filename, kind, MIME type, and complete file content yourself; this also works for CSV, JSON, TXT, HTML, JS, Python, and other text files.',
   "Each exec call defaults to a 12-second CDP timeout and payload.timeoutMs is capped at 12000. Keep scripts short; avoid sleep/poll loops. For long sequences, split across turns or return wireActions.",
   'For "raw", set payload.method to a CDP method and payload.params to its parameters. Use raw only when exec cannot reach the needed browser behavior.',
   '"exec" code can return {wireActions: [{method, params}, ...]} to send CDP commands after the code runs. Keep wireActions batches under 80 commands; send another action after reading state.',

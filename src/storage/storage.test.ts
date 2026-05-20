@@ -14,6 +14,7 @@ import type {
   Hypothesis,
   Run,
   Task,
+  TraceEvent,
 } from "../shared/types.js";
 
 import {
@@ -36,6 +37,7 @@ import {
 } from "./runs.js";
 import { listSessions, loadSession, saveSession } from "./sessions.js";
 import { listArtifacts, loadArtifact, saveArtifact } from "./artifacts.js";
+import { listTraceEvents, loadTraceEvent, saveTraceEvents } from "./events.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -86,6 +88,17 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
     kind: "screenshot",
     path: "/tmp/test.png",
     createdAt: nowIsoUtc(),
+    ...overrides,
+  };
+}
+
+function makeTraceEvent(overrides: Partial<TraceEvent> = {}): TraceEvent {
+  return {
+    id: createId("event"),
+    runId: createId("run"),
+    ts: nowIsoUtc(),
+    kind: "observation",
+    payload: { url: "https://example.com", title: "Example" },
     ...overrides,
   };
 }
@@ -524,6 +537,7 @@ test("saveSession preserves optional fields", async () => {
   const session = makeSession({
     profileId,
     liveUrl: "https://live.example.com",
+    debugUrl: "https://debug.example.com",
     wsUrl: "wss://ws.example.com",
     region: "us-west-2",
     proxyCountryCode: "US",
@@ -534,8 +548,36 @@ test("saveSession preserves optional fields", async () => {
 
   assert.equal(loaded.profileId, profileId);
   assert.equal(loaded.liveUrl, "https://live.example.com");
+  assert.equal(loaded.debugUrl, "https://debug.example.com");
   assert.equal(loaded.region, "us-west-2");
   assert.equal(loaded.proxyCountryCode, "US");
+});
+
+// ---------------------------------------------------------------------------
+// events.ts
+// ---------------------------------------------------------------------------
+
+test("saveTraceEvents + loadTraceEvent round-trips runtime-only event kinds", async () => {
+  testRoot = makeRoot();
+  const runId = createId("run");
+  const events = [
+    makeTraceEvent({
+      runId,
+      kind: "llm-usage",
+      payload: { model: "gpt-test", usage: { inputTokens: 1, outputTokens: 2 } },
+    }),
+    makeTraceEvent({
+      runId,
+      kind: "user-message",
+      payload: { message: "pause after this step" },
+    }),
+  ];
+
+  await saveTraceEvents(testRoot, events);
+
+  assert.equal((await loadTraceEvent(testRoot, events[0]!.id)).kind, "llm-usage");
+  assert.equal((await loadTraceEvent(testRoot, events[1]!.id)).kind, "user-message");
+  assert.equal((await listTraceEvents(testRoot, runId)).length, 2);
 });
 
 test("loadSession throws CorruptError for schema-invalid file", async () => {
@@ -621,6 +663,17 @@ test("saveArtifact preserves all artifact kinds", async () => {
     const loaded = await loadArtifact(testRoot, artifact.id);
     assert.equal(loaded.kind, kind);
   }
+});
+
+test("saveArtifact preserves model-supplied artifact kinds", async () => {
+  testRoot = makeRoot();
+  const artifact = makeArtifact({ kind: "python", mimeType: "text/x-python" });
+
+  await saveArtifact(testRoot, artifact);
+  const loaded = await loadArtifact(testRoot, artifact.id);
+
+  assert.equal(loaded.kind, "python");
+  assert.equal(loaded.mimeType, "text/x-python");
 });
 
 test("saveArtifact preserves optional metadata", async () => {

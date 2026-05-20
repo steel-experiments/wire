@@ -100,7 +100,7 @@ Implementation: `src/agent/loop.ts:225` — `executeStep()`. 856 LOC, one switch
 
 ```ts
 type ProposedAction = {
-  kind: 'observe' | 'exec' | 'raw' | 'edit-helper' | 'finish'
+  kind: 'observe' | 'edit-helper' | 'exec' | 'raw' | 'finish'
   summary: string
   payload?: Record<string, unknown>
 }
@@ -108,10 +108,10 @@ type ProposedAction = {
 
 | Verb | Purpose |
 |---|---|
-| `observe` | URL, title, headings, counts |
+| `observe` | URL, title, headings, counts, tabs, tab-drift warnings |
+| `edit-helper` | Rewrite task-local helper source |
 | `exec` | Run agent-written JS |
 | `raw` | Direct CDP escape hatch |
-| `edit-helper` | Rewrite task-local helper source |
 | `finish` | Terminate, requires code evidence |
 
 Typical agent stacks: 30–50 tools, growing. Wire's verb set is the contract.
@@ -278,7 +278,7 @@ Cited in `SPECS.md:31`. We borrowed minimal-core ethos + file-based skill format
 | Skills | **User-authored** | **Agent-authored + promoted** |
 | Sessions | Tree-JSONL (`/fork`, `/clone`) | `events.jsonl` + classification |
 | Policy | **None** — "run in a container" | Deterministic engine |
-| Size | ~40k LOC, 142 files, 17 deps | 12,992 LOC, 60 files, 1 dep |
+| Size | ~40k LOC, 142 files, 17 deps | ~13k LOC, 60 files, 1 dep |
 
 What pi does better: branching session UX is ahead of our `branching.ts`.
 
@@ -296,7 +296,7 @@ Cited in `SPECS.md:31`. We borrowed code-as-action + agent-authored skills.
 | Skills | Markdown, agent-authored | Same, + promotion lifecycle |
 | Policy | Prompt-level only | Deterministic engine |
 | Trace | Daemon log + screenshots | `events.jsonl` + classification |
-| Size | ~1k LOC, 6 files, 4 deps | 12,992 LOC, 60 files, 1 dep |
+| Size | ~1k LOC, 6 files, 4 deps | ~13k LOC, 60 files, 1 dep |
 | Language | Python | TypeScript |
 
 ---
@@ -369,6 +369,37 @@ Make lessons durable.
 ```
 
 `MANIFESTO.md:87`. Every PR is reviewed against this.
+
+---
+
+## End to end — a real example
+
+```bash
+# 1. Run
+wire run --objective "Open the pricing pages of vercel.com, netlify.com,
+                      and railway.app. Extract everything and save as a
+                      comparison table in markdown."
+# → run_abc123 created, Steel live URL printed, trace streams to terminal
+
+# 2. Result
+wire result --run-id run_abc123     # final markdown table on stdout
+
+# 3. Inspect
+wire review --run-id run_abc123     # classification + artifacts + skills loaded
+wire replay --run-id run_abc123     # step-by-step timeline
+
+# 4. Learn
+ls skills/.proposals/               # vercel_com-skill_*, netlify_com-skill_*, ...
+cat skills/.proposals/vercel_com-skill_*.md
+
+# 5. Lock it in as a regression
+wire bench --benchmarks benchmarks/pricing.json --json
+                                    # exits 1 on future regression
+
+# 6. Compare across changes
+diff <(jq '.' .wire/benchmarks/bench-2026-05.json) \
+     <(jq '.' .wire/benchmarks/bench-2026-06.json)
+```
 
 ---
 

@@ -33,6 +33,7 @@ import { ActionRegistry } from "./actions.js";
 import { writeSkillStats } from "../skills/stats.js";
 import {
   isNavigationOnlyResult,
+  appendExtractedResultArtifact,
   hasPostNavigationExtraction,
   isRecoverableStepError,
   computeRepeatStreak,
@@ -1395,6 +1396,74 @@ test("executeTask forces a generic extraction pass before finishing task mode", 
   );
   assert.ok(artifactEvent);
   assert.match(String(artifactEvent.payload.content ?? ""), /"Hotel One"/u);
+});
+
+test("appendExtractedResultArtifact preserves explicit file artifact envelopes", () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: new Date().toISOString(),
+    kind: "code-result",
+    payload: {
+      ok: true,
+      durationMs: 10,
+      returnValue: {
+        artifacts: [
+          {
+            filename: "comparison.md",
+            kind: "markdown",
+            mimeType: "text/markdown",
+            content: "| Provider | Price |\n|---|---:|\n| Vercel | $20 |",
+          },
+        ],
+        data: { providers: 1 },
+      },
+    },
+  });
+
+  appendExtractedResultArtifact(state);
+
+  const artifactEvent = state.events.find((event) => event.kind === "artifact");
+  assert.ok(artifactEvent);
+  assert.equal(artifactEvent.payload.filename, "comparison.md");
+  assert.equal(artifactEvent.payload.kind, "markdown");
+  assert.equal(artifactEvent.payload.mimeType, "text/markdown");
+  assert.match(String(artifactEvent.payload.path), /^artifacts\/artifact_.+-comparison\.md$/u);
+  assert.match(String(artifactEvent.payload.content), /Provider/u);
+});
+
+test("appendExtractedResultArtifact accepts multiple generic artifact kinds and sanitizes filenames", () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: new Date().toISOString(),
+    kind: "code-result",
+    payload: {
+      ok: true,
+      durationMs: 10,
+      returnValue: {
+        artifacts: [
+          { filename: "../../report.csv", kind: "csv", mimeType: "text/csv", content: "name,value\nA,1\n" },
+          { filename: "script.py", kind: "python", mimeType: "text/x-python", content: "print('ok')\n" },
+        ],
+      },
+    },
+  });
+
+  appendExtractedResultArtifact(state);
+
+  const artifactEvents = state.events.filter((event) => event.kind === "artifact");
+  assert.equal(artifactEvents.length, 2);
+  assert.equal(artifactEvents[0]!.payload.filename, "report.csv");
+  assert.equal(artifactEvents[0]!.payload.kind, "csv");
+  assert.equal(artifactEvents[0]!.payload.mimeType, "text/csv");
+  assert.doesNotMatch(String(artifactEvents[0]!.payload.path), /\.\./u);
+  assert.equal(artifactEvents[1]!.payload.filename, "script.py");
+  assert.equal(artifactEvents[1]!.payload.kind, "python");
 });
 
 test("executeTask blocks finish until numeric objective evidence is present", async () => {
