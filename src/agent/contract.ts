@@ -83,7 +83,14 @@ function inferFormat(text: string): ContractArtifactFormat | undefined {
   if (/\b(?:md|markdown)\b|\.md\b/iu.test(text)) return "markdown";
   if (/\bjson\b|\.json\b/iu.test(text)) return "json";
   if (/\bcsv\b|\.csv\b/iu.test(text)) return "csv";
-  if (/\b(?:txt|text)\b|\.txt\b/iu.test(text)) return "text";
+  // Text is the trickiest format to infer because "text" is also a common
+  // noun in objectives ("the heading text", "page text content"). Require a
+  // signal that actually implies output format: a directional preposition
+  // (as/in/to/into), the "plain text" idiom, a "text format/file/output"
+  // qualifier, or a .txt extension.
+  if (/\.txt\b|\bplain\s+text\b|\b(?:as|in|to|into)\s+(?:plain\s+)?text\b|\btext\s+(?:format|file|output)\b/iu.test(text)) {
+    return "text";
+  }
   return undefined;
 }
 

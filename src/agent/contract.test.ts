@@ -47,6 +47,38 @@ test("createTaskContract infers domains and markdown table output", () => {
   assert.match(contractToPrompt(contract), /Must visit: vercel\.com, netlify\.com, railway\.app/u);
 });
 
+test("createTaskContract does not infer text format from incidental 'text' in objective", () => {
+  // Regression: "Go to example.com and return the heading text" inferred
+  // mustProduce.format="text" because of the bare \btext\b match. The agent
+  // produced a markdown answer (correct) and contract validation marked the
+  // run as missing-text-artifact. Format inference now requires a context
+  // that actually implies the desired output shape.
+  const incidental = [
+    "Go to example.com and return the heading text",
+    "Extract the page text content",
+    "Read the text of the article",
+    "Summarize the body text",
+  ];
+  for (const objective of incidental) {
+    const contract = createTaskContract(makeTask({ objective }));
+    assert.notEqual(contract.mustProduce?.format, "text", `expected no text format from: ${objective}`);
+  }
+});
+
+test("createTaskContract infers text format from explicit output-format phrases", () => {
+  const explicit = [
+    "Extract the headlines and return as text",
+    "Save the response as plain text",
+    "Output as text format",
+    "Write the result to output.txt",
+    "Return the summary in text format",
+  ];
+  for (const objective of explicit) {
+    const contract = createTaskContract(makeTask({ objective }));
+    assert.equal(contract.mustProduce?.format, "text", `expected text format from: ${objective}`);
+  }
+});
+
 test("createTaskContract does not treat filenames as domains", () => {
   const contract = createTaskContract(makeTask({
     objective: "Save data to output.json from package.json and summarize vue.js notes in markdown.",
