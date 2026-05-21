@@ -20,6 +20,44 @@ import { classifyError } from "./errors.js";
 import { success, failure } from "./output.js";
 import { buildTimeline, summarizeTimeline } from "../trace/replay.js";
 import { defaultStorageRoot } from "../shared/paths.js";
+import { NotFoundError } from "../storage/atomic.js";
+import {
+  alternateRootHint,
+  defaultAlternateRoots,
+  findEntityInAlternateRoots,
+} from "./storage-hints.js";
+
+// Look up an error's entity in known alternate storage roots so the failure
+// message can point at the file when the active root simply isn't where the
+// user's data lives.
+async function alternateRootMessage(err: unknown, root: string): Promise<string | null> {
+  if (!(err instanceof NotFoundError)) return null;
+  const hit = await findEntityInAlternateRoots(
+    err.entityKind,
+    err.entityId,
+    defaultAlternateRoots(root),
+  );
+  return hit ? alternateRootHint(hit) : null;
+}
+
+async function reportCliError(
+  command: string,
+  err: unknown,
+  root: string,
+  json: boolean | undefined,
+): Promise<void> {
+  const extraHint = await alternateRootMessage(err, root);
+  if (json) {
+    const classified = classifyError(err);
+    const enriched = extraHint
+      ? { ...classified, hint: `${classified.hint} ${extraHint}` }
+      : classified;
+    console.log(JSON.stringify(failure(command, enriched)));
+  } else {
+    console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    if (extraHint) console.error(`Hint: ${extraHint}`);
+  }
+}
 
 export async function main(argv: string[]): Promise<void> {
   const args = parseArgs(argv);
@@ -285,11 +323,7 @@ async function handleReview(
       console.log(formatReview({ run, task, events, artifacts, score }));
     }
   } catch (err) {
-    if (args.json) {
-      console.log(JSON.stringify(failure("review", classifyError(err))));
-    } else {
-      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    await reportCliError("review", err, root, args.json);
     process.exitCode = 1;
   }
 }
@@ -389,11 +423,7 @@ async function handleResult(
       console.log(result);
     }
   } catch (err) {
-    if (args.json) {
-      console.log(JSON.stringify(failure("result", classifyError(err))));
-    } else {
-      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    await reportCliError("result", err, root, args.json);
     process.exitCode = 1;
   }
 }
@@ -422,11 +452,7 @@ async function handleApprove(
       console.log(JSON.stringify(success("approve", result, args.runId)));
     }
   } catch (err) {
-    if (args.json) {
-      console.log(JSON.stringify(failure("approve", classifyError(err))));
-    } else {
-      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    await reportCliError("approve", err, defaultStorageRoot(), args.json);
     process.exitCode = 1;
   }
 }
@@ -449,8 +475,8 @@ async function handleReplay(
     return;
   }
 
+  const root = defaultStorageRoot();
   try {
-    const root = defaultStorageRoot();
     const runId = args.runId as `run_${string}`;
     const run = await loadRun(root, runId);
     const events = await listTraceEvents(root, runId);
@@ -465,11 +491,7 @@ async function handleReplay(
       console.log(summarizeTimeline(timeline));
     }
   } catch (err) {
-    if (args.json) {
-      console.log(JSON.stringify(failure("replay", classifyError(err))));
-    } else {
-      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    await reportCliError("replay", err, root, args.json);
     process.exitCode = 1;
   }
 }
@@ -505,8 +527,8 @@ async function handleBench(
 }
 
 async function handleExport(args: CliArgs): Promise<void> {
+  const root = defaultStorageRoot();
   try {
-    const root = defaultStorageRoot();
     const format: TrajectoryExportFormat = args.exportFormat ?? "trajectory";
     const runs = await selectRunsForExport(root, args);
     const trajectories = [];
@@ -545,11 +567,7 @@ async function handleExport(args: CliArgs): Promise<void> {
       process.stdout.write(jsonl);
     }
   } catch (err) {
-    if (args.json) {
-      console.log(JSON.stringify(failure("export", classifyError(err))));
-    } else {
-      console.error(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    await reportCliError("export", err, root, args.json);
     process.exitCode = 1;
   }
 }
