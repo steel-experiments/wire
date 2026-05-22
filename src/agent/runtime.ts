@@ -382,6 +382,31 @@ function metacognitionTraces(events: TraceEvent[]): Array<{ kind: string; summar
     for (let i = execs.length - 1; i >= 0 && execs[i]?.payload.code === lastCode; i--) count++;
     if (count >= 2) traces.push({ kind: "thought-summary", summary: `WARNING: identical exec code was tried ${count} times; change strategy before retrying.` });
   }
+  const recentExecs = execs.slice(-5);
+  const recentResults = events
+    .filter((e) => e.kind === "code-result")
+    .slice(-5)
+    .map((e) => String(e.payload.stderr ?? e.payload.error ?? e.payload.result ?? ""));
+  if (
+    recentExecs.some((e) => /\bwire\.goto\s*\(/u.test(String(e.payload.code ?? ""))) ||
+    recentResults.some((text) => /\bwire\.goto\b/u.test(text))
+  ) {
+    traces.push({
+      kind: "error",
+      summary:
+        "Reactive constraint: wire.goto does not exist. Navigate with window.location.href in a navigation-only exec, or raw Page.navigate when needed, then wait for Wire's auto-observe before interacting.",
+    });
+  }
+  if (
+    recentExecs.some((e) => /(?:location\.href|location\.assign|window\.location)\s*=?\s*['"]data:/u.test(String(e.payload.code ?? ""))) &&
+    recentResults.some((text) => /not found within \d+ms|Cannot read properties of null|about:blank/u.test(text))
+  ) {
+    traces.push({
+      kind: "error",
+      summary:
+        'Reactive constraint: data: URL navigation from exec did not load the page. Next action must be raw Page.navigate with the full data: URL only; wait for Wire auto-observe before wire.click or extraction.',
+    });
+  }
   const error = [...events].reverse().find((e) => e.kind === "error");
   const message = String(error?.payload.message ?? error?.payload.stderr ?? JSON.stringify(error?.payload ?? ""));
   if (/timed?\s*out|timeout|Execution context was destroyed|WebSocket error/iu.test(message)) {
@@ -390,6 +415,37 @@ function metacognitionTraces(events: TraceEvent[]): Array<{ kind: string; summar
   const cdp = [...events].reverse().find((e) => e.kind === "code-result" && e.payload.source === "wireActions" && e.payload.truncated === true);
   if (cdp) traces.push({ kind: "code-result", summary: "Reactive constraint: last wireActions batch was filtered/truncated; keep batches under 80 and do not use Runtime.evaluate there." });
   return traces;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+function extractDataNavigationUrl(code: string): string | undefined {
+  const direct =
+    code.match(/(?:window\.)?location(?:\.href)?\s*=\s*(['"])(data:[\s\S]*?)\1/u) ??
+    code.match(/(?:window\.)?location\.assign\(\s*(['"])(data:[\s\S]*?)\1/u);
+  if (direct?.[2]) return direct[2];
+
+  const assigned = code.match(/(?:window\.)?location(?:\.href)?\s*=\s*([A-Za-z_$][\w$]*)/u);
+  const name = assigned?.[1];
+  if (!name) return undefined;
+  const declaration = new RegExp(`(?:const|let|var)\\s+${escapeRegExp(name)}\\s*=\\s*(['"])(data:[\\s\\S]*?)\\1`, "u");
+  return code.match(declaration)?.[2];
+}
+
+function normalizeProposedAction(action: ProposedAction): ProposedAction {
+  if (action.kind !== "exec" || typeof action.payload?.code !== "string") return action;
+  const url = extractDataNavigationUrl(action.payload.code);
+  if (!url) return action;
+  return {
+    kind: "raw",
+    summary: "Navigate to data URL",
+    payload: {
+      method: "Page.navigate",
+      params: { url },
+    },
+  };
 }
 
 export function defaultAgentTurn(
@@ -619,7 +675,7 @@ export function defaultAgentTurn(
       }
 
       // Parse the LLM response as a proposed action
-      return parseActionFromLlm(response.content, state);
+      return normalizeProposedAction(parseActionFromLlm(response.content, state));
     }
 
     // Fallback: observe the browser, then finish

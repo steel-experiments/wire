@@ -716,6 +716,68 @@ test("defaultAgentTurn includes metacognition warnings in prompt", async () => {
   assert.match(prompt, /Reactive constraint/u);
 });
 
+test("defaultAgentTurn corrects wire.goto hallucinations in prompt", async () => {
+  const state = createLoopState(makeTask(), makeSessionId());
+  let prompt = "";
+  state.events.push(
+    { id: createId("event"), runId: state.run.id, ts: new Date().toISOString(), kind: "code-exec", payload: { code: 'await wire.goto("https://example.com"); return {done:true};' } },
+    { id: createId("event"), runId: state.run.id, ts: new Date().toISOString(), kind: "code-result", payload: { ok: false, durationMs: 1, stderr: "TypeError: wire.goto is not a function" } },
+  );
+  const turn = defaultAgentTurn({ model: "test-model", async chat(messages) {
+    prompt = String(messages.find((m) => m.role === "user")?.content ?? "");
+    return { content: '{"kind":"exec","summary":"Navigate directly","payload":{"code":"window.location.href = \\"https://example.com\\"; return {navigated:true};"}}', model: "test-model" };
+  } });
+
+  await turn(state, createMockProvider());
+
+  assert.match(prompt, /wire\.goto does not exist/u);
+  assert.match(prompt, /window\.location\.href/u);
+  assert.match(prompt, /auto-observe/u);
+});
+
+test("defaultAgentTurn corrects failed exec data URL navigation toward raw Page.navigate", async () => {
+  const state = createLoopState(makeTask(), makeSessionId());
+  let prompt = "";
+  state.events.push(
+    { id: createId("event"), runId: state.run.id, ts: new Date().toISOString(), kind: "code-exec", payload: { code: 'location.href = "data:text/html,<button id=go>Trust Check</button>"; await waitForSelector("#go", 5000);' } },
+    { id: createId("event"), runId: state.run.id, ts: new Date().toISOString(), kind: "code-result", payload: { ok: false, durationMs: 5000, stderr: 'Error: waitForSelector: "#go" not found within 5000ms' } },
+  );
+  const turn = defaultAgentTurn({ model: "test-model", async chat(messages) {
+    prompt = String(messages.find((m) => m.role === "user")?.content ?? "");
+    return { content: '{"kind":"raw","summary":"Navigate to data URL","payload":{"method":"Page.navigate","params":{"url":"data:text/html,<button id=go>Trust Check</button>"}}}', model: "test-model" };
+  } });
+
+  await turn(state, createMockProvider());
+
+  assert.match(prompt, /data: URL navigation from exec did not load/u);
+  assert.match(prompt, /raw Page\.navigate/u);
+  assert.match(prompt, /before wire\.click/u);
+});
+
+test("defaultAgentTurn normalizes exec data URL navigation into raw Page.navigate", async () => {
+  const state = createLoopState(makeTask(), makeSessionId());
+  const dataUrl = "data:text/html,<button id=go>Trust Check</button>";
+  const turn = defaultAgentTurn({ model: "test-model", async chat() {
+    return {
+      content: JSON.stringify({
+        kind: "exec",
+        summary: "Navigate then click",
+        payload: {
+          code: `const url = "${dataUrl}"; location.href = url; await waitForSelector("#go", 5000);`,
+        },
+      }),
+      model: "test-model",
+    };
+  } });
+
+  const action = await turn(state, createMockProvider());
+
+  assert.equal(action.kind, "raw");
+  assert.equal(action.summary, "Navigate to data URL");
+  assert.equal(action.payload?.method, "Page.navigate");
+  assert.deepEqual(action.payload?.params, { url: dataUrl });
+});
+
 // ---------------------------------------------------------------------------
 // finalizeRun
 // ---------------------------------------------------------------------------
