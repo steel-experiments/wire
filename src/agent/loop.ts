@@ -509,6 +509,9 @@ export async function executeStep(
         if (result.returnValue !== undefined) {
           resultPayload.returnValue = result.returnValue;
         }
+        if (result.wireEvents && result.wireEvents.length > 0) {
+          resultPayload.wireEvents = result.wireEvents;
+        }
         state.events.push({
           id: createId("event"),
           runId: state.run.id,
@@ -590,7 +593,8 @@ export async function executeStep(
               (commandsIncludeNavigation(parsed.wireActions) || commandsIncludeInput(parsed.wireActions));
           } catch { return false; }
         })();
-        if (isLikelyNavigationCode(code) || wireActionsSignal || (result.ok && isLikelyInteractionCode(code))) {
+        const wireBindingSignal = result.ok && result.wireEvents?.some((event) => event.action === "click");
+        if (isLikelyNavigationCode(code) || wireActionsSignal || wireBindingSignal || (result.ok && isLikelyInteractionCode(code))) {
           const obs = await observeAndRecord(state, provider);
           if (obs.authWallHit) authWallHit = true;
         }

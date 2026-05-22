@@ -11,6 +11,17 @@
     }
   },
   {
+    "id": "wire-click-trusted-event",
+    "objective": "Navigate to data:text/html;charset=utf-8,%3C!doctype%20html%3E%3Cbutton%20id%3D%22go%22%20style%3D%22margin%3A80px%3Bwidth%3A160px%3Bheight%3A54px%22%3ETrust%20Check%3C%2Fbutton%3E%3Cdiv%20id%3D%22out%22%3Enot%20clicked%3C%2Fdiv%3E%3Cscript%3Ego.addEventListener(%22click%22%2C%20e%20%3D%3E%20out.textContent%20%3D%20e.isTrusted%20%3F%20%22trusted%22%20%3A%20%22synthetic%22)%3C%2Fscript%3E, click the Trust Check button with real browser input, and return the #out text. The answer must be trusted, not synthetic.",
+    "mode": "task",
+    "maxSteps": 8,
+    "expected": {
+      "classification": "task-complete",
+      "answerContains": ["trusted"],
+      "maxSteps": 5
+    }
+  },
+  {
     "id": "booking-search",
     "objective": "Navigate directly to https://www.booking.com/searchresults.html?ss=Tokyo&checkin=2026-06-10&checkout=2026-06-12, wait 5 seconds, then extract the first 5 hotel names and prices as JSON",
     "mode": "task",

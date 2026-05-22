@@ -434,10 +434,11 @@ test("assembleUserPrompt omits the user messages section when no user messages",
 // buildActionGuidance — helper surface
 // ---------------------------------------------------------------------------
 
-test("buildActionGuidance includes all four exec helpers", () => {
+test("buildActionGuidance includes trusted click and all four exec helpers", () => {
   const context = makeContext();
   const guidance = buildActionGuidance(context);
 
+  assert.match(guidance, /wire\.click/u);
   assert.match(guidance, /clickVisibleText/u);
   assert.match(guidance, /fillByLabel/u);
   assert.match(guidance, /extractTable/u);

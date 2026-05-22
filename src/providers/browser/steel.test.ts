@@ -218,6 +218,103 @@ test("SteelProvider.getSession retrieves existing session", async () => {
   }
 });
 
+test("SteelProvider.getSession retries on 404 then succeeds (post-create propagation race)", async () => {
+  const provider = new SteelProvider({
+    apiKey: "ste-test-key",
+    baseUrl: "http://localhost:0/v1",
+    getSessionRetryDelayMs: 0,
+  });
+
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    if (calls < 3) {
+      return new Response(
+        JSON.stringify({ message: "Session not found" }),
+        { status: 404, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return new Response(
+      JSON.stringify(fakeSteelSession()),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }) as typeof fetch;
+
+  try {
+    const session = await provider.getSession("session_aaa-bbb-ccc" as never);
+    assert.equal(session.provider, "steel");
+    assert.equal(calls, 3, "should have retried twice before succeeding");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("SteelProvider.getSession throws 404 after exhausting retries", async () => {
+  const provider = new SteelProvider({
+    apiKey: "ste-test-key",
+    baseUrl: "http://localhost:0/v1",
+    getSessionRetryDelayMs: 0,
+  });
+
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    return new Response(
+      JSON.stringify({ message: "Session not found" }),
+      { status: 404, headers: { "Content-Type": "application/json" } },
+    );
+  }) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      () => provider.getSession("session_aaa-bbb-ccc" as never),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /404/);
+        return true;
+      },
+    );
+    assert.ok(calls >= 3, `expected ≥3 attempts, got ${calls}`);
+    assert.ok(calls <= 5, `retry budget should be bounded, got ${calls}`);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("SteelProvider.getSession does not retry on non-404 errors", async () => {
+  const provider = new SteelProvider({
+    apiKey: "ste-test-key",
+    baseUrl: "http://localhost:0/v1",
+    getSessionRetryDelayMs: 0,
+  });
+
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    return new Response(
+      JSON.stringify({ message: "Unauthorized" }),
+      { status: 401, headers: { "Content-Type": "application/json" } },
+    );
+  }) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      () => provider.getSession("session_aaa-bbb-ccc" as never),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.match(err.message, /401/);
+        return true;
+      },
+    );
+    assert.equal(calls, 1, "401 should fail fast without retry");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 // ---------------------------------------------------------------------------
 // stopSession
 // ---------------------------------------------------------------------------
@@ -368,6 +465,123 @@ test("SteelProvider.exec surfaces exception class+message+location, not bare 'Un
     assert.match(stderr, /<anonymous>:3:5|line 2|col(?:umn)? 14/i, "stderr should include a location");
   } finally {
     restore();
+  }
+});
+
+test("SteelProvider.exec exposes wire.click as trusted CDP mouse input", async () => {
+  const sent: Array<Record<string, unknown>> = [];
+  class WireClickSocket {
+    onopen: ((event: any) => void) | null = null;
+    onmessage: ((event: any) => void) | null = null;
+    onerror: ((event: any) => void) | null = null;
+    onclose: ((event: any) => void) | null = null;
+    private runtimeEvaluateCount = 0;
+    private userEvalId: number | undefined;
+
+    constructor() {
+      queueMicrotask(() => this.onopen?.({}));
+    }
+
+    send(data: string): void {
+      const message = JSON.parse(data) as {
+        id: number;
+        method: string;
+        params?: Record<string, unknown>;
+        sessionId?: string;
+      };
+      sent.push(message as unknown as Record<string, unknown>);
+
+      if (message.method === "Target.getTargets") {
+        this.respond(message.id, {
+          targetInfos: [{ targetId: "tab-1", type: "page", title: "Example", url: "https://example.com" }],
+        });
+        return;
+      }
+      if (message.method === "Target.attachToTarget") {
+        this.respond(message.id, { sessionId: "cdp-session-1" });
+        return;
+      }
+      if (message.method === "Runtime.addBinding") {
+        this.respond(message.id, {});
+        return;
+      }
+      if (message.method === "Runtime.evaluate") {
+        this.runtimeEvaluateCount++;
+        if (this.runtimeEvaluateCount === 1) {
+          this.respond(message.id, { result: { value: undefined } });
+          return;
+        }
+        if (this.runtimeEvaluateCount === 2) {
+          this.userEvalId = message.id;
+          queueMicrotask(() => this.onmessage?.({
+            data: JSON.stringify({
+              method: "Runtime.bindingCalled",
+              sessionId: "cdp-session-1",
+              params: {
+                name: "__wire_action",
+                payload: JSON.stringify({
+                  id: "1",
+                  kind: "click",
+                  x: 100,
+                  y: 200,
+                  target: { tag: "button", text: "Continue", selectorHint: "button" },
+                }),
+              },
+            }),
+          }));
+          return;
+        }
+        this.respond(message.id, { result: { value: undefined } });
+        queueMicrotask(() => {
+          if (this.userEvalId !== undefined) {
+            this.respond(this.userEvalId, { result: { value: "clicked" } });
+          }
+        });
+        return;
+      }
+      if (message.method === "Input.dispatchMouseEvent") {
+        this.respond(message.id, {});
+        return;
+      }
+      this.respond(message.id, {});
+    }
+
+    close(): void {
+      this.onclose?.({});
+    }
+
+    private respond(id: number, result: unknown): void {
+      queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ id, result }) }));
+    }
+  }
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(
+    JSON.stringify(fakeSteelSession({ id: "aaa-bbb-ccc" })),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+
+  try {
+    const provider = new SteelProvider({
+      apiKey: "ste-test-key",
+      webSocketFactory: () => new WireClickSocket(),
+    });
+    const result = await provider.exec({
+      sessionId: "session_aaa-bbb-ccc" as never,
+      code: "await wire.click('button'); return 'clicked';",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.returnValue, "clicked");
+    assert.deepEqual(
+      sent.filter((message) => message["method"] === "Input.dispatchMouseEvent").map((message) => (message["params"] as Record<string, unknown>)["type"]),
+      ["mouseMoved", "mousePressed", "mouseReleased"],
+    );
+    assert.equal(result.wireEvents?.[0]?.["source"], "wireBinding");
+    assert.equal(result.wireEvents?.[0]?.["action"], "click");
+    assert.equal((result.wireEvents?.[0]?.["target"] as Record<string, unknown>)["text"], "Continue");
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 
@@ -647,6 +861,72 @@ test("createSteelProvider uses explicit config over env var", () => {
     assert.ok(provider instanceof SteelProvider);
   } finally {
     delete process.env.STEEL_API_KEY;
+  }
+});
+
+test("createSteelProvider uses STEEL_BASE_URL env var when set", async () => {
+  const originalKey = process.env.STEEL_API_KEY;
+  const originalBase = process.env.STEEL_BASE_URL;
+  const originalFetch = globalThis.fetch;
+  process.env.STEEL_API_KEY = "ste-from-env";
+  process.env.STEEL_BASE_URL = "https://steel-api-preview.example.dev/v1";
+
+  let observedUrl = "";
+  globalThis.fetch = (async (url: string | URL | Request) => {
+    observedUrl = String(url);
+    return new Response(JSON.stringify(fakeSteelSession()), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  try {
+    const provider = createSteelProvider();
+    await provider.createSession({});
+    assert.equal(
+      observedUrl,
+      "https://steel-api-preview.example.dev/v1/sessions",
+      "createSession should hit the URL derived from STEEL_BASE_URL",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey) process.env.STEEL_API_KEY = originalKey;
+    else delete process.env.STEEL_API_KEY;
+    if (originalBase) process.env.STEEL_BASE_URL = originalBase;
+    else delete process.env.STEEL_BASE_URL;
+  }
+});
+
+test("createSteelProvider prefers explicit baseUrl over STEEL_BASE_URL env var", async () => {
+  const originalKey = process.env.STEEL_API_KEY;
+  const originalBase = process.env.STEEL_BASE_URL;
+  const originalFetch = globalThis.fetch;
+  process.env.STEEL_API_KEY = "ste-from-env";
+  process.env.STEEL_BASE_URL = "https://from-env.example.dev/v1";
+
+  let observedUrl = "";
+  globalThis.fetch = (async (url: string | URL | Request) => {
+    observedUrl = String(url);
+    return new Response(JSON.stringify(fakeSteelSession()), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  try {
+    const provider = createSteelProvider({ baseUrl: "https://from-config.example.dev/v1" });
+    await provider.createSession({});
+    assert.equal(
+      observedUrl,
+      "https://from-config.example.dev/v1/sessions",
+      "explicit config baseUrl should win over STEEL_BASE_URL env var",
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey) process.env.STEEL_API_KEY = originalKey;
+    else delete process.env.STEEL_API_KEY;
+    if (originalBase) process.env.STEEL_BASE_URL = originalBase;
+    else delete process.env.STEEL_BASE_URL;
   }
 });
 

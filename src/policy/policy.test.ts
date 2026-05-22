@@ -141,13 +141,29 @@ test("evaluateRules allows raw CDP batches with only safe input methods", () => 
   assert.equal(result, "allow");
 });
 
+test("evaluateRules allows raw CDP navigation methods", () => {
+  const action = makeAction({
+    kind: "raw",
+    payload: {
+      commands: [
+        { method: "Page.navigate", params: { url: "https://example.com/search?q=wire" } },
+        { method: "Page.reload" },
+      ],
+    },
+  });
+
+  const { result } = evaluateRules(action);
+
+  assert.equal(result, "allow");
+});
+
 test("evaluateRules requires approval when raw CDP batch mixes safe and unsafe methods", () => {
   const action = makeAction({
     kind: "raw",
     payload: {
       method: "Input.insertText",
       commands: [
-        { method: "Page.navigate", params: { url: "https://example.com" } },
+        { method: "Runtime.evaluate", params: { expression: "document.cookie" } },
       ],
     },
   });

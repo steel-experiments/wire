@@ -264,6 +264,7 @@ export interface BrowserExecResult {
   stdout?: string;
   stderr?: string;
   returnValue?: JsonValue;
+  wireEvents?: JsonObject[];
   artifactIds?: ArtifactId[];
   durationMs: number;
 }

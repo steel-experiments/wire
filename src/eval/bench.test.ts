@@ -292,12 +292,13 @@ test("parseArgs parses bench command with --json flag", () => {
 // Default benchmark file validation
 // ---------------------------------------------------------------------------
 
-test("default benchmarks file is valid and has 6 entries", async () => {
+test("default benchmarks file is valid and has 7 entries", async () => {
   const loaded = await loadBenchmarks("benchmarks/default.json");
-  assert.equal(loaded.length, 6);
+  assert.equal(loaded.length, 7);
 
   const ids = loaded.map((b) => b.id);
   assert.ok(ids.includes("example-title"));
+  assert.ok(ids.includes("wire-click-trusted-event"));
   assert.ok(ids.includes("booking-search"));
   assert.ok(ids.includes("sec-edgar-filing"));
   assert.ok(ids.includes("lesswrong-posts"));

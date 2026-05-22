@@ -2,7 +2,7 @@
 marp: true
 theme: default
 paginate: true
-header: 'Wire — internal dev pitch'
+header: 'Wire'
 footer: 'github.com/.../wire'
 ---
 
@@ -56,6 +56,24 @@ cli/  eval/  ui/  experiments/  profiles/
 ```
 
 Missing: DI container, plugin system, event bus, middleware, retry layer.
+
+---
+
+## Where does new behavior live?
+
+The routing question on every PR.
+
+| True for... | → lands in |
+|---|---|
+| One site or task pattern | **skill** (`skills/*.md`) |
+| Many sites; a thin callable function | **helper** (`browser/helpers/*`) |
+| Regardless of site — how wire itself works | **core** (`agent/`, `policy/`, `trace/`) |
+
+If a skill repeats across hosts → promote to helper.
+If a helper grows site-specific knobs → split back into skills.
+If a helper hides causality or becomes a workflow DSL → demote it.
+
+From `AGENTS.md`. The rule that keeps `core` small.
 
 ---
 

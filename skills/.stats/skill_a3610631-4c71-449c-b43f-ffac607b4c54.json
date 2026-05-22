@@ -1,0 +1,20 @@
+{
+  "loadedCount": 1,
+  "successCount": 1,
+  "outcomeCounts": {
+    "task-complete": 1
+  },
+  "totalSteps": 2,
+  "totalTokens": 11367,
+  "lastLoadedAt": "2026-05-20T18:46:50.741Z",
+  "recentRuns": [
+    {
+      "runId": "run_a21e4547-0141-4ed3-b566-10aea676fb47",
+      "loadedAt": "2026-05-20T18:46:50.741Z",
+      "outcome": "task-complete",
+      "stepCount": 2,
+      "totalTokens": 11367,
+      "loadedWithSkillIds": []
+    }
+  ]
+}

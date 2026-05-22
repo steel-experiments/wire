@@ -90,14 +90,17 @@ const PRIVILEGED_KINDS = new Set([
 ]);
 
 /**
- * CDP methods that are safe to auto-allow — they inject trusted input events
- * equivalent to what a user could do physically, no more dangerous than exec.
+ * CDP methods that are safe to auto-allow. Input methods mirror physical user
+ * gestures, and navigation methods match exec navigation risk.
  */
 const SAFE_CDP_METHOD_PREFIXES = [
   "Input.dispatchKeyEvent",
   "Input.dispatchMouseEvent",
   "Input.insertText",
   "Input.dispatchTouchEvent",
+  "Page.navigate",
+  "Page.reload",
+  "Page.navigateToHistoryEntry",
 ];
 
 function isSafeCdpMethod(method: string | undefined): boolean {

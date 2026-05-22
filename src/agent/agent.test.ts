@@ -2618,6 +2618,56 @@ test("executeStep auto-observes after clicks and records tab drift", async () =>
   assert.match(String((latest.payload.tabDrift as Record<string, unknown>).message), /new tab/u);
 });
 
+test("executeStep records wire.click events and auto-observes", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  let observeCount = 0;
+  const provider = createMockProvider({
+    async exec() {
+      return {
+        ok: true,
+        durationMs: 10,
+        returnValue: "clicked",
+        wireEvents: [
+          {
+            source: "wireBinding",
+            action: "click",
+            ok: true,
+            x: 100,
+            y: 200,
+            button: "left",
+            target: { tag: "button", text: "Continue", selectorHint: "#continue" },
+          },
+        ],
+      };
+    },
+    async observe(input: BrowserObserveInput): Promise<BrowserObservation> {
+      observeCount++;
+      return {
+        sessionId: input.sessionId,
+        targetId: "tab-1",
+        url: "https://example.com/next",
+        title: "Next",
+        tabs: [{ id: "tab-1", title: "Next", url: "https://example.com/next", active: true }],
+      };
+    },
+  } as Partial<BrowserProvider>);
+
+  await executeStep(
+    state,
+    { kind: "exec", summary: "Trusted click", payload: { code: "await wire.click('#continue'); return 'clicked';" } },
+    provider,
+    createMockPolicyEngine(),
+  );
+
+  assert.equal(observeCount, 1);
+  const result = state.events.find((event) => event.kind === "code-result")!;
+  const wireEvents = result.payload.wireEvents as Array<Record<string, unknown>>;
+  assert.equal(wireEvents[0]?.source, "wireBinding");
+  assert.equal(wireEvents[0]?.action, "click");
+  assert.equal((wireEvents[0]?.target as Record<string, unknown>).text, "Continue");
+});
+
 test("executeStep caps oversized wireActions batches", async () => {
   const task = makeTask();
   const state = createLoopState(task, makeSessionId());

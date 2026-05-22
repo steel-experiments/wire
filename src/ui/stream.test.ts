@@ -108,6 +108,28 @@ test("stream code-result prefers stderr over returnValue when err", () => {
   assert.ok(!lines[0]!.includes("something"));
 });
 
+test("stream renders wire.click result metadata", () => {
+  const { lines, sink } = captureSink();
+  sink.onEvent(ev("code-result", {
+    ok: true,
+    durationMs: 7,
+    returnValue: "trusted",
+    wireEvents: [
+      {
+        source: "wireBinding",
+        action: "click",
+        ok: true,
+        x: 120.7,
+        y: 75.2,
+        target: { tag: "button", text: "Accept all" },
+      },
+    ],
+  }));
+  assert.match(lines[0]!, /→ ok/u);
+  assert.match(lines[0]!, /wire\.click button "Accept all" @ 121,75/u);
+  assert.ok(!lines[0]!.includes("trusted"), "wire event should be the primary evidence detail");
+});
+
 test("stream renders ↻ marker on repeat code-exec", () => {
   const { lines, sink } = captureSink();
   const code = "[...document.querySelectorAll('button')].find(b=>/start bot/i.test(b.textContent))";

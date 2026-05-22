@@ -78,6 +78,11 @@ function formatEvent(event: TraceEvent, state: RendererState): string | null {
     case "code-result": {
       const ok = event.payload["ok"] === true;
       const ms = typeof event.payload["durationMs"] === "number" ? `${event.payload["durationMs"]}ms` : "";
+      const wireDetail = formatWireEvents(event.payload["wireEvents"]);
+      if (wireDetail) {
+        const tag = ok ? p.green("→ ok ") : p.red("→ err");
+        return `${contPrefix(state)} ${tag} ${p.dim(ms)} ${p.dim("·")} ${wireDetail}`;
+      }
       const stdout = typeof event.payload["stdout"] === "string" ? event.payload["stdout"] : "";
       const stderr = typeof event.payload["stderr"] === "string" ? event.payload["stderr"] : "";
       const ret = event.payload["returnValue"];
@@ -190,9 +195,25 @@ function preferredDetail(ok: boolean, ret: unknown, stdout: string, stderr: stri
   return stdout;
 }
 
+function formatWireEvents(value: unknown): string | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const first = value.find((event) => event && typeof event === "object" && !Array.isArray(event)) as Record<string, unknown> | undefined;
+  if (!first || first.action !== "click") return undefined;
+  const target = first.target && typeof first.target === "object" && !Array.isArray(first.target)
+    ? first.target as Record<string, unknown>
+    : {};
+  const tag = typeof target.tag === "string" ? target.tag : "target";
+  const text = typeof target.text === "string" && target.text.length > 0 ? ` "${truncate(target.text, 40)}"` : "";
+  const x = typeof first.x === "number" ? Math.round(first.x) : "?";
+  const y = typeof first.y === "number" ? Math.round(first.y) : "?";
+  const more = value.length > 1 ? ` (+${value.length - 1} more)` : "";
+  return `● wire.click ${tag}${text} @ ${x},${y}${more}`;
+}
+
 function actionLabel(event: TraceEvent): string {
   if (event.payload["rawCommands"]) return "⚙ raw     ";
   const code = typeof event.payload["code"] === "string" ? event.payload["code"] : "";
+  if (/\bwire\.click\s*\(/u.test(code)) return "● interact";
   if (/location\.(href|assign|replace)|Page\.navigate|window\.open/u.test(code)) return "↪ navigate";
   if (/\.click\(|dispatchEvent|Input\.dispatch|KeyboardEvent|MouseEvent|fillByLabel|clickVisibleText/u.test(code)) return "● interact";
   if (/querySelector|innerText|textContent|getAttribute|extract|return document/u.test(code)) return "◆ inspect ";
