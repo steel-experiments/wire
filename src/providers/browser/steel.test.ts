@@ -585,6 +585,125 @@ test("SteelProvider.exec exposes wire.click as trusted CDP mouse input", async (
   }
 });
 
+test("SteelProvider.exec blocks sensitive wire.click target before CDP input", async () => {
+  const sent: Array<Record<string, unknown>> = [];
+  class BlockedWireClickSocket {
+    onopen: ((event: any) => void) | null = null;
+    onmessage: ((event: any) => void) | null = null;
+    onerror: ((event: any) => void) | null = null;
+    onclose: ((event: any) => void) | null = null;
+    private runtimeEvaluateCount = 0;
+    private userEvalId: number | undefined;
+
+    constructor() {
+      queueMicrotask(() => this.onopen?.({}));
+    }
+
+    send(data: string): void {
+      const message = JSON.parse(data) as {
+        id: number;
+        method: string;
+        params?: Record<string, unknown>;
+        sessionId?: string;
+      };
+      sent.push(message as unknown as Record<string, unknown>);
+
+      if (message.method === "Target.getTargets") {
+        this.respond(message.id, {
+          targetInfos: [{ targetId: "tab-1", type: "page", title: "Example", url: "https://example.com" }],
+        });
+        return;
+      }
+      if (message.method === "Target.attachToTarget") {
+        this.respond(message.id, { sessionId: "cdp-session-1" });
+        return;
+      }
+      if (message.method === "Runtime.addBinding" || message.method === "Runtime.removeBinding") {
+        this.respond(message.id, {});
+        return;
+      }
+      if (message.method === "Runtime.evaluate") {
+        this.runtimeEvaluateCount++;
+        if (this.runtimeEvaluateCount === 1) {
+          this.respond(message.id, { result: { value: undefined } });
+          return;
+        }
+        if (this.runtimeEvaluateCount === 2) {
+          this.userEvalId = message.id;
+          queueMicrotask(() => this.onmessage?.({
+            data: JSON.stringify({
+              method: "Runtime.bindingCalled",
+              sessionId: "cdp-session-1",
+              params: {
+                name: "__wire_action",
+                payload: JSON.stringify({
+                  id: "1",
+                  kind: "click",
+                  x: 100,
+                  y: 200,
+                  target: { tag: "button", text: "Delete account", selectorHint: "#delete" },
+                }),
+              },
+            }),
+          }));
+          return;
+        }
+        this.respond(message.id, { result: { value: undefined } });
+        queueMicrotask(() => {
+          if (this.userEvalId !== undefined) {
+            this.onmessage?.({
+              data: JSON.stringify({
+                id: this.userEvalId,
+                result: {
+                  exceptionDetails: {
+                    text: "Uncaught (in promise)",
+                    exception: { description: "Error: wire.click deny: destructive click target" },
+                  },
+                },
+              }),
+            });
+          }
+        });
+        return;
+      }
+      this.respond(message.id, {});
+    }
+
+    close(): void {
+      this.onclose?.({});
+    }
+
+    private respond(id: number, result: unknown): void {
+      queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ id, result }) }));
+    }
+  }
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(
+    JSON.stringify(fakeSteelSession({ id: "aaa-bbb-ccc" })),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+
+  try {
+    const provider = new SteelProvider({
+      apiKey: "ste-test-key",
+      webSocketFactory: () => new BlockedWireClickSocket(),
+    });
+    const result = await provider.exec({
+      sessionId: "session_aaa-bbb-ccc" as never,
+      code: "await wire.click('#delete'); return 'clicked';",
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.stderr ?? "", /wire\.click deny/u);
+    assert.equal(sent.some((message) => message["method"] === "Input.dispatchMouseEvent"), false);
+    assert.equal(result.wireEvents?.[0]?.["ok"], false);
+    assert.equal(result.wireEvents?.[0]?.["error"], "wire.click deny: destructive click target");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("SteelProvider.raw sends a CDP command over websocket", async () => {
   const { provider, setNextResponse, setCdpResponse, restore } = createMockedProvider();
   setNextResponse("/sessions/aaa-bbb-ccc", fakeSteelSession({ id: "aaa-bbb-ccc" }));

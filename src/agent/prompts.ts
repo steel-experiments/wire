@@ -40,6 +40,7 @@ export const BASE_ACTION_GUIDANCE = [
   "Each exec call defaults to a 12-second CDP timeout and payload.timeoutMs is capped at 12000. Keep scripts short; avoid sleep/poll loops. For long sequences, split across turns or return wireActions.",
   'For "raw", set payload.method to a CDP method and payload.params to its parameters. Use raw only when exec cannot reach the needed browser behavior.',
   'Use `await wire.click(elOrSelector)` for user-facing clicks that should reach the page as real browser input. Use ordinary DOM APIs for reading, searching, computing, and extraction.',
+  "The only `wire.*` page API is `wire.click`. Do not call `wire.goto`, `wire.type`, `wire.navigate`, `wire.press`, or other `wire.*` methods.",
   '"exec" code can return {wireActions: [{method, params}, ...]} to send CDP commands after the code runs. Keep wireActions batches under 80 commands; send another action after reading state.',
   "When DOM clicks fail across iframe, shadow DOM, or cross-origin boundaries, use viewport-coordinate `Input.dispatchMouseEvent` clicks via raw or wireActions.",
   "Prefer direct URL patterns before brittle DOM hunting when the destination is obvious.",

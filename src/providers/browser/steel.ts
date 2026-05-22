@@ -21,6 +21,7 @@ export interface SteelProviderConfig {
   cdpCommandTimeoutMs?: number;
   createSessionMaxRetries?: number;
   getSessionRetryDelayMs?: number;
+  wireClickPolicy?: (request: WireClickRequest) => WireClickPolicyDecision;
   onRetry?: (event: SteelRetryEvent) => void | Promise<void>;
   logger?: SteelLogger;
 }
@@ -78,7 +79,7 @@ interface WebSocketLike {
   close(): void;
 }
 
-interface WireClickRequest {
+export interface WireClickRequest {
   id: string;
   kind: "click";
   x: number;
@@ -91,6 +92,11 @@ interface WireClickRequest {
     ariaLabel?: string;
     selectorHint?: string;
   };
+}
+
+export interface WireClickPolicyDecision {
+  result: "allow" | "deny" | "require-approval";
+  reason?: string;
 }
 
 function mapStatus(steelStatus: string): SessionStatus {
@@ -292,6 +298,7 @@ export class SteelProvider implements BrowserProvider {
   private readonly cdpCommandTimeoutMs: number;
   private readonly createSessionMaxRetries: number;
   private readonly getSessionRetryDelayMs: number;
+  private readonly wireClickPolicy: (request: WireClickRequest) => WireClickPolicyDecision;
   private readonly onRetry: ((event: SteelRetryEvent) => void | Promise<void>) | undefined;
   private readonly logger: SteelLogger | undefined;
 
@@ -302,6 +309,7 @@ export class SteelProvider implements BrowserProvider {
     this.cdpCommandTimeoutMs = config.cdpCommandTimeoutMs ?? DEFAULT_CDP_COMMAND_TIMEOUT_MS;
     this.createSessionMaxRetries = config.createSessionMaxRetries ?? 0;
     this.getSessionRetryDelayMs = config.getSessionRetryDelayMs ?? DEFAULT_GET_SESSION_RETRY_DELAY_MS;
+    this.wireClickPolicy = config.wireClickPolicy ?? defaultWireClickPolicy;
     this.onRetry = config.onRetry;
     this.logger = config.logger;
   }
@@ -456,7 +464,7 @@ export class SteelProvider implements BrowserProvider {
         try {
           validateBrowserCode(input.code);
           const sessionId = await attachToTarget(cdp, target.targetId);
-          await installWireClickBinding(cdp, sessionId, wireEvents);
+          await installWireClickBinding(cdp, sessionId, wireEvents, this.wireClickPolicy);
           const value = await evaluateJson<unknown>(cdp, sessionId, wrapUserCode(input.code), input.timeoutMs);
           returnValue = value;
           if (value !== undefined) {
@@ -676,6 +684,7 @@ async function installWireClickBinding(
   cdp: CdpConnection,
   sessionId: string,
   wireEvents: JsonObject[],
+  policy: (request: WireClickRequest) => WireClickPolicyDecision,
 ): Promise<void> {
   cdp.on("Runtime.bindingCalled", async (params) => {
     if (!params || typeof params !== "object") return;
@@ -688,6 +697,11 @@ async function installWireClickBinding(
     try {
       const parsed = JSON.parse(event["payload"]) as unknown;
       request = parseWireClickRequest(parsed);
+      const decision = policy(request);
+      if (decision.result !== "allow") {
+        const reason = decision.reason ? `: ${decision.reason}` : "";
+        throw new Error(`wire.click ${decision.result}${reason}`);
+      }
       await dispatchWireClick(cdp, sessionId, request);
       dispatched = true;
       wireEvents.push(wireClickEvent(request, true));
@@ -707,6 +721,35 @@ async function installWireClickBinding(
   }
   await cdp.send("Runtime.addBinding", { name: WIRE_CLICK_BINDING_NAME }, sessionId);
   await evaluateJson<unknown>(cdp, sessionId, WIRE_CLICK_SHIM);
+}
+
+const WIRE_CLICK_DENY_PATTERNS = [
+  /\b(delete|remove|destroy|purge|drop|truncate)\b/iu,
+];
+
+const WIRE_CLICK_APPROVAL_PATTERNS = [
+  /\b(pay|purchase|checkout|buy|order|submit|confirm|send|post|reply|email|invite)\b/iu,
+  /\b(billing|account|password|permission|role|grant|revoke|transfer)\b/iu,
+];
+
+function defaultWireClickPolicy(request: WireClickRequest): WireClickPolicyDecision {
+  const target = request.target;
+  const text = [
+    target?.text,
+    target?.ariaLabel,
+    target?.role,
+    target?.selectorHint,
+  ].filter((item): item is string => typeof item === "string" && item.length > 0).join(" ");
+
+  if (WIRE_CLICK_DENY_PATTERNS.some((pattern) => pattern.test(text))) {
+    return { result: "deny", reason: "destructive click target" };
+  }
+
+  if (WIRE_CLICK_APPROVAL_PATTERNS.some((pattern) => pattern.test(text))) {
+    return { result: "require-approval", reason: "sensitive click target" };
+  }
+
+  return { result: "allow" };
 }
 
 function parseWireClickRequest(value: unknown): WireClickRequest {

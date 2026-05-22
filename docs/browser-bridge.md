@@ -76,6 +76,7 @@ interface BrowserExecResult {
   stdout?: string;
   stderr?: string;
   returnValue?: JsonValue;
+  wireEvents?: JsonObject[];
   artifactIds?: ArtifactId[];
   durationMs: number;
 }
@@ -87,6 +88,30 @@ Exec targets:
 - `"active-tab"` — run in the current tab (default)
 - `"all-tabs"` — run in all open tabs
 - `{ tabId: string }` — run in a specific tab
+
+#### `wire.click()`
+
+Every Steel-backed `exec()` context includes a small page-side `wire.click(target)` binding for user-facing clicks that should reach the page as real browser input.
+
+```js
+const btn = [...document.querySelectorAll("button,a,[role=button]")]
+  .find((el) => /continue|accept/i.test(el.textContent || ""));
+await wire.click(btn);
+```
+
+The agent still uses ordinary JavaScript to find the target. `wire.click()` only changes how the click is delivered: the page shim snapshots the element's viewport coordinates and target metadata, then the host dispatches a narrow CDP mouse move/press/release sequence. It does not add auto-waiting, retries, a selector DSL, typing, navigation, or a new sandbox.
+
+The binding records structured `wireEvents` on the exec result with fields such as action, coordinates, button, tag, text, aria label, and selector hint. Those events are used for trace display and audit evidence.
+
+Policy boundary:
+- The exec source is still checked before execution.
+- Runtime click metadata is checked again before CDP dispatch.
+- Destructive targets such as "Delete account" are blocked before any mouse event is sent.
+- Sensitive targets such as payment, checkout, account, billing, permission, or outbound-message actions are rejected as requiring approval before dispatch.
+
+Frame boundary:
+- Main-frame elements and same-origin iframe elements are supported.
+- Cross-origin iframe elements are not directly passable from the parent page. Use a target-specific execution context or raw CDP coordinates when that is truly needed.
 
 ### 3. raw()
 

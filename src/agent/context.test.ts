@@ -439,6 +439,7 @@ test("buildActionGuidance includes trusted click and all four exec helpers", () 
   const guidance = buildActionGuidance(context);
 
   assert.match(guidance, /wire\.click/u);
+  assert.match(guidance, /Do not call `wire\.goto`/u);
   assert.match(guidance, /clickVisibleText/u);
   assert.match(guidance, /fillByLabel/u);
   assert.match(guidance, /extractTable/u);
