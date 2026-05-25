@@ -107,7 +107,7 @@ test("validateTaskContract rejects placeholder multi-site extraction artifacts",
         "| --- | --- | --- | --- |",
         "| Title | Vercel Pricing | Pricing and Plans | Pricing - Railway |",
         "## Netlify",
-        "See open Netlify pricing tab in this browser session.",
+        "Previously extracted in this run, but the raw text was not preserved.",
         "## Railway",
         "Content was included in prior extraction artifact context.",
       ].join("\n"),
@@ -118,7 +118,8 @@ test("validateTaskContract rejects placeholder multi-site extraction artifacts",
   assert.equal(validation.passed, false);
   assert.ok(validation.totalChecks > validation.missing.length);
   assert.ok(validation.satisfied.some((item) => item.includes("Visited vercel.com")));
-  assert.ok(validation.missing.some((item) => item.includes("see open")));
+  assert.ok(validation.missing.some((item) => item.includes("previously extracted")));
+  assert.ok(validation.missing.some((item) => item.includes("raw text was not preserved")));
   assert.ok(validation.missing.some((item) => item.includes("included in prior")));
 });
 

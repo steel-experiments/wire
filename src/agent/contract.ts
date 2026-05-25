@@ -29,6 +29,9 @@ const PLACEHOLDER_PHRASES = [
   "see open",
   "included in prior",
   "preserved as part of",
+  "previously extracted",
+  "raw text was not preserved",
+  "not preserved",
   "extracted below",
   "content was included",
 ];

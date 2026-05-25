@@ -1665,6 +1665,73 @@ test("executeTask blocks finish when artifact review finds problems", async () =
   assert.equal(result.run.status, "succeeded");
 });
 
+test("executeTask does not record finish when artifact review still fails after retry", async () => {
+  const task = makeTask({ objective: "Extract pricing and save as markdown table in md format" });
+  const sessionId = makeSessionId();
+  let execCount = 0;
+  const provider = createMockProvider({
+    async createSession() {
+      return { id: sessionId, provider: "custom", createdAt: new Date().toISOString(), status: "ready" };
+    },
+    async exec(): Promise<BrowserExecResult> {
+      execCount++;
+      return {
+        ok: true,
+        durationMs: 10,
+        returnValue: {
+          artifacts: [{
+            filename: "pricing.md",
+            kind: "markdown",
+            mimeType: "text/markdown",
+            content: [
+              "| Plan | Price |",
+              "|---|---|",
+              "| Hobby | Free |",
+              "| Pro | $20/mo |",
+              "| Enterprise | Pricing Ask AI |",
+            ].join("\n"),
+          }],
+        },
+      };
+    },
+    async stopSession() {},
+  });
+  const llmProvider: LLMProvider = {
+    model: "reviewer",
+    async chat() {
+      return {
+        model: "reviewer",
+        content: JSON.stringify({ passed: false, problems: ["Placeholder extraction claim remains."] }),
+      };
+    },
+  };
+
+  const result = await executeTask(
+    task,
+    { provider, policyEngine: createMockPolicyEngine(), llmProvider, maxSteps: 5 },
+    async (state) => {
+      const failedReview = state.events.some((event) =>
+        event.kind === "artifact-review" && event.payload.passed === false
+      );
+      if (state.stepCount === 0 || (failedReview && execCount < 2)) {
+        return { kind: "exec", summary: "Extract bad artifact", payload: { code: "return bad" } };
+      }
+      return { kind: "finish", summary: "Done" };
+    },
+  );
+
+  assert.equal(execCount, 2);
+  assert.equal(result.run.status, "failed");
+  assert.equal(result.classification.kind, "partial-success");
+  assert.equal(result.events.some((event) =>
+    event.kind === "thought-summary" && event.payload.kind === "finish"
+  ), false);
+  assert.ok(result.events.some((event) =>
+    event.kind === "thought-summary" &&
+    event.payload.reason === "Artifact review failed after retry budget"
+  ));
+});
+
 test("executeTask streams trace events to an optional sink", async () => {
   const task = makeTask({ objective: "Observe and finish" });
   const sessionId = makeSessionId();

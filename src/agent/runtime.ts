@@ -969,6 +969,15 @@ function latestReviewedArtifactCount(state: LoopState): number {
   return typeof review?.payload.artifactCount === "number" ? review.payload.artifactCount : 0;
 }
 
+function hasUnfixedArtifactReviewFailure(state: LoopState): boolean {
+  const review = [...state.events].reverse().find((event) =>
+    event.kind === "artifact-review" &&
+    typeof event.payload.artifactCount === "number"
+  );
+  return review?.payload.passed === false &&
+    taskArtifactEvents(state).length <= Number(review.payload.artifactCount);
+}
+
 function hasReviewableContract(state: LoopState): boolean {
   return state.contract.mustVisit.length > 0 ||
     state.contract.mustMention.length > 0 ||
@@ -1526,6 +1535,23 @@ async function runMainLoop(
           await flushTraceSink(state, config, signals);
           continue;
         }
+        if (hasUnfixedArtifactReviewFailure(state)) {
+          if (state.stepCount < config.maxSteps) {
+            state.stepCount++;
+            await flushTraceSink(state, config, signals);
+            continue;
+          } else {
+            state.events.push({
+              id: createId("event"),
+              runId: state.run.id,
+              ts: nowIsoUtc(),
+              kind: "thought-summary",
+              payload: { reason: "Artifact review failed and no corrected artifact was produced" },
+            });
+            await flushTraceSink(state, config, signals);
+            break;
+          }
+        }
         if (shouldReviewArtifacts(state, config)) {
           const artifactCount = taskArtifactEvents(state).length;
           const review = await reviewArtifacts(state, config);
@@ -1548,6 +1574,18 @@ async function runMainLoop(
               await flushTraceSink(state, config, signals);
               continue;
             }
+            state.events.push({
+              id: createId("event"),
+              runId: state.run.id,
+              ts: nowIsoUtc(),
+              kind: "thought-summary",
+              payload: {
+                reason: "Artifact review failed after retry budget",
+                problems: Array.isArray(payload.problems) ? payload.problems : [],
+              },
+            });
+            await flushTraceSink(state, config, signals);
+            break;
           }
         }
         state.events.push({
