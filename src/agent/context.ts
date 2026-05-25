@@ -45,6 +45,11 @@ export interface ObjectiveOverride {
   originalObjective: string;
 }
 
+export interface UrlEvidence {
+  url: string;
+  content: string;
+}
+
 export interface ContextBundle {
   task: TaskObjective;
   skills: SkillSummary[];
@@ -62,6 +67,9 @@ export interface ContextBundle {
   userMessages?: string[];
   /** When set, the user has redirected the task to a new objective. */
   objectiveOverride?: ObjectiveOverride;
+  /** Latest substantive extraction per URL visited this run. Lets the agent
+   *  reuse what it has already pulled instead of re-navigating to re-extract. */
+  evidence?: UrlEvidence[];
 }
 
 import { redactSecrets } from "../shared/redact.js";
@@ -201,6 +209,20 @@ export function assembleUserPrompt(context: ContextBundle): string {
       obsParts.push(`Headings: ${obs.headings.join(" | ")}`);
     }
     sections.push(obsParts.join("\n"));
+  }
+
+  if (context.evidence && context.evidence.length > 0) {
+    // Evidence content is sanitized upstream in latestExtractionsPerUrl
+    // (redactSecrets + stripInjectionPatterns applied BEFORE slicing). The
+    // URL itself still goes through redactSecrets here to scrub query-string
+    // tokens like ?session_token=…
+    const blocks = context.evidence.map(
+      (item) => `From ${redactSecrets(item.url)}:\n${item.content}`,
+    );
+    sections.push(
+      "Evidence already extracted this run (do not re-navigate to re-fetch):\n\n" +
+        blocks.join("\n\n"),
+    );
   }
 
   if (context.recentTraces.length > 0) {

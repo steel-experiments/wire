@@ -64,6 +64,7 @@ function makeLoopResult(overrides: {
     startedAt: run.startedAt ?? "2026-05-06T10:00:00.000Z",
     helperSource: "function noop() {}",
     helperVersion: 0,
+    reviewFailureCount: 0,
   };
   if (overrides.usage !== undefined) result.usage = overrides.usage;
   return result;

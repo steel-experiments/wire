@@ -353,6 +353,7 @@ async function persistExecutionArtifacts(
       startedAt: result.startedAt,
       helperSource: result.helperSource,
       helperVersion: result.helperVersion,
+      reviewFailureCount: result.reviewFailureCount,
       pendingAction: result.pendingAction,
       approvalRequestId: result.pendingApproval.id,
       savedAt: nowIsoUtc(),

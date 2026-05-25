@@ -449,6 +449,7 @@ export const runCheckpointSchema = z
     startedAt: isoUtcTimestampSchema,
     helperSource: z.string().min(1).optional(),
     helperVersion: z.number().int().nonnegative().optional(),
+    reviewFailureCount: z.number().int().nonnegative().optional(),
     pendingAction: proposedActionSchema,
     approvalRequestId: approvalIdSchema,
     savedAt: isoUtcTimestampSchema,

@@ -399,6 +399,10 @@ export interface RunCheckpoint {
   startedAt: string;
   helperSource?: string;
   helperVersion?: number;
+  /** Carries the reviewer-retry cap (Change D) across approval/resume so it
+   *  can't be silently restarted by repeated resumes. Optional for backward
+   *  compatibility with checkpoints written before this field existed. */
+  reviewFailureCount?: number;
   pendingAction: ProposedAction;
   approvalRequestId: ApprovalId;
   savedAt: string;

@@ -250,6 +250,8 @@ export interface LoopState extends TaskContext, RunTrace, StepCounter {
   helperVersion: number;
   /** Minimal task-derived completion contract. */
   contract: TaskContract;
+  /** How many times the artifact reviewer has rejected so far this run. */
+  reviewFailureCount: number;
 }
 
 export interface LoopResult {
@@ -263,6 +265,9 @@ export interface LoopResult {
   startedAt: string;
   helperSource: string;
   helperVersion: number;
+  /** Reviewer-retry counter at the moment the run paused/finished. Persisted
+   *  through checkpoint so resume can't silently restart the cap. */
+  reviewFailureCount: number;
   pendingApproval?: ApprovalRequest;
   pendingAction?: ProposedAction;
   usage?: LlmUsage;
@@ -304,6 +309,7 @@ export function createLoopState(
     helperSource: DEFAULT_HELPER_SOURCE,
     helperVersion: 0,
     contract: createTaskContract(task),
+    reviewFailureCount: 0,
   };
 
   if (sessionLiveUrl !== undefined) {
@@ -969,6 +975,7 @@ export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): Lo
     startedAt: state.startedAt,
     helperSource: state.helperSource,
     helperVersion: state.helperVersion,
+    reviewFailureCount: state.reviewFailureCount,
     // Pass an empty artifacts list: scoring.ts evidenceScore reads from
     // events via OR-style fallbacks, so artifact-event presence still
     // contributes. The eval/CLI paths that have persisted Artifact records

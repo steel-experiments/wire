@@ -40,6 +40,7 @@ import {
 import { assembleSystemPrompt, assembleUserPrompt, buildActionGuidance, stripInjectionPatterns, type ContextBundle } from "./context.js";
 import { createPlan, planToContext, advancePlanBy, type TaskPlan } from "./planning.js";
 import { observeBrowser, toObservationPayload } from "../browser/observe.js";
+import { redactSecrets } from "../shared/redact.js";
 import { detectAuthWall } from "../profiles/auth.js";
 import { llmProposeSkill, generateSkillProposal, manageSkillPromotion } from "../skills/promote.js";
 import { findMatchingSkillDocMatches, loadSkillDocsFromDir } from "../skills/loader.js";
@@ -191,6 +192,114 @@ function capForPrompt(text: string): string {
   const tail = text.slice(text.length - Math.floor(PROMPT_CAP_BYTES * 0.2));
   const omitted = text.length - head.length - tail.length;
   return `${head}\n…[truncated ${omitted} chars]…\n${tail}`;
+}
+
+// Per-URL evidence bounds. Each URL keeps a head slice of the latest
+// substantive extraction so the agent can reuse it instead of re-navigating.
+// Hard slice with no ellipsis marker — the marker is what the reviewer
+// previously misread as a content defect, and we want models to treat this
+// section as real evidence, not a redacted summary.
+const EVIDENCE_HEAD_BYTES = 8000;
+const EVIDENCE_MAX_URLS = 5;
+// Lower-bound to filter out navigation acks; tight substantive answers
+// (e.g. `{price:'$0/month'}` at ~30 bytes) still count if they aren't
+// structurally a nav ack — see isNavigationAck.
+const EVIDENCE_MIN_BYTES = 40;
+
+function evidenceHead(text: string): string {
+  return text.length <= EVIDENCE_HEAD_BYTES ? text : text.slice(0, EVIDENCE_HEAD_BYTES);
+}
+
+// A "navigation ack" is a small object whose keys are all control-plane
+// signals — {navigated:true}, {navigated:true,finalUrl:"…"}, {ok:true,…}.
+// These shouldn't shadow a real extraction recorded for the same URL.
+const NAV_ACK_KEYS = new Set([
+  "navigated", "ok", "saved", "finalUrl", "url", "redirected", "status",
+]);
+function isNavigationAck(returnValue: unknown): boolean {
+  if (!returnValue || typeof returnValue !== "object" || Array.isArray(returnValue)) return false;
+  const keys = Object.keys(returnValue as Record<string, unknown>);
+  if (keys.length === 0 || keys.length > NAV_ACK_KEYS.size) return false;
+  return keys.every((k) => NAV_ACK_KEYS.has(k));
+}
+
+// Serialize a code-result payload to the substantive text the agent would
+// want to reuse. Extractions typically come back as a JSON returnValue
+// ({site, text, plans, ...}); navigations come back as small acks. Prefer
+// returnValue (typed) over stdout, but ALWAYS fall back to stdout if the
+// returnValue can't be serialized — never return undefined.
+function codeResultContent(payload: TraceEvent["payload"]): string {
+  const rv = payload.returnValue;
+  const stdout = typeof payload.stdout === "string" ? payload.stdout : "";
+  if (rv !== undefined && rv !== null) {
+    if (typeof rv === "string") return rv;
+    try {
+      const serialized = JSON.stringify(rv);
+      // JSON.stringify returns undefined for Symbols, functions, and
+      // top-level undefined without throwing. Fall back to stdout in that
+      // case rather than propagate undefined into downstream .trim() calls.
+      if (typeof serialized === "string") return serialized;
+    } catch {
+      // fall through to stdout
+    }
+  }
+  return stdout;
+}
+
+// Find the URL the agent ENDS UP on after an exec at events[execIdx]. If the
+// exec navigated mid-step, the next observation in the trace will reflect the
+// new URL; the extracted content belongs to that destination URL, not the
+// pre-navigation one. If no later observation exists yet, fall back to the
+// pre-exec URL.
+function urlForCodeResult(events: TraceEvent[], execIdx: number, preExecUrl: string): string {
+  for (let i = execIdx + 1; i < events.length; i++) {
+    const event = events[i]!;
+    if (event.kind === "observation") {
+      const url = typeof event.payload.url === "string" ? event.payload.url : undefined;
+      return url || preExecUrl;
+    }
+    if (event.kind === "code-result") break;
+  }
+  return preExecUrl;
+}
+
+// Walk events in order; for each URL we observed, record the most recent
+// successful code-result whose payload looks like an extraction (not a
+// navigation acknowledgement). Returns latest-per-URL, with the most-recently
+// updated URL LAST in the array (which is what slice(-N) below keeps).
+export function latestExtractionsPerUrl(events: TraceEvent[]): Array<{ url: string; content: string }> {
+  let currentUrl: string | undefined;
+  const latest = new Map<string, string>();
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i]!;
+    if (event.kind === "observation") {
+      const url = typeof event.payload.url === "string" ? event.payload.url : undefined;
+      if (url) currentUrl = url;
+      continue;
+    }
+    if (event.kind !== "code-result") continue;
+    if (event.payload.ok !== true) continue;
+    if (!currentUrl) continue;
+    if (isNavigationAck(event.payload.returnValue)) continue;
+    const content = codeResultContent(event.payload);
+    if (content.trim().length < EVIDENCE_MIN_BYTES) continue;
+    // Attribute to the URL the page is on AFTER the exec, in case the exec
+    // navigated mid-step (e.g. `location.href=…; return body.innerText`).
+    const url = urlForCodeResult(events, i, currentUrl);
+    // Delete-then-set so map order reflects most-recent-extraction, which
+    // matters when slice(-N) drops entries below.
+    latest.delete(url);
+    latest.set(url, content);
+  }
+  // Redact + strip-injection BEFORE slicing. A secret that straddles the
+  // 8 KB boundary would otherwise be cut into a too-short prefix that no
+  // SECRET_PATTERNS regex matches; an injection token cut in half would
+  // similarly escape stripInjectionPatterns.
+  const entries = [...latest.entries()].map(([url, content]) => ({
+    url,
+    content: evidenceHead(stripInjectionPatterns(redactSecrets(content))),
+  }));
+  return entries.slice(-EVIDENCE_MAX_URLS);
 }
 
 function observationTabs(payload: TraceEvent["payload"]): Array<{ id: string; url: string; title: string }> {
@@ -566,6 +675,11 @@ export function defaultAgentTurn(
       contract: contractToPrompt(state.contract),
     };
 
+    const evidence = latestExtractionsPerUrl(state.events);
+    if (evidence.length > 0) {
+      context.evidence = evidence;
+    }
+
     if (state.sessionConfig) {
       context.sessionCapabilities = { ...state.sessionConfig };
     }
@@ -790,6 +904,9 @@ export async function resumeTask(
     helperSource: checkpoint.helperSource ?? DEFAULT_HELPER_SOURCE,
     helperVersion: checkpoint.helperVersion ?? 0,
     contract: createTaskContract(checkpoint.task),
+    // Restore reviewer-retry counter from checkpoint so a run that already
+    // burned its cap can't silently get fresh retries on every resume.
+    reviewFailureCount: checkpoint.reviewFailureCount ?? 0,
   };
 
   return executeWithState(checkpoint.task, config, turn, undefined, state, checkpoint.pendingAction, registry);
@@ -864,17 +981,87 @@ function shouldReviewArtifacts(state: LoopState, config: RuntimeConfig): boolean
   if (!config.llmProvider) return false;
   if (state.task.mode !== "task") return false;
   if (!hasReviewableContract(state)) return false;
+  // Use raw count so that the agent rewriting an artifact in response to
+  // reviewer feedback re-triggers the reviewer (the legitimate fix path).
+  // Wasted re-reviews on byte-identical rewrites are bounded by Change D's
+  // retry cap, so this can't loop unboundedly.
   return taskArtifactEvents(state).length > latestReviewedArtifactCount(state);
 }
 
-function artifactReviewPrompt(state: LoopState): string {
-  const artifacts = taskArtifactEvents(state).slice(-2).map((event) => {
-    const filename = String(event.payload.filename ?? event.payload.path ?? "artifact");
-    const content = String(event.payload.content ?? "");
-    return `Artifact: ${filename}\n${capForPrompt(content)}`;
+// The reviewer needs the actual artifact text to judge it; `capForPrompt`'s
+// `…[truncated N chars]…` marker is the prompt-summarizer's, not the
+// artifact's, and the reviewer treats the marker itself as a content defect.
+// Use a hard slice with a much higher bound here so the judge sees real bytes.
+const REVIEWER_ARTIFACT_BYTES = 50_000;
+const REVIEWER_MAX_ARTIFACTS = 3;
+
+function capForReviewer(text: string): string {
+  return text.length <= REVIEWER_ARTIFACT_BYTES ? text : text.slice(0, REVIEWER_ARTIFACT_BYTES);
+}
+
+// Dedupe key for an artifact event. Auto-extracted JSON/note artifacts have
+// no filename and use a unique-artifactId path, so falling back to `path`
+// would never collapse them. Fall back to `kind` first (json-output, note,
+// markdown, helper-diff, …) so repeated auto-extractions of the same kind
+// dedupe to one entry per kind, then to path (still unique per emission),
+// then to a literal label as a last resort.
+function artifactDedupeKey(event: TraceEvent): string {
+  const filename = typeof event.payload.filename === "string" && event.payload.filename.length > 0
+    ? event.payload.filename
+    : undefined;
+  if (filename) return filename;
+  const kind = typeof event.payload.kind === "string" && event.payload.kind.length > 0
+    ? event.payload.kind
+    : undefined;
+  if (kind) return `kind:${kind}`;
+  const path = typeof event.payload.path === "string" && event.payload.path.length > 0
+    ? event.payload.path
+    : undefined;
+  if (path) return path;
+  return "artifact";
+}
+
+function artifactDisplayName(event: TraceEvent): string {
+  const filename = typeof event.payload.filename === "string" && event.payload.filename.length > 0
+    ? event.payload.filename
+    : undefined;
+  if (filename) return filename;
+  const path = typeof event.payload.path === "string" && event.payload.path.length > 0
+    ? event.payload.path
+    : undefined;
+  if (path) return path;
+  return "artifact";
+}
+
+// Multiple artifact events with the same dedupe key are the agent rewriting
+// the same logical artifact across retries, not separate deliverables. Keep
+// the latest per key so the reviewer doesn't read its own retry trail as
+// duplication. Delete-then-set so map iteration order reflects
+// most-recent-update — important when slice(-N) below drops entries.
+export function dedupeArtifactEvents(events: TraceEvent[]): TraceEvent[] {
+  const latest = new Map<string, TraceEvent>();
+  for (const event of events) {
+    const key = artifactDedupeKey(event);
+    latest.delete(key);
+    latest.set(key, event);
+  }
+  return [...latest.values()].slice(-REVIEWER_MAX_ARTIFACTS);
+}
+
+export function artifactReviewPrompt(state: LoopState): string {
+  // Sanitize artifact content before showing it to the reviewer LLM: a hostile
+  // page scraped into an artifact can contain "ignore previous instructions"
+  // or <system> tags that would flip the verdict, and any credentials that
+  // bled into the content should be redacted before they leave the process.
+  const sanitize = (text: string): string =>
+    capForReviewer(stripInjectionPatterns(redactSecrets(text)));
+  const artifacts = dedupeArtifactEvents(taskArtifactEvents(state)).map((event) => {
+    const label = artifactDisplayName(event);
+    const content = typeof event.payload.content === "string" ? event.payload.content : "";
+    return `Artifact: ${label}\n${sanitize(content)}`;
   }).join("\n\n");
   const result = deriveRunResult(state.events, state.task.mode);
-  const evidence = result ? capForPrompt(result) : "(none)";
+  const evidence = result ? sanitize(result) : "(none)";
   return [
     "Review the final artifact against the objective and completion contract.",
     "Return strict JSON only: {\"passed\": boolean, \"problems\": string[]}.",
@@ -1350,10 +1537,17 @@ async function runMainLoop(
             kind: "artifact-review",
             payload,
           });
-          if (payload.passed === false && state.stepCount < config.maxSteps) {
-            state.stepCount++;
-            await flushTraceSink(state, config, signals);
-            continue;
+          // Bound reviewer retries. The reviewer is an LLM judge in a tight
+          // loop — without a cap, a flaky verdict can consume the whole step
+          // budget. After one retry, accept and let classification carry the
+          // notes as partial-success evidence.
+          if (payload.passed === false) {
+            state.reviewFailureCount++;
+            if (state.reviewFailureCount <= 1 && state.stepCount < config.maxSteps) {
+              state.stepCount++;
+              await flushTraceSink(state, config, signals);
+              continue;
+            }
           }
         }
         state.events.push({
