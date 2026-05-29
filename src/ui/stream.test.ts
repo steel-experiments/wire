@@ -177,7 +177,6 @@ test("stream renders created completion contract", () => {
       mustVisit: ["vercel.com", "netlify.com"],
       mustMention: ["Vercel", "Netlify"],
       mustNotContain: ["see open"],
-      mustReach: [],
     },
   }));
 

@@ -982,7 +982,6 @@ function hasReviewableContract(state: LoopState): boolean {
   return state.contract.mustVisit.length > 0 ||
     state.contract.mustMention.length > 0 ||
     state.contract.mustProduce !== undefined ||
-    state.contract.mustReach.length > 0 ||
     state.contract.mustNotContain.length > 0;
 }
 
