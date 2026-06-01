@@ -43,6 +43,7 @@ import { observeBrowser, toObservationPayload } from "../browser/observe.js";
 import { redactSecrets } from "../shared/redact.js";
 import { detectAuthWall } from "../profiles/auth.js";
 import { llmProposeSkill, generateSkillProposal, manageSkillPromotion } from "../skills/promote.js";
+import { proposeCriticalPoints, reviewCriticalPoints } from "./critical-points.js";
 import { findMatchingSkillDocMatches, loadSkillDocsFromDir } from "../skills/loader.js";
 import { extractFirstJsonObject, parseActionFromLlm, registerActionKind } from "./llm-parse.js";
 import {
@@ -104,6 +105,11 @@ export interface RuntimeConfig {
   ) => Promise<void> | void;
   traceSink?: TraceSink;
   traceLlmMessages?: boolean;
+  // Opt-in: have the model author an explicit critical-point checklist and
+  // judge the run against each point, instead of one all-or-nothing artifact
+  // verdict. Off by default; falls back to the default reviewer when the
+  // objective yields no verifiable points.
+  criticalPointReview?: boolean;
   saveTraceBlob?: (
     runId: TraceEvent["runId"],
     kind: TraceBlobKind,
@@ -1056,11 +1062,13 @@ export function dedupeArtifactEvents(events: TraceEvent[]): TraceEvent[] {
   return [...latest.values()].slice(-REVIEWER_MAX_ARTIFACTS);
 }
 
-export function artifactReviewPrompt(state: LoopState): string {
-  // Sanitize artifact content before showing it to the reviewer LLM: a hostile
-  // page scraped into an artifact can contain "ignore previous instructions"
-  // or <system> tags that would flip the verdict, and any credentials that
-  // bled into the content should be redacted before they leave the process.
+// Sanitized review evidence: the recent extracted result plus the deduped
+// final artifacts. A hostile page scraped into an artifact can carry "ignore
+// previous instructions" or <system> tags that would flip a verdict, and any
+// credentials that bled into the content are redacted before they leave the
+// process. Shared by the default artifact reviewer and the critical-point
+// reviewer so both judge the same evidence.
+function reviewerEvidence(state: LoopState): { evidence: string; artifacts: string } {
   const sanitize = (text: string): string =>
     capForReviewer(stripInjectionPatterns(redactSecrets(text)));
   const artifacts = dedupeArtifactEvents(taskArtifactEvents(state)).map((event) => {
@@ -1070,6 +1078,11 @@ export function artifactReviewPrompt(state: LoopState): string {
   }).join("\n\n");
   const result = deriveRunResult(state.events, state.task.mode);
   const evidence = result ? sanitize(result) : "(none)";
+  return { evidence, artifacts };
+}
+
+export function artifactReviewPrompt(state: LoopState): string {
+  const { evidence, artifacts } = reviewerEvidence(state);
   return [
     "Review the final artifact against the objective and completion contract.",
     "Return strict JSON only: {\"passed\": boolean, \"problems\": string[]}.",
@@ -1103,8 +1116,34 @@ function parseArtifactReview(content: string): ArtifactReviewResult | undefined 
   return undefined;
 }
 
+// Critical-point review: ask the model to decompose the objective into an
+// explicit checklist, then judge the evidence against each point. Returns
+// undefined (so the caller falls back to the default reviewer) when the
+// objective yields no verifiable points. Maps unmet points onto the existing
+// {passed, problems} shape so the downstream event/classification path is
+// unchanged.
+export async function reviewWithCriticalPoints(
+  state: LoopState,
+  llm: LLMProvider,
+): Promise<ArtifactReviewResult | undefined> {
+  const points = await proposeCriticalPoints(state.task, llm);
+  if (points.length === 0) return undefined;
+  const { evidence, artifacts } = reviewerEvidence(state);
+  const review = await reviewCriticalPoints(
+    state.task,
+    points,
+    `${evidence}\n\nArtifacts:\n${artifacts}`,
+    llm,
+  );
+  return { passed: review.passed, problems: review.unmet.slice(0, 8) };
+}
+
 async function reviewArtifacts(state: LoopState, config: RuntimeConfig): Promise<ArtifactReviewResult | undefined> {
   if (!config.llmProvider) return undefined;
+  if (config.criticalPointReview) {
+    const critical = await reviewWithCriticalPoints(state, config.llmProvider);
+    if (critical) return critical;
+  }
   const messages: ChatMessage[] = [
     {
       role: "system",

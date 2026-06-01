@@ -3,7 +3,7 @@ import type { LlmProvider } from "./config.js";
 import type { TrajectoryExportFormat } from "../eval/trajectories.js";
 
 export interface CliArgs {
-  command: "run" | "review" | "result" | "list" | "approve" | "bench" | "replay" | "export";
+  command: "run" | "review" | "result" | "list" | "approve" | "bench" | "replay" | "export" | "craft";
   taskFile?: string;
   objective?: string;
   mode?: TaskMode;
@@ -31,11 +31,12 @@ export interface CliArgs {
   quiet?: boolean;
   noColor?: boolean;
   traceLlm?: boolean;
+  criticalPoints?: boolean;
   help?: boolean;
   version?: boolean;
 }
 
-const VALID_COMMANDS = new Set(["run", "review", "result", "list", "approve", "bench", "replay", "export"]);
+const VALID_COMMANDS = new Set(["run", "review", "result", "list", "approve", "bench", "replay", "export", "craft"]);
 
 export function parseArgs(argv: string[]): CliArgs {
   const args = argv.slice(2); // drop node and script path
@@ -293,6 +294,11 @@ export function parseArgs(argv: string[]): CliArgs {
       continue;
     }
 
+    if (arg === "--critical-points") {
+      result.criticalPoints = true;
+      i++;
+      continue;
+    }
     if (arg === "--trace-llm") {
       result.traceLlm = true;
       i++;
@@ -336,6 +342,7 @@ export function formatHelp(): string {
     "  list      List tasks or runs",
     "  approve   Approve pending actions",
     "  replay    Replay a run and show timeline",
+    "  craft     Crystallize a run into a re-runnable browser script",
     "  bench     Run benchmark suite",
     "  export    Export scored trace trajectories for eval/training",
     "",
@@ -365,6 +372,10 @@ export function formatHelp(): string {
     "Replay options:",
     "  --run-id <id>            Run to replay",
     "",
+    "Craft options:",
+    "  --run-id <id>            Run to crystallize into a script (required)",
+    "  --out <path>             Write the script to a file instead of stdout",
+    "",
     "List options:",
     "  --mode <mode>            Filter by task mode",
     "",
@@ -392,6 +403,7 @@ export function formatHelp(): string {
     "  --quiet, -q              Suppress per-step trace stream",
     "  --no-color               Disable ANSI color in trace stream",
     "  --trace-llm              Store LLM messages/responses as blob refs",
+    "  --critical-points        Judge completion against an LLM-authored checklist",
     "  --version, -V            Show version",
     "  --help, -h               Show this help message",
   ].join("\n");

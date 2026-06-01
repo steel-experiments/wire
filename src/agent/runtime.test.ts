@@ -9,6 +9,7 @@ import {
   dedupeArtifactEvents,
   latestExtractionsPerUrl,
   artifactReviewPrompt,
+  reviewWithCriticalPoints,
 } from "./runtime.js";
 import type { RuntimeConfig, UserMessageInbox } from "./runtime.js";
 import type { BrowserProvider, BrowserObserveInput } from "../browser/bridge.js";
@@ -850,6 +851,35 @@ function makeReviewableState(events: TraceEvent[]): LoopState {
   state.events.push(...events);
   return state;
 }
+
+// Returns each canned response in turn (propose call, then review call).
+function queuedLlm(responses: string[]): LLMProvider {
+  let i = 0;
+  return {
+    model: "fake",
+    chat: async (): Promise<ChatResponse> => ({ content: responses[i++] ?? "NONE", model: "fake" }),
+  };
+}
+
+test("reviewWithCriticalPoints fails the review when a critical point is unmet", async () => {
+  const state = makeReviewableState([makeArtifactEvent("out.md", "Only example.com is covered.", "run_test")]);
+  const llm = queuedLlm([
+    '["Visit example.com","Produce a markdown comparison table"]',
+    '[{"id":"cp1","met":true},{"id":"cp2","met":false,"note":"no table present"}]',
+  ]);
+
+  const review = await reviewWithCriticalPoints(state, llm);
+
+  assert.ok(review, "expected a critical-point review result");
+  assert.equal(review!.passed, false);
+  assert.ok(review!.problems.some((problem) => /comparison table/u.test(problem)));
+});
+
+test("reviewWithCriticalPoints returns undefined so the default reviewer runs when no points are proposed", async () => {
+  const state = makeReviewableState([makeArtifactEvent("out.md", "x", "run_test")]);
+  const review = await reviewWithCriticalPoints(state, queuedLlm(["NONE"]));
+  assert.equal(review, undefined);
+});
 
 test("artifactReviewPrompt — does not emit a '…[truncated' marker for large artifact content (Change A)", () => {
   // Regression: the reviewer LLM previously read its own prompt-summarizer's

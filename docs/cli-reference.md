@@ -73,6 +73,24 @@ wire replay --run-id run_abc123
 wire replay --run-id run_abc123 --json
 ```
 
+### `craft`
+
+Crystallize a completed run into a re-runnable browser script: its successful
+`exec` steps, in order, annotated by intent (navigate / inspect / interact).
+Skills capture durable *site* knowledge; a crafted script captures the *task
+solution* as inspectable, patchable code.
+
+```bash
+wire craft --run-id run_abc123
+wire craft --run-id run_abc123 --out solution.js
+wire craft --run-id run_abc123 --json
+```
+
+Each block is one Wire exec action (async; `wire.click`, `clickVisibleText`,
+`fillByLabel`, `extractTable`, `waitForSelector` and top-level `return` are
+provided by the Wire exec sandbox), so the script is meant to be re-run through
+Wire and patched as the site changes.
+
 ### `bench`
 
 Run the benchmark suite.
@@ -116,6 +134,7 @@ wire export --run-id run_abc123 --format trajectory --out traces.jsonl
 | `--stealth` | flag | Request stealth mode |
 | `--region <code>` | string | Browser region |
 | `--user-agent <ua>` | string | Browser user agent override |
+| `--critical-points` | flag | Judge completion against an LLM-authored critical-point checklist (per-criterion review) instead of one all-or-nothing artifact verdict; falls back to the default reviewer when the objective yields no verifiable points |
 
 ### Review options
 
@@ -135,6 +154,13 @@ wire export --run-id run_abc123 --format trajectory --out traces.jsonl
 | Flag | Type | Description |
 |------|------|-------------|
 | `--run-id <id>` | string | Run with pending approvals (required) |
+
+### Craft options
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--run-id <id>` | string | Run to crystallize into a script (required) |
+| `--out <path>` | string | Write the script to a file instead of stdout |
 
 ### Bench options
 

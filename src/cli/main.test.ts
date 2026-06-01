@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import type { TraceEvent } from "../shared/types.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
 import { saveTask } from "../storage/tasks.js";
 import { saveRun } from "../storage/runs.js";
@@ -544,6 +545,90 @@ test("parseArgs parses --json flag for result command", () => {
   assert.equal(args.json, true);
   assert.equal(args.command, "result");
   assert.equal(args.runId, "run_test123");
+});
+
+test("parseArgs parses --critical-points as a run flag", () => {
+  const args = parseArgs(["node", "wire", "--objective", "do a thing", "--critical-points"]);
+
+  assert.equal(args.command, "run");
+  assert.equal(args.criticalPoints, true);
+  assert.equal(args.objective, "do a thing");
+});
+
+test("parseArgs parses craft command with run-id and out", () => {
+  const args = parseArgs(["node", "wire", "craft", "--run-id", "run_abc", "--out", "script.js"]);
+
+  assert.equal(args.command, "craft");
+  assert.equal(args.runId, "run_abc");
+  assert.equal(args.outFile, "script.js");
+});
+
+test("main craft crystallizes a run's exec steps into a script", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wire-cli-"));
+  const previousRoot = process.env.WIRE_ROOT;
+  const previousExitCode = process.exitCode;
+  process.env.WIRE_ROOT = root;
+
+  const task = {
+    id: createId("task"),
+    title: "Craft test",
+    mode: "task" as const,
+    objective: "Open example.com and read the heading",
+    constraints: [],
+    successCriteria: ["Heading returned"],
+    createdAt: nowIsoUtc(),
+  };
+  const run = {
+    id: createId("run"),
+    taskId: task.id,
+    status: "succeeded" as const,
+    startedAt: nowIsoUtc(),
+    finishedAt: nowIsoUtc(),
+    outcomeSummary: "ok",
+    classification: { kind: "task-complete" as const, confidence: 1 },
+  };
+  // Real traces have monotonically increasing timestamps (the browser round
+  // trip between an exec and its result guarantees result.ts > exec.ts), and
+  // listTraceEvents orders by ts. Mirror that here so the exec→result pairing
+  // is deterministic rather than scrambled by same-millisecond ties.
+  let tick = 0;
+  const traceEvent = (kind: "code-exec" | "code-result", payload: TraceEvent["payload"]): TraceEvent => ({
+    id: createId("event"),
+    runId: run.id,
+    ts: new Date(Date.UTC(2026, 5, 1, 0, 0, tick++)).toISOString(),
+    kind,
+    payload,
+  });
+
+  const lines: string[] = [];
+  const originalLog = console.log;
+  console.log = (value?: unknown) => {
+    lines.push(String(value ?? ""));
+  };
+
+  try {
+    await saveTask(root, task);
+    await saveRun(root, run);
+    await saveTraceEvent(root, traceEvent("code-exec", { code: 'window.location.href = "https://example.com";' }));
+    await saveTraceEvent(root, traceEvent("code-result", { ok: true, durationMs: 1 }));
+    await saveTraceEvent(root, traceEvent("code-exec", { code: "return document.querySelector('h1').innerText;" }));
+    await saveTraceEvent(root, traceEvent("code-result", { ok: true, durationMs: 1, returnValue: "Example Domain" }));
+    await main(["node", "wire", "craft", "--run-id", run.id]);
+  } finally {
+    console.log = originalLog;
+    process.exitCode = previousExitCode;
+    if (previousRoot === undefined) {
+      delete process.env.WIRE_ROOT;
+    } else {
+      process.env.WIRE_ROOT = previousRoot;
+    }
+  }
+
+  const output = lines.join("\n");
+  assert.match(output, /Open example\.com and read the heading/u);
+  assert.match(output, /Step 1 \(navigate\)/u);
+  assert.match(output, /Step 2 \(inspect\)/u);
+  assert.match(output, /document\.querySelector\('h1'\)/u);
 });
 
 test("main rejects unknown run-id subcommand instead of running it as a task", async () => {
