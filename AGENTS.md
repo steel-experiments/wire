@@ -20,6 +20,8 @@ When new knowledge or behavior needs a home, ask:
 - True for many sites; expressible as a thin callable function? → **helper**
 - True regardless of site or task; a property of how wire itself works? → **core**
 
+See [`docs/skills-vs-core.md`](docs/skills-vs-core.md) for the operational version of this question — how the skill trigger constrains what a skill can carry, and the cases that look like skills but are core.
+
 Treat code size as pressure, not a quota. Prefer deleting, consolidating, or moving behavior into skills/helpers before growing core.
 
 On every code change, update `METRICS.md` with the current `src/` LOC count.

@@ -13,6 +13,7 @@ Documentation as code for Wire — the zero-weight browser agent.
 | [browser-bridge.md](browser-bridge.md) | Observe, exec, raw — the three browser operations |
 | [policy-engine.md](policy-engine.md) | Rules, risk classification, and approval flow |
 | [skills-system.md](skills-system.md) | Skill format, loading, matching, and promotion |
+| [skills-vs-core.md](skills-vs-core.md) | Where knowledge belongs: skill, helper, or core |
 | [cli-reference.md](cli-reference.md) | Every command, flag, and option |
 | [storage.md](storage.md) | File-backed persistence, paths, and directory layout |
 | [evaluation.md](evaluation.md) | Benchmarks, scoring, trajectories, and export formats |

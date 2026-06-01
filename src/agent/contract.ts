@@ -11,10 +11,6 @@ export interface TaskContract {
     table?: boolean;
     minItems?: number;
   };
-  mustReach: Array<
-    | { kind: "contains-number"; value: number }
-    | { kind: "min-count"; value: number }
-  >;
   mustNotContain: string[];
 }
 
@@ -104,22 +100,6 @@ function inferMinItems(text: string): number | undefined {
   return Number.isFinite(count) && count > 0 ? count : undefined;
 }
 
-function inferWinTargetNumbers(text: string): number[] {
-  const values: number[] = [];
-  const patterns = [
-    /\b(?:play|beat|solve)\s+(?:the\s+)?(\d{2,6})(?:\s+(?:game|puzzle))?\b/giu,
-    /\bwin\s+(?:the\s+)?(\d{2,6})\s+(?:game|puzzle)\b/giu,
-    /\b(\d{2,6})\s+(?:game|puzzle)\b[^\n.;:,]*\bwin\b/giu,
-  ];
-  for (const pattern of patterns) {
-    for (const match of text.matchAll(pattern)) {
-      const value = Number(match[1]);
-      if (Number.isFinite(value)) values.push(value);
-    }
-  }
-  return [...new Set(values)];
-}
-
 export function createTaskContract(task: Task): TaskContract {
   const text = objectiveText(task);
   const lower = text.toLowerCase();
@@ -129,17 +109,6 @@ export function createTaskContract(task: Task): TaskContract {
   const wantsArtifact = /\b(?:save|write|export|download|artifact|file|md|markdown|json|csv|txt|text)\b/iu.test(text);
   const wantsTable = /\btable\b|comparison table/iu.test(text);
   const minItems = inferMinItems(text);
-  const mustReach: TaskContract["mustReach"] = [];
-
-  if (/\bwin\b/iu.test(text)) {
-    for (const value of inferWinTargetNumbers(text)) {
-      mustReach.push({ kind: "contains-number", value });
-    }
-  }
-
-  if (minItems !== undefined) {
-    mustReach.push({ kind: "min-count", value: minItems });
-  }
 
   const mustProduce = wantsArtifact || wantsTable || format || minItems !== undefined
     ? {
@@ -154,7 +123,6 @@ export function createTaskContract(task: Task): TaskContract {
     mustVisit,
     mustMention,
     ...(mustProduce ? { mustProduce } : {}),
-    mustReach,
     mustNotContain: lower.includes("extract") || lower.includes("save") || lower.includes("compare")
       ? PLACEHOLDER_PHRASES
       : [],
@@ -173,10 +141,6 @@ export function contractToPrompt(contract: TaskContract): string {
     if (contract.mustProduce.minItems !== undefined) parts.push(`at least ${contract.mustProduce.minItems} items`);
     if (parts.length > 0) lines.push(`- Must produce: ${parts.join(", ")}`);
   }
-  for (const reach of contract.mustReach) {
-    if (reach.kind === "contains-number") lines.push(`- Must show evidence containing: ${reach.value}`);
-    if (reach.kind === "min-count") lines.push(`- Must show at least ${reach.value} items`);
-  }
   if (contract.mustNotContain.length > 0) {
     lines.push("- Must not contain placeholder extraction claims");
   }
@@ -194,12 +158,6 @@ export function contractSummary(contract: TaskContract): string {
     if (contract.mustProduce.minItems !== undefined) produce.push(`${contract.mustProduce.minItems} items`);
     if (produce.length > 0) parts.push(produce.join(" "));
   }
-  if (contract.mustReach.length > 0) {
-    const reach = contract.mustReach.map((item) =>
-      item.kind === "contains-number" ? String(item.value) : `${item.value} items`
-    );
-    parts.push(`evidence: ${reach.join(", ")}`);
-  }
   if (contract.mustMention.length > 0) parts.push(`mention: ${contract.mustMention.join(", ")}`);
   if (contract.mustNotContain.length > 0) parts.push("no placeholders");
   return parts.length > 0 ? parts.join(" · ") : "no extra completion contract";
@@ -209,7 +167,6 @@ function contractToJson(contract: TaskContract): JsonObject {
   const value: JsonObject = {
     mustVisit: contract.mustVisit,
     mustMention: contract.mustMention,
-    mustReach: contract.mustReach.map((item) => ({ kind: item.kind, value: item.value })),
     mustNotContain: contract.mustNotContain,
   };
   if (contract.mustProduce) {
@@ -379,19 +336,6 @@ export function validateTaskContract(
     missing.push(`Expected at least ${minItems} items in final result`);
   } else if (minItems !== undefined) {
     satisfied.push(`Produced at least ${minItems} items in final result`);
-  }
-
-  for (const reach of contract.mustReach) {
-    if (reach.kind === "contains-number" && !new RegExp(`\\b${reach.value}\\b`, "u").test(answerText)) {
-      missing.push(`Missing evidence containing ${reach.value}`);
-    } else if (reach.kind === "contains-number") {
-      satisfied.push(`Found evidence containing ${reach.value}`);
-    }
-    if (reach.kind === "min-count" && countItems(answerText) < reach.value) {
-      missing.push(`Expected at least ${reach.value} items in final result`);
-    } else if (reach.kind === "min-count") {
-      satisfied.push(`Found at least ${reach.value} items in final result`);
-    }
   }
 
   for (const phrase of contract.mustNotContain) {

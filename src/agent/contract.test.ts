@@ -148,20 +148,40 @@ test("validateTaskContract accepts a substantive markdown comparison artifact", 
   assert.equal(validateTaskContract(contract, events).passed, true);
 });
 
-test("createTaskContract requires 2048 evidence for win objective", () => {
+test("createTaskContract no longer fabricates a 'win the number' completion contract", () => {
+  // Regression: a game/win heuristic injected a `contains-number` requirement
+  // (e.g. "Play 2048 game and win" forced the answer to contain 2048). That was
+  // single-pattern lore living in the universal contract builder; game success
+  // is judged by benchmark rubrics, not by the completion contract.
   const contract = createTaskContract(makeTask({ objective: "Play 2048 game and win" }));
 
-  assert.deepEqual(contract.mustReach, [{ kind: "contains-number", value: 2048 }]);
-  assert.equal(validateTaskContract(contract, [], "max tile is 1024").passed, false);
-  assert.equal(validateTaskContract(contract, [], "board: [2,4,1024,2048]").passed, true);
+  assert.equal(contract.mustProduce, undefined);
+  assert.equal(validateTaskContract(contract, [], "max tile is 1024").passed, true);
 });
 
-test("createTaskContract does not require unrelated numbers for generic win objectives", () => {
+test("createTaskContract does not invent requirements from incidental numbers", () => {
   const contract = createTaskContract(makeTask({
     objective: "Win the 100m sprint by 2024 under 5000 budget",
   }));
 
-  assert.deepEqual(contract.mustReach, []);
+  assert.equal(contract.mustProduce, undefined);
+  assert.equal(validateTaskContract(contract, [], "no numbers here").passed, true);
+});
+
+test("createTaskContract validates a minItems requirement exactly once", () => {
+  // "find/list/top N" sets mustProduce.minItems. It must be checked a single
+  // time — previously it was also mirrored into a redundant mustReach entry and
+  // validated twice, inflating totalChecks for every list task.
+  const contract = createTaskContract(makeTask({
+    objective: "Find the top 10 trending repos and list them",
+  }));
+
+  assert.equal(contract.mustProduce?.minItems, 10);
+
+  const validation = validateTaskContract(contract, [], "1. one\n2. two\n3. three");
+  assert.equal(validation.passed, false);
+  const minItemsMisses = validation.missing.filter((item) => item.includes("at least 10 items"));
+  assert.equal(minItemsMisses.length, 1, "minItems must be validated exactly once");
 });
 
 test("classifyRun downgrades completion when contract check failed", () => {
