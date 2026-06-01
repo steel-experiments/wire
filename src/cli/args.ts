@@ -3,7 +3,7 @@ import type { LlmProvider } from "./config.js";
 import type { TrajectoryExportFormat } from "../eval/trajectories.js";
 
 export interface CliArgs {
-  command: "run" | "review" | "result" | "list" | "approve" | "bench" | "replay" | "export";
+  command: "run" | "review" | "result" | "list" | "approve" | "bench" | "replay" | "export" | "craft";
   taskFile?: string;
   objective?: string;
   mode?: TaskMode;
@@ -35,7 +35,7 @@ export interface CliArgs {
   version?: boolean;
 }
 
-const VALID_COMMANDS = new Set(["run", "review", "result", "list", "approve", "bench", "replay", "export"]);
+const VALID_COMMANDS = new Set(["run", "review", "result", "list", "approve", "bench", "replay", "export", "craft"]);
 
 export function parseArgs(argv: string[]): CliArgs {
   const args = argv.slice(2); // drop node and script path
@@ -336,6 +336,7 @@ export function formatHelp(): string {
     "  list      List tasks or runs",
     "  approve   Approve pending actions",
     "  replay    Replay a run and show timeline",
+    "  craft     Crystallize a run into a re-runnable browser script",
     "  bench     Run benchmark suite",
     "  export    Export scored trace trajectories for eval/training",
     "",
@@ -364,6 +365,10 @@ export function formatHelp(): string {
     "",
     "Replay options:",
     "  --run-id <id>            Run to replay",
+    "",
+    "Craft options:",
+    "  --run-id <id>            Run to crystallize into a script (required)",
+    "  --out <path>             Write the script to a file instead of stdout",
     "",
     "List options:",
     "  --mode <mode>            Filter by task mode",

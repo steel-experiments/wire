@@ -19,6 +19,7 @@ import { scoreRun } from "../eval/scoring.js";
 import { classifyError } from "./errors.js";
 import { success, failure } from "./output.js";
 import { buildTimeline, summarizeTimeline } from "../trace/replay.js";
+import { crystallizeRunScript } from "../trace/crystallize.js";
 import { defaultStorageRoot } from "../shared/paths.js";
 import { NotFoundError } from "../storage/atomic.js";
 import {
@@ -111,6 +112,10 @@ export async function main(argv: string[]): Promise<void> {
     }
     case "replay": {
       await handleReplay(args);
+      break;
+    }
+    case "craft": {
+      await handleCraft(args);
       break;
     }
     case "bench": {
@@ -492,6 +497,56 @@ async function handleReplay(
     }
   } catch (err) {
     await reportCliError("replay", err, root, args.json);
+    process.exitCode = 1;
+  }
+}
+
+async function handleCraft(args: CliArgs): Promise<void> {
+  if (!args.runId) {
+    if (args.json) {
+      console.log(JSON.stringify(failure("craft", {
+        error_class: "input",
+        error_code: "MISSING_RUN_ID",
+        retryable: false,
+        hint: "--run-id is required for 'craft'.",
+      })));
+    } else {
+      console.error("Error: --run-id is required for 'craft'.");
+    }
+    process.exitCode = 1;
+    return;
+  }
+
+  const root = defaultStorageRoot();
+  try {
+    const runId = args.runId as `run_${string}`;
+    const run = await loadRun(root, runId);
+    const task = await loadTask(root, run.taskId);
+    const events = await listTraceEvents(root, runId);
+    const crafted = crystallizeRunScript(events, {
+      objective: task.objective,
+      runId,
+      generatedAt: new Date().toISOString(),
+    });
+
+    if (args.outFile) {
+      await mkdir(dirname(args.outFile), { recursive: true });
+      await writeFile(args.outFile, crafted.source.endsWith("\n") ? crafted.source : `${crafted.source}\n`, "utf-8");
+      if (args.json) {
+        console.log(JSON.stringify(success("craft", { steps: crafted.steps.length, outFile: args.outFile }, runId)));
+      } else {
+        console.log(`Crafted ${crafted.steps.length} step(s) from ${runId} to ${args.outFile}`);
+      }
+      return;
+    }
+
+    if (args.json) {
+      console.log(JSON.stringify(success("craft", { steps: crafted.steps, source: crafted.source }, runId)));
+    } else {
+      console.log(crafted.source);
+    }
+  } catch (err) {
+    await reportCliError("craft", err, root, args.json);
     process.exitCode = 1;
   }
 }
