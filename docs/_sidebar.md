@@ -10,6 +10,7 @@
   - [Browser Bridge](browser-bridge.md)
   - [Policy Engine](policy-engine.md)
   - [Skills System](skills-system.md)
+  - [Skills vs. Core](skills-vs-core.md)
 
 - **Reference**
   - [CLI Reference](cli-reference.md)

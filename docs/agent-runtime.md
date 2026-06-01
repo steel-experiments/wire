@@ -206,7 +206,6 @@ Contracts are derived from the task's success criteria, constraints, and objecti
 - `mustVisit` — URLs that must have been visited
 - `mustMention` — keywords that must appear in the extracted content
 - `mustProduce` — artifact kinds that must have been created
-- `mustReach` — URL patterns that must appear in observations
 - `mustNotContain` — content patterns that must not appear
 
 Contracts are defined in `src/agent/contract.ts`.
