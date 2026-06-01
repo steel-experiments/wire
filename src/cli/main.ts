@@ -230,6 +230,7 @@ async function handleRun(
     if (args.quiet) opts.quiet = args.quiet;
     if (args.noColor) opts.color = false;
     if (args.traceLlm) opts.traceLlmMessages = true;
+    if (args.criticalPoints) opts.criticalPointReview = true;
 
     const result = await runTask(opts);
 

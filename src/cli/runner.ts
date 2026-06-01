@@ -88,6 +88,7 @@ export interface RunOptions {
   color?: boolean;
   keepSessionOpen?: boolean;
   traceLlmMessages?: boolean;
+  criticalPointReview?: boolean;
 }
 
 // Auto-approving policy decorator (--yes mode)
@@ -191,7 +192,7 @@ function defaultMaxSteps(mode: "task" | "investigate" | "experiment"): number {
 }
 
 function createRuntimeConfig(
-  options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "sessionConfig" | "provider" | "model" | "yes" | "json" | "mode" | "verbose" | "quiet" | "color" | "keepSessionOpen" | "traceLlmMessages">,
+  options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "sessionConfig" | "provider" | "model" | "yes" | "json" | "mode" | "verbose" | "quiet" | "color" | "keepSessionOpen" | "traceLlmMessages" | "criticalPointReview">,
 ): RuntimeConfig {
   let policyEngine: PolicyEngine = createPolicyEngine();
   if (options.yes) {
@@ -229,6 +230,7 @@ function createRuntimeConfig(
     },
   };
   if (options.keepSessionOpen) config.keepSessionOpen = true;
+  if (options.criticalPointReview === true) config.criticalPointReview = true;
   if (options.traceLlmMessages === true || process.env.WIRE_TRACE_LLM_MESSAGES === "1") {
     config.traceLlmMessages = true;
     config.saveTraceBlob = async (runId, kind, value, contentType) => {

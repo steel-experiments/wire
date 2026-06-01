@@ -547,6 +547,14 @@ test("parseArgs parses --json flag for result command", () => {
   assert.equal(args.runId, "run_test123");
 });
 
+test("parseArgs parses --critical-points as a run flag", () => {
+  const args = parseArgs(["node", "wire", "--objective", "do a thing", "--critical-points"]);
+
+  assert.equal(args.command, "run");
+  assert.equal(args.criticalPoints, true);
+  assert.equal(args.objective, "do a thing");
+});
+
 test("parseArgs parses craft command with run-id and out", () => {
   const args = parseArgs(["node", "wire", "craft", "--run-id", "run_abc", "--out", "script.js"]);
 

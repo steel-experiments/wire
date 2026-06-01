@@ -31,6 +31,7 @@ export interface CliArgs {
   quiet?: boolean;
   noColor?: boolean;
   traceLlm?: boolean;
+  criticalPoints?: boolean;
   help?: boolean;
   version?: boolean;
 }
@@ -293,6 +294,11 @@ export function parseArgs(argv: string[]): CliArgs {
       continue;
     }
 
+    if (arg === "--critical-points") {
+      result.criticalPoints = true;
+      i++;
+      continue;
+    }
     if (arg === "--trace-llm") {
       result.traceLlm = true;
       i++;
@@ -397,6 +403,7 @@ export function formatHelp(): string {
     "  --quiet, -q              Suppress per-step trace stream",
     "  --no-color               Disable ANSI color in trace stream",
     "  --trace-llm              Store LLM messages/responses as blob refs",
+    "  --critical-points        Judge completion against an LLM-authored checklist",
     "  --version, -V            Show version",
     "  --help, -h               Show this help message",
   ].join("\n");
