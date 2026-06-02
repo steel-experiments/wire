@@ -1,0 +1,32 @@
+[
+  {
+    "id": "hackernews-top5",
+    "objective": "Go to https://news.ycombinator.com/ and return the top 5 stories on the front page as JSON, each with rank, title, and points.",
+    "maxSteps": 12
+  },
+  {
+    "id": "example-title",
+    "objective": "Go to https://example.com and return the heading text.",
+    "maxSteps": 8
+  },
+  {
+    "id": "httpbin-headers",
+    "objective": "Navigate to https://httpbin.org/headers and return the User-Agent and Accept headers from the response JSON.",
+    "maxSteps": 8
+  },
+  {
+    "id": "lesswrong-posts",
+    "objective": "Navigate to https://www.lesswrong.com, wait a few seconds for it to load, and extract the titles of the first 3 posts on the front page.",
+    "maxSteps": 12
+  },
+  {
+    "id": "sec-edgar-filing",
+    "objective": "Navigate to https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company=Apple&type=10-K&dateb=&owner=include&count=5 and return the most recent filing date and form type.",
+    "maxSteps": 12
+  },
+  {
+    "id": "booking-search",
+    "objective": "Navigate directly to https://www.booking.com/searchresults.html?ss=Tokyo&checkin=2026-06-10&checkout=2026-06-12, wait a few seconds, then extract the first 5 hotel names and their prices as JSON.",
+    "maxSteps": 14
+  }
+]
