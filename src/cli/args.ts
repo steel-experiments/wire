@@ -24,6 +24,7 @@ export interface CliArgs {
   outFile?: string;
   minScore?: number;
   minPreferenceDelta?: number;
+  minPassRate?: number;
   json?: boolean;
   yes?: boolean;
   strict?: boolean;
@@ -245,6 +246,19 @@ export function parseArgs(argv: string[]): CliArgs {
       continue;
     }
 
+    if (arg === "--min-pass-rate") {
+      i++;
+      const val = args[i];
+      if (val !== undefined) {
+        const n = Number(val);
+        if (Number.isFinite(n)) {
+          result.minPassRate = Math.max(0, Math.min(1, n));
+        }
+      }
+      i++;
+      continue;
+    }
+
     if (arg === "--min-delta") {
       i++;
       const val = args[i];
@@ -386,6 +400,8 @@ export function formatHelp(): string {
     "  --benchmarks <path>      Benchmark file (default: benchmarks/default.json)",
     "  --provider <provider>    LLM provider for agent and judge",
     "  --model <model-id>       LLM model for agent and judge",
+    "  --min-pass-rate <n>      Exit non-zero only if pass rate < n (0..1).",
+    "                           Variance-tolerant gate; default requires all pass.",
     "",
     "Export options:",
     "  --format <format>        trajectory | sft | rewards | preferences",

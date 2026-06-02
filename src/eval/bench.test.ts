@@ -13,6 +13,7 @@ import {
   loadBenchReport,
   listBenchReports,
   evaluateBenchmarkPass,
+  parseJudgeScore,
   type BenchReport,
   type BenchResult,
 } from "./bench.js";
@@ -81,6 +82,20 @@ test("loadBenchmarks reads and parses a valid benchmark file", async () => {
   assert.equal(loaded[0]!.mode, "task");
   assert.equal(loaded[0]!.maxSteps, 5);
   assert.deepEqual(loaded[0]!.expected.answerContains, ["Example"]);
+});
+
+test("parseJudgeScore returns null for unscoreable replies, not a misleading 0", () => {
+  // Reasoning models can spend their token budget before emitting the number,
+  // returning empty/prose. That must read as "no judge signal" (null), not a
+  // 0.0 that fails a correct answer — the bug that made the suite swing.
+  assert.equal(parseJudgeScore(""), null);
+  assert.equal(parseJudgeScore("I think the answer is good"), null);
+  // Real scores parse, including when wrapped in stray prose, and clamp.
+  assert.equal(parseJudgeScore("0.85"), 0.85);
+  assert.equal(parseJudgeScore("Score: 1.0"), 1);
+  assert.equal(parseJudgeScore("0"), 0);
+  assert.equal(parseJudgeScore("1.7"), 1);
+  assert.equal(parseJudgeScore("-0.5"), 0);
 });
 
 test("loadBenchmarks preserves an optional per-case sessionConfig", async () => {

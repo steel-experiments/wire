@@ -10,8 +10,44 @@ Canonical task corpus for testing wire's browser infrastructure and agent. Each 
 | `emit-schema.ts` | Regenerates `benchmark_tasks.schema.json` from `schema.ts`. Run with `pnpm emit-schema` (or `bun run benchmarks/emit-schema.ts`). |
 | `benchmark_tasks.schema.json` | Auto-emitted Draft 2020-12 JSON Schema (do not hand-edit). |
 | `benchmark_tasks.json` | The 210-task corpus. Validated against the schema. |
-| `default.json` | Legacy 6-task regression set; kept for back-compat. The same 6 are in `benchmark_tasks.json` under `source.name = "wire-default"`. |
+| `default.json` | 7-task smoke/regression set run by `wire bench`. A case may carry an optional `sessionConfig` (proxy/stealth/captcha/userAgent) so anti-bot and fair-access sites measure capability, not default-config blocking. |
 | `demo_tasks.json` | 80 sales-recording demo prompts. **Not** a graded benchmark; different shape. A curated, depersonalized subset of these is included in `benchmark_tasks.json` under `source.name = "wire-demo"`. |
+
+## Running the default suite (`wire bench`)
+
+```bash
+wire bench                          # run benchmarks/default.json, print a report
+wire bench --min-pass-rate 0.6      # exit non-zero only if pass rate < 0.6 (CI gate)
+wire bench --benchmarks <path>      # run a different suite file
+```
+
+Reports persist to `~/.wire/state/benchmarks/`.
+
+### Baseline (2026-06-02)
+
+Locked at **5/7** typical, **6/7** when SEC EDGAR's fair-access request succeeds. A
+task passes if its classification matches the expected one with full keyword
+relevance, **or** the LLM judge scores it ≥ 0.8.
+
+| task | status | notes |
+|---|---|---|
+| example-title | ✅ stable | |
+| wire-click-trusted-event | ✅ stable | trusted-input click |
+| booking-search | ✅ stable | needs `sessionConfig` stealth+proxy+captcha |
+| lesswrong-posts | ✅ stable | |
+| httpbin-headers | ✅ stable | |
+| sec-edgar-filing | ⚠️ flaky | declared `userAgent`; SEC still rate-limits intermittently |
+| elgoog-2048 | ❌ hard | iframe game; not yet reliably solved |
+
+### Gating
+
+The default `wire bench` gate is strict (all tasks must pass) — not suitable for CI
+given the flaky/hard tail. Use `--min-pass-rate` for a variance-tolerant gate.
+**Recommended CI floor: `--min-pass-rate 0.6`** — tolerates the sec-edgar flake and
+the elgoog miss, but catches any regression that drops a stable task (→ 4/7 = 0.57).
+
+A single run is noisy (live sites + LLM nondeterminism); for a trustworthy number,
+run 2–3× and take the mode, or raise the floor only after stabilizing the tail.
 
 ## Task shape
 

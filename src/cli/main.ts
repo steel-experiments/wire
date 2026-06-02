@@ -569,7 +569,13 @@ async function handleBench(
       console.log(formatBenchReport(report));
     }
 
-    if (!report.passed) {
+    // Gate: with --min-pass-rate, fail only when the aggregate pass rate drops
+    // below the floor (variance-tolerant — a single flaky task won't fail CI).
+    // Without it, keep the strict all-tasks-pass gate.
+    const gateFailed = args.minPassRate !== undefined
+      ? report.passRate < args.minPassRate
+      : !report.passed;
+    if (gateFailed) {
       process.exitCode = 1;
     }
   } catch (err) {

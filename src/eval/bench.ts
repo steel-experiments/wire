@@ -266,7 +266,7 @@ async function judgeResult(
   provider: LLMProvider,
   objective: string,
   result: string,
-): Promise<number> {
+): Promise<number | null> {
   const response = await provider.chat(
     [
       {
@@ -284,11 +284,26 @@ async function judgeResult(
         content: `Objective: ${objective}\n\nAgent output:\n${result.slice(0, 2000)}`,
       },
     ],
-    { temperature: 0, maxTokens: 16 },
+    // Generous cap: reasoning models spend output budget on hidden reasoning
+    // before emitting the number, so a tight cap (e.g. 16) returns empty text.
+    { temperature: 0, maxTokens: 2000 },
   );
 
-  const score = parseFloat(response.content.trim());
-  if (isNaN(score)) return 0;
+  return parseJudgeScore(response.content);
+}
+
+/**
+ * Parse the judge's score from its raw reply. Returns null when no number is
+ * present (e.g. a reasoning model spent its token budget and returned empty or
+ * prose) so an unscoreable reply is treated as "no judge signal" rather than a
+ * 0.0 that masquerades as a failing answer. Scans for the first number anywhere
+ * in the text and clamps to 0..1.
+ */
+export function parseJudgeScore(content: string): number | null {
+  const match = content.match(/-?\d*\.?\d+/u);
+  if (!match) return null;
+  const score = parseFloat(match[0]);
+  if (Number.isNaN(score)) return null;
   return Math.min(1, Math.max(0, score));
 }
 

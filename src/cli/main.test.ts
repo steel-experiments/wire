@@ -455,6 +455,15 @@ test("main prints version for -V and --version", async () => {
   assert.deepEqual(lines, ["0.1.0", "0.1.0"]);
 });
 
+test("parseArgs parses --min-pass-rate and clamps it to 0..1", () => {
+  assert.equal(parseArgs(["node", "wire", "bench", "--min-pass-rate", "0.7"]).minPassRate, 0.7);
+  // Clamp out-of-range and ignore non-numeric.
+  assert.equal(parseArgs(["node", "wire", "bench", "--min-pass-rate", "1.5"]).minPassRate, 1);
+  assert.equal(parseArgs(["node", "wire", "bench", "--min-pass-rate", "-1"]).minPassRate, 0);
+  assert.equal(parseArgs(["node", "wire", "bench", "--min-pass-rate", "abc"]).minPassRate, undefined);
+  assert.equal(parseArgs(["node", "wire", "bench"]).minPassRate, undefined);
+});
+
 test("parseArgs treats positional arg as objective", () => {
   const args = parseArgs(["node", "wire", "get", "the", "title", "of", "steel.dev"]);
 
