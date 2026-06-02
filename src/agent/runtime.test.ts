@@ -18,7 +18,7 @@ import type { PolicyEngine } from "../policy/engine.js";
 import type { LLMProvider, ChatMessage, ChatResponse } from "../providers/llm/openai.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
 import { createLoopState, type LoopState } from "./loop.js";
-import type { Task, BrowserSession, BrowserObservation, LoadedSkill, JsonObject, TraceEvent } from "../shared/types.js";
+import type { Task, BrowserSession, BrowserObservation, LoadedSkill, JsonObject, TraceEvent, TraceBlobKind } from "../shared/types.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -692,8 +692,9 @@ test("executeTask records opt-in LLM call blob refs without inline messages", as
   assert.ok(saved.filter((item) => item.kind === "llm-response").length >= 1);
   assert.deepEqual(
     Object.keys(call.payload).sort(),
-    ["callIndex", "messageRefs", "model", "responseRef"].sort(),
+    ["callIndex", "messageRefs", "model", "purpose", "responseRef"].sort(),
   );
+  assert.equal(call.payload.purpose, "agent");
   assert.match(JSON.stringify(call.payload), /hash-1/u);
   assert.doesNotMatch(JSON.stringify(call.payload), /Completion contract|Return exactly one next action/u);
 });
@@ -903,6 +904,33 @@ test("reviewWithCriticalPoints returns undefined so the default reviewer runs wh
   const state = makeReviewableState([makeArtifactEvent("out.md", "x", "run_test")]);
   const review = await reviewWithCriticalPoints(state, queuedLlm(["NONE"]));
   assert.equal(review, undefined);
+});
+
+test("reviewWithCriticalPoints traces its propose and review LLM calls when trace options are set", async () => {
+  // --trace-llm previously captured only the main agent-loop calls; the
+  // reviewer's propose/review exchanges went untraced and indistinguishable.
+  const state = makeReviewableState([makeArtifactEvent("out.md", "table here", "run_test")]);
+  const llm = queuedLlm([
+    '["Produce a markdown table"]',
+    '[{"id":"cp1","met":true}]',
+  ]);
+  const blobKinds: string[] = [];
+  let n = 0;
+  const traceOptions = {
+    traceLlmMessages: true,
+    saveTraceBlob: async (_runId: TraceEvent["runId"], kind: TraceBlobKind) => {
+      blobKinds.push(kind);
+      n += 1;
+      return { hash: `h${n}`, size: 1, kind };
+    },
+  };
+
+  await reviewWithCriticalPoints(state, llm, traceOptions);
+
+  const purposes = state.events.filter((e) => e.kind === "llm-call").map((e) => e.payload.purpose);
+  assert.deepEqual(purposes, ["critical-points-propose", "critical-points-review"]);
+  assert.ok(blobKinds.includes("llm-message"), "messages should be saved as blobs");
+  assert.ok(blobKinds.includes("llm-response"), "responses should be saved as blobs");
 });
 
 test("artifactReviewPrompt — does not emit a '…[truncated' marker for large artifact content (Change A)", () => {

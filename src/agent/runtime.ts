@@ -25,7 +25,7 @@ import { createBrowserSession, stopBrowserSession } from "../browser/session.js"
 
 import type { PolicyEngine } from "../policy/engine.js";
 
-import type { LLMProvider, ChatMessage, ContentPart } from "../providers/llm/openai.js";
+import type { LLMProvider, ChatMessage, ChatResponse, ChatOptions, ContentPart } from "../providers/llm/openai.js";
 
 import {
   createLoopState,
@@ -129,6 +129,76 @@ function chatMessageToJson(message: ChatMessage): JsonObject {
   return {
     role: message.role,
     content: message.content as JsonValue,
+  };
+}
+
+type LlmTraceOptions = Pick<RuntimeConfig, "traceLlmMessages" | "saveTraceBlob">;
+
+// Record one LLM exchange onto the run trace: the messages and response as
+// blobs plus an `llm-call` event when --trace-llm is on, and an `llm-usage`
+// event whenever the provider reports token counts. `purpose` distinguishes
+// the agent loop from the reviewer calls (which previously went untraced and
+// indistinguishable). Shared by the agent turn and every reviewer call.
+async function recordLlmCall(
+  state: LoopState,
+  traceOptions: LlmTraceOptions | undefined,
+  purpose: string,
+  messages: ChatMessage[],
+  response: ChatResponse,
+): Promise<void> {
+  if (traceOptions?.traceLlmMessages === true && traceOptions.saveTraceBlob) {
+    const messageRefs: JsonObject[] = [];
+    for (const message of messages) {
+      const ref = await traceOptions.saveTraceBlob(state.run.id, "llm-message", chatMessageToJson(message), "application/json");
+      messageRefs.push({ hash: ref.hash, size: ref.size, kind: ref.kind, role: message.role });
+    }
+    const responseRef = await traceOptions.saveTraceBlob(state.run.id, "llm-response", response.content, "text/plain");
+    state.events.push({
+      id: createId("event"),
+      runId: state.run.id,
+      ts: nowIsoUtc(),
+      kind: "llm-call",
+      payload: {
+        callIndex: state.stepCount + 1,
+        purpose,
+        model: response.model,
+        messageRefs,
+        responseRef: { hash: responseRef.hash, size: responseRef.size, kind: responseRef.kind },
+      },
+    });
+  }
+  if (response.usage) {
+    state.events.push({
+      id: createId("event"),
+      runId: state.run.id,
+      ts: nowIsoUtc(),
+      kind: "llm-usage",
+      payload: {
+        callIndex: state.stepCount + 1,
+        purpose,
+        model: response.model,
+        usage: response.usage,
+      },
+    });
+  }
+}
+
+// Wrap a provider so every chat() it makes is recorded under `purpose`. Lets
+// the pure reviewer modules (which only know how to call llm.chat) be traced
+// without threading trace state through their signatures.
+function tracingProvider(
+  llm: LLMProvider,
+  state: LoopState,
+  traceOptions: LlmTraceOptions | undefined,
+  purpose: string,
+): LLMProvider {
+  return {
+    model: llm.model,
+    chat: async (messages: ChatMessage[], options?: ChatOptions): Promise<ChatResponse> => {
+      const response = await llm.chat(messages, options);
+      await recordLlmCall(state, traceOptions, purpose, messages, response);
+      return response;
+    },
   };
 }
 
@@ -759,40 +829,7 @@ export function defaultAgentTurn(
 
       const response = await llmProvider.chat(messages);
 
-      if (traceOptions?.traceLlmMessages === true && traceOptions.saveTraceBlob) {
-        const messageRefs: JsonObject[] = [];
-        for (const message of messages) {
-          const ref = await traceOptions.saveTraceBlob(state.run.id, "llm-message", chatMessageToJson(message), "application/json");
-          messageRefs.push({ hash: ref.hash, size: ref.size, kind: ref.kind, role: message.role });
-        }
-        const responseRef = await traceOptions.saveTraceBlob(state.run.id, "llm-response", response.content, "text/plain");
-        state.events.push({
-          id: createId("event"),
-          runId: state.run.id,
-          ts: nowIsoUtc(),
-          kind: "llm-call",
-          payload: {
-            callIndex: state.stepCount + 1,
-            model: response.model,
-            messageRefs,
-            responseRef: { hash: responseRef.hash, size: responseRef.size, kind: responseRef.kind },
-          },
-        });
-      }
-
-      if (response.usage) {
-        state.events.push({
-          id: createId("event"),
-          runId: state.run.id,
-          ts: nowIsoUtc(),
-          kind: "llm-usage",
-          payload: {
-            callIndex: state.stepCount + 1,
-            model: response.model,
-            usage: response.usage,
-          },
-        });
-      }
+      await recordLlmCall(state, traceOptions, "agent", messages, response);
 
       // Parse the LLM response as a proposed action
       return normalizeProposedAction(parseActionFromLlm(response.content, state));
@@ -1125,13 +1162,14 @@ function parseArtifactReview(content: string): ArtifactReviewResult | undefined 
 export async function reviewWithCriticalPoints(
   state: LoopState,
   llm: LLMProvider,
+  traceOptions?: LlmTraceOptions,
 ): Promise<ArtifactReviewResult | undefined> {
   // Propose the checklist once per run and cache it on the state: retried
   // reviews reuse it rather than spending another LLM call to re-derive it.
   // `undefined` = not yet proposed; `[]` = proposed with no verifiable points.
   let points = state.criticalPoints;
   if (points === undefined) {
-    points = await proposeCriticalPoints(state.task, llm);
+    points = await proposeCriticalPoints(state.task, tracingProvider(llm, state, traceOptions, "critical-points-propose"));
     state.criticalPoints = points;
   }
   if (points.length === 0) return undefined;
@@ -1140,7 +1178,7 @@ export async function reviewWithCriticalPoints(
     state.task,
     points,
     `${evidence}\n\nArtifacts:\n${artifacts}`,
-    llm,
+    tracingProvider(llm, state, traceOptions, "critical-points-review"),
   );
   return { passed: review.passed, problems: review.unmet.slice(0, 8) };
 }
@@ -1148,7 +1186,7 @@ export async function reviewWithCriticalPoints(
 async function reviewArtifacts(state: LoopState, config: RuntimeConfig): Promise<ArtifactReviewResult | undefined> {
   if (!config.llmProvider) return undefined;
   if (config.criticalPointReview) {
-    const critical = await reviewWithCriticalPoints(state, config.llmProvider);
+    const critical = await reviewWithCriticalPoints(state, config.llmProvider, config);
     if (critical) return critical;
   }
   const messages: ChatMessage[] = [
@@ -1159,6 +1197,7 @@ async function reviewArtifacts(state: LoopState, config: RuntimeConfig): Promise
     { role: "user", content: artifactReviewPrompt(state) },
   ];
   const response = await config.llmProvider.chat(messages, { maxTokens: 700 });
+  await recordLlmCall(state, config, "artifact-review", messages, response);
   return parseArtifactReview(response.content);
 }
 

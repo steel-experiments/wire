@@ -44,3 +44,5 @@ Track lightweight project size signals here when code changes.
 | 2026-06-02 | `src/` test TypeScript LOC | 16,158 | `find src -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) -print0 \| xargs -0 wc -l \| tail -1` |
 | 2026-06-02 | `src/` production TypeScript LOC | 16,144 | `find src -type f \( -name '*.ts' -o -name '*.tsx' \) ! -name '*.test.ts' ! -name '*.test.tsx' -print0 \| xargs -0 wc -l \| tail -1` |
 | 2026-06-02 | `src/` test TypeScript LOC | 16,178 | `find src -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) -print0 \| xargs -0 wc -l \| tail -1` |
+| 2026-06-02 | `src/` production TypeScript LOC | 16,183 | `find src -type f \( -name '*.ts' -o -name '*.tsx' \) ! -name '*.test.ts' ! -name '*.test.tsx' -print0 \| xargs -0 wc -l \| tail -1` |
+| 2026-06-02 | `src/` test TypeScript LOC | 16,206 | `find src -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) -print0 \| xargs -0 wc -l \| tail -1` |
