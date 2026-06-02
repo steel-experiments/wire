@@ -39,12 +39,27 @@ test("createTaskContract infers domains and markdown table output", () => {
   }));
 
   assert.deepEqual(contract.mustVisit, ["vercel.com", "netlify.com", "railway.app"]);
-  assert.deepEqual(contract.mustMention, ["Vercel", "Netlify", "Railway"]);
+  // mustMention is no longer inferred from domains — mustVisit covers
+  // navigation, and a brand-word content requirement falsely fails runs.
+  assert.deepEqual(contract.mustMention, []);
   assert.equal(contract.mustProduce?.artifact, true);
   assert.equal(contract.mustProduce?.format, "markdown");
   assert.equal(contract.mustProduce?.table, true);
   assert.ok(contract.mustNotContain.includes("see open"));
   assert.match(contractToPrompt(contract), /Must visit: vercel\.com, netlify\.com, railway\.app/u);
+});
+
+test("createTaskContract infers no mention requirement from a navigation-target domain", () => {
+  // Regression: "news.ycombinator.com" derived mustMention ["News"] from the
+  // leftmost domain segment, so a correct top-5 extraction (whose result need
+  // not contain the word "News") failed the contract and looped to max steps.
+  const contract = createTaskContract(makeTask({
+    objective: "Go to news.ycombinator.com and return the titles and point counts of the top 5 stories",
+  }));
+
+  assert.deepEqual(contract.mustVisit, ["news.ycombinator.com"]);
+  assert.deepEqual(contract.mustMention, []);
+  assert.equal(contract.mustProduce?.minItems, 5);
 });
 
 test("createTaskContract does not infer text format from incidental 'text' in objective", () => {

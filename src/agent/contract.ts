@@ -70,11 +70,6 @@ function isLikelyVisitDomain(domain: string): boolean {
   return suffix !== undefined && !FILE_EXTENSION_DOMAIN_SUFFIXES.has(suffix);
 }
 
-function labelFromDomain(domain: string): string {
-  const first = normalizeDomain(domain).split(".")[0] ?? domain;
-  return first.length > 0 ? first[0]!.toUpperCase() + first.slice(1) : domain;
-}
-
 function objectiveText(task: Task): string {
   return [task.objective, ...task.successCriteria, ...task.constraints].join("\n");
 }
@@ -105,7 +100,6 @@ export function createTaskContract(task: Task): TaskContract {
   const text = objectiveText(task);
   const lower = text.toLowerCase();
   const mustVisit = unique((text.match(DOMAIN_PATTERN) ?? []).filter(isLikelyVisitDomain).map(normalizeDomain));
-  const mustMention = unique(mustVisit.map(labelFromDomain));
   const format = inferFormat(text);
   const wantsArtifact = /\b(?:save|write|export|download|artifact|file|md|markdown|json|csv|txt|text)\b/iu.test(text);
   const wantsTable = /\btable\b|comparison table/iu.test(text);
@@ -122,7 +116,11 @@ export function createTaskContract(task: Task): TaskContract {
 
   return {
     mustVisit,
-    mustMention,
+    // No mention requirement is inferred from domains: mustVisit already
+    // verifies navigation, and demanding the site's brand word appear in the
+    // final result falsely fails extraction tasks whose output is data from
+    // the site rather than its name. mustMention stays settable via task-file.
+    mustMention: [],
     ...(mustProduce ? { mustProduce } : {}),
     mustNotContain: lower.includes("extract") || lower.includes("save") || lower.includes("compare")
       ? PLACEHOLDER_PHRASES
