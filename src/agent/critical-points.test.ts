@@ -9,6 +9,8 @@ import type { ChatMessage, ChatResponse, LLMProvider } from "../providers/llm/op
 import {
   parseCriticalPoints,
   proposeCriticalPoints,
+  buildCriticalPointsPrompt,
+  buildCriterionReviewPrompt,
   criticalPointsToChecklist,
   parseCriterionVerdicts,
   summarizeCriticalPointReview,
@@ -72,6 +74,24 @@ test("proposeCriticalPoints returns parsed points, and [] when the LLM throws", 
 
   const degraded = await proposeCriticalPoints(makeTask(), fakeLlm(() => { throw new Error("boom"); }));
   assert.deepEqual(degraded, []);
+});
+
+test("buildCriticalPointsPrompt scopes points to what is decidable from the output alone", () => {
+  // Regression: the reviewer evidence is only the final result + artifacts — no
+  // path taken and no live page. The proposer emitted points a post-hoc,
+  // output-only reviewer cannot decide (navigate to X; "these are really the
+  // top 5"), so a strict reviewer always marked them unmet and blocked complete
+  // runs. Points must be checkable from the produced output alone.
+  const system = String(buildCriticalPointsPrompt(makeTask())[0]!.content);
+  assert.match(system, /navigation/iu);
+  assert.match(system, /external ground truth/iu);
+  assert.match(system, /final result and/iu);
+});
+
+test("buildCriterionReviewPrompt tells the reviewer navigation is verified separately", () => {
+  const system = String(buildCriterionReviewPrompt(points, "obj", "evidence")[0]!.content);
+  assert.match(system, /verified separately/iu);
+  assert.match(system, /presentation format/iu);
 });
 
 test("criticalPointsToChecklist renders an enumerated checklist", () => {
