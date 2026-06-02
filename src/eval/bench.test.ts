@@ -83,6 +83,32 @@ test("loadBenchmarks reads and parses a valid benchmark file", async () => {
   assert.deepEqual(loaded[0]!.expected.answerContains, ["Example"]);
 });
 
+test("loadBenchmarks preserves an optional per-case sessionConfig", async () => {
+  // Anti-bot sites (booking) and fair-access sites (SEC EDGAR) only pass with
+  // the right session config, so a case may carry stealth/proxy/userAgent.
+  const dir = await mkdtemp(join(tmpdir(), "wire-bench-"));
+  const benchmarks = [
+    {
+      id: "test-cfg",
+      objective: "Go to a bot-walled site",
+      mode: "task",
+      maxSteps: 5,
+      sessionConfig: { useProxy: true, stealth: true, solveCaptcha: true, userAgent: "Wire Research wire@example.com" },
+      expected: { classification: "task-complete" },
+    },
+  ];
+  const filePath = join(dir, "bench.json");
+  await writeFile(filePath, JSON.stringify(benchmarks), "utf-8");
+
+  const loaded = await loadBenchmarks(filePath);
+  assert.deepEqual(loaded[0]!.sessionConfig, {
+    useProxy: true,
+    stealth: true,
+    solveCaptcha: true,
+    userAgent: "Wire Research wire@example.com",
+  });
+});
+
 test("loadBenchmarks rejects missing file", async () => {
   await assert.rejects(
     () => loadBenchmarks("/nonexistent/bench.json"),

@@ -1,4 +1,4 @@
-import type { Run, RunId, TaskId, TraceEvent } from "../shared/types.js";
+import type { Run, RunId, TaskId, TraceEvent, SessionConfig } from "../shared/types.js";
 import type { LLMProvider } from "../providers/llm/openai.js";
 import type { LlmProvider } from "../cli/config.js";
 
@@ -22,6 +22,10 @@ export interface BenchmarkCase {
   objective: string;
   mode: "task" | "investigate" | "experiment";
   maxSteps: number;
+  // Per-case browser session config. Anti-bot sites need stealth/proxy/captcha;
+  // fair-access sites (e.g. SEC EDGAR) need a declared userAgent. Without it the
+  // case measures default-config blocking rather than Wire's real capability.
+  sessionConfig?: SessionConfig;
   expected: {
     classification: string;
     answerContains?: string[];
@@ -146,6 +150,7 @@ async function runBenchmark(
   };
   if (options.provider) runOpts.provider = options.provider;
   if (options.model) runOpts.model = options.model;
+  if (bm.sessionConfig) runOpts.sessionConfig = bm.sessionConfig;
 
   // Suppress per-task output while collecting the runId
   const origLog = console.log;

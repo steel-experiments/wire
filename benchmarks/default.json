@@ -6,7 +6,9 @@
     "maxSteps": 8,
     "expected": {
       "classification": "task-complete",
-      "answerContains": ["Example Domain"],
+      "answerContains": [
+        "Example Domain"
+      ],
       "maxSteps": 4
     }
   },
@@ -17,7 +19,9 @@
     "maxSteps": 8,
     "expected": {
       "classification": "task-complete",
-      "answerContains": ["trusted"],
+      "answerContains": [
+        "trusted"
+      ],
       "maxSteps": 5
     }
   },
@@ -28,8 +32,15 @@
     "maxSteps": 10,
     "expected": {
       "classification": "task-complete",
-      "answerContains": ["hotel"],
+      "answerContains": [
+        "hotel"
+      ],
       "maxSteps": 6
+    },
+    "sessionConfig": {
+      "useProxy": true,
+      "stealth": true,
+      "solveCaptcha": true
     }
   },
   {
@@ -39,8 +50,13 @@
     "maxSteps": 10,
     "expected": {
       "classification": "task-complete",
-      "answerContains": ["10-K"],
+      "answerContains": [
+        "10-K"
+      ],
       "maxSteps": 6
+    },
+    "sessionConfig": {
+      "userAgent": "Wire Research wire-research@example.com"
     }
   },
   {
@@ -61,7 +77,9 @@
     "maxSteps": 8,
     "expected": {
       "classification": "task-complete",
-      "answerContains": ["User-Agent"],
+      "answerContains": [
+        "User-Agent"
+      ],
       "maxSteps": 4
     }
   },
@@ -72,7 +90,10 @@
     "maxSteps": 25,
     "expected": {
       "classification": "partial-success",
-      "answerContains": ["score", "maxTile"],
+      "answerContains": [
+        "score",
+        "maxTile"
+      ],
       "maxSteps": 18
     }
   }
