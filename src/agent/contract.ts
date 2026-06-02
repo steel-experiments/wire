@@ -1,4 +1,5 @@
 import type { ArtifactKind, JsonObject, Task, TraceEvent } from "../shared/types.js";
+import { extractFirstJsonObject, extractFirstJsonArray } from "./llm-parse.js";
 
 export type ContractArtifactFormat = "markdown" | "json" | "csv" | "text" | "file";
 
@@ -271,18 +272,45 @@ function countItems(text: string): number {
   if (tableRows.length > 1) return tableRows.length - 1;
   const bullets = text.match(/^\s*(?:[-*]|\d+[.)])\s+\S/gmu)?.length ?? 0;
   if (bullets > 0) return bullets;
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    if (Array.isArray(parsed)) return parsed.length;
-    if (parsed && typeof parsed === "object") {
-      const values = Object.values(parsed as Record<string, unknown>);
-      const arrays = values.filter(Array.isArray);
-      if (arrays.length > 0) return Math.max(...arrays.map((value) => value.length));
-    }
-  } catch {
-    // Not JSON.
+  return countJsonItems(text);
+}
+
+function jsonItemCount(parsed: unknown): number {
+  if (Array.isArray(parsed)) return parsed.length;
+  if (parsed && typeof parsed === "object") {
+    const arrays = Object.values(parsed as Record<string, unknown>).filter(Array.isArray);
+    if (arrays.length > 0) return Math.max(...arrays.map((value) => value.length));
   }
   return 0;
+}
+
+// The text is usually a blob of several concatenated parts (final result +
+// artifact contents + latest code-result, each prefixed with its event kind),
+// so the whole string is rarely valid JSON. Scan every embedded JSON
+// object/array span and return the largest item count found — a single rich
+// part is enough to satisfy a "produce at least N items" requirement.
+function countJsonItems(text: string): number {
+  let max = 0;
+  let rest = text;
+  while (rest.length > 0) {
+    const objStart = rest.indexOf("{");
+    const arrStart = rest.indexOf("[");
+    if (objStart === -1 && arrStart === -1) break;
+    const useArray = arrStart !== -1 && (objStart === -1 || arrStart < objStart);
+    const start = useArray ? arrStart : objStart;
+    const span = useArray ? extractFirstJsonArray(rest) : extractFirstJsonObject(rest);
+    if (span === undefined) {
+      rest = rest.slice(start + 1);
+      continue;
+    }
+    try {
+      max = Math.max(max, jsonItemCount(JSON.parse(span) as unknown));
+    } catch {
+      // Not valid JSON despite balanced brackets; skip this span.
+    }
+    rest = rest.slice(start + span.length);
+  }
+  return max;
 }
 
 export function validateTaskContract(

@@ -184,6 +184,41 @@ test("createTaskContract validates a minItems requirement exactly once", () => {
   assert.equal(minItemsMisses.length, 1, "minItems must be validated exactly once");
 });
 
+test("validateTaskContract counts JSON items when the answer blends result, artifact, and code-result", () => {
+  // Regression: a correct "top 5" run produced a 5-item JSON object, but the
+  // minItems check concatenates result + artifact content + the latest
+  // code-result into one blob, so JSON.parse on the whole string threw and the
+  // count fell back to 0 — failing a complete run and burning every remaining
+  // step. The count must find the embedded JSON and see all 5 items.
+  const contract = createTaskContract(makeTask({
+    objective: "Go to news.ycombinator.com and return the titles and point counts of the top 5 stories on the front page as a numbered list",
+  }));
+  assert.equal(contract.mustProduce?.minItems, 5);
+
+  const result = JSON.stringify({
+    site: "Hacker News",
+    items: [
+      { rank: 1, title: "Why Janet?", points: "194 points" },
+      { rank: 2, title: "Apple rejected my dictation app", points: "44 points" },
+      { rank: 3, title: "Adafruit demand letter", points: "173 points" },
+      { rank: 4, title: "CSS-Native Parallax Effect", points: "48 points" },
+      { rank: 5, title: "The newest Instagram exploit", points: "1925 points" },
+    ],
+  });
+  const events = [
+    event("observation", { url: "https://news.ycombinator.com/", title: "Hacker News" }),
+    event("artifact", { filename: "output.json", kind: "json-output", mimeType: "application/json", content: result }),
+    event("code-result", { ok: true, source: "inspect", stdout: result }),
+  ];
+
+  const validation = validateTaskContract(contract, events, result);
+  assert.ok(
+    !validation.missing.some((item) => item.includes("at least 5 items")),
+    "a 5-item JSON result must satisfy the minItems check",
+  );
+  assert.ok(validation.satisfied.some((item) => item.includes("at least 5 items")));
+});
+
 test("classifyRun downgrades completion when contract check failed", () => {
   const events = [
     event("code-result", {
