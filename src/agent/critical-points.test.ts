@@ -80,6 +80,18 @@ test("criticalPointsToChecklist renders an enumerated checklist", () => {
   assert.match(checklist, /cp2: Visit netlify\.com pricing/u);
 });
 
+test("parseCriterionVerdicts tolerates string booleans and case-mismatched ids", () => {
+  // Common LLM deviations must not falsely mark a met criterion as unmet (which
+  // would fail a genuinely complete task): met as the string "true", and an
+  // upper-cased id "CP1" against the canonical "cp1".
+  const verdicts = parseCriterionVerdicts(
+    '[{"id":"CP1","met":"true"},{"id":"cp2","met":"yes"}]',
+    points,
+  );
+  assert.equal(verdicts.find((v) => v.id === "cp1")!.met, true);
+  assert.equal(verdicts.find((v) => v.id === "cp2")!.met, true);
+});
+
 test("parseCriterionVerdicts maps by id and defaults missing criteria to unmet", () => {
   const verdicts = parseCriterionVerdicts(
     '[{"id":"cp1","met":true,"note":"seen"},{"id":"cp999","met":true}]',

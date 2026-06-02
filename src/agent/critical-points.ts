@@ -4,6 +4,7 @@
 
 import type { Task } from "../shared/types.js";
 import type { ChatMessage, LLMProvider } from "../providers/llm/openai.js";
+import { extractFirstJsonArray } from "./llm-parse.js";
 
 export interface CriticalPoint {
   /** Stable per-task id: cp1, cp2, … */
@@ -27,27 +28,14 @@ export interface CriticalPointReview {
 
 const MAX_POINTS = 12;
 
-function stripFences(text: string): string {
-  return text.replace(/```(?:json)?/giu, "").trim();
-}
-
-function firstJsonArray(text: string): string | undefined {
-  const trimmed = stripFences(text);
-  if (trimmed.startsWith("[")) return trimmed;
-  const start = trimmed.indexOf("[");
-  const end = trimmed.lastIndexOf("]");
-  if (start >= 0 && end > start) return trimmed.slice(start, end + 1);
-  return undefined;
-}
-
 /**
  * Parse an LLM response into critical points. Accepts a JSON array of strings
- * or of `{text}` objects, tolerates code fences, and treats "NONE" or
- * unparseable content as an empty checklist (callers degrade gracefully).
+ * or of `{text}` objects, tolerates surrounding prose/code fences, and treats
+ * "NONE" or unparseable content as an empty checklist (callers degrade
+ * gracefully).
  */
 export function parseCriticalPoints(content: string): CriticalPoint[] {
-  if (/^\s*none\s*$/iu.test(content)) return [];
-  const candidate = firstJsonArray(content);
+  const candidate = extractFirstJsonArray(content);
   if (!candidate) return [];
   let parsed: unknown;
   try {
@@ -145,9 +133,18 @@ export function buildCriterionReviewPrompt(
  * explicit `met: true` verdict defaults to unmet — a missing or malformed
  * verdict never silently passes a requirement.
  */
+// A met flag is satisfied by the boolean `true` or the common string forms
+// models emit ("true"/"yes", any case). Anything else is treated as unmet.
+function isMet(value: unknown): boolean {
+  if (value === true) return true;
+  return typeof value === "string" && /^(true|yes)$/iu.test(value.trim());
+}
+
 export function parseCriterionVerdicts(content: string, points: CriticalPoint[]): CriterionVerdict[] {
+  // Key by lowercased id so a case-mismatched response id ("CP1" vs "cp1")
+  // still matches its point instead of defaulting to unmet.
   const byId = new Map<string, { met: boolean; note?: string }>();
-  const candidate = firstJsonArray(content);
+  const candidate = extractFirstJsonArray(content);
   if (candidate) {
     try {
       const parsed = JSON.parse(candidate) as unknown;
@@ -156,9 +153,10 @@ export function parseCriterionVerdicts(content: string, points: CriticalPoint[])
           if (!item || typeof item !== "object") continue;
           const obj = item as { id?: unknown; met?: unknown; note?: unknown };
           if (typeof obj.id !== "string") continue;
-          const entry: { met: boolean; note?: string } = { met: obj.met === true };
-          if (typeof obj.note === "string" && obj.note.trim().length > 0) entry.note = obj.note.trim();
-          byId.set(obj.id, entry);
+          const entry: { met: boolean; note?: string } = { met: isMet(obj.met) };
+          const note = typeof obj.note === "string" ? obj.note.trim() : "";
+          if (note.length > 0) entry.note = note;
+          byId.set(obj.id.toLowerCase(), entry);
         }
       }
     } catch {
@@ -166,7 +164,7 @@ export function parseCriterionVerdicts(content: string, points: CriticalPoint[])
     }
   }
   return points.map((point) => {
-    const found = byId.get(point.id);
+    const found = byId.get(point.id.toLowerCase());
     const verdict: CriterionVerdict = { id: point.id, met: found?.met === true };
     if (found?.note !== undefined) verdict.note = found.note;
     return verdict;

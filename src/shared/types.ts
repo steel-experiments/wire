@@ -35,6 +35,7 @@ export type TraceEventKind =
   | "skill-empty"
   | "skill-proposal"
   | "contract-check"
+  | "critical-points"
   | "artifact-review"
   | "llm-call"
   | "llm-usage"

@@ -875,6 +875,30 @@ test("reviewWithCriticalPoints fails the review when a critical point is unmet",
   assert.ok(review!.problems.some((problem) => /comparison table/u.test(problem)));
 });
 
+test("reviewWithCriticalPoints caches the checklist so a retried review does not re-propose", async () => {
+  const state = makeReviewableState([makeArtifactEvent("out.md", "Only example.com is covered.", "run_test")]);
+  // Propose once, then only review responses thereafter. A second review that
+  // re-proposed would consume a third response and read the review JSON as a
+  // checklist, so reuse is what keeps both reviews returning a verdict.
+  const llm = queuedLlm([
+    '["Visit example.com","Produce a markdown comparison table"]',
+    '[{"id":"cp1","met":true},{"id":"cp2","met":false,"note":"no table present"}]',
+    '[{"id":"cp1","met":true},{"id":"cp2","met":false,"note":"still no table"}]',
+  ]);
+
+  const first = await reviewWithCriticalPoints(state, llm);
+  const second = await reviewWithCriticalPoints(state, llm);
+
+  assert.equal(state.criticalPoints?.length, 2, "checklist should be cached on the state");
+  assert.equal(first!.passed, false);
+  // If the second call had re-proposed, it would have consumed the third
+  // response (a verdict array, not a valid checklist) as the proposal, yielded
+  // zero points, and returned undefined. A defined verdict proves it reused
+  // the cached checklist and spent its LLM call on the review instead.
+  assert.ok(second, "second review reused the cached checklist instead of re-proposing");
+  assert.equal(second!.passed, false);
+});
+
 test("reviewWithCriticalPoints returns undefined so the default reviewer runs when no points are proposed", async () => {
   const state = makeReviewableState([makeArtifactEvent("out.md", "x", "run_test")]);
   const review = await reviewWithCriticalPoints(state, queuedLlm(["NONE"]));

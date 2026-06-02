@@ -84,7 +84,20 @@ export function tryParseAction(content: string): ProposedAction | undefined {
 }
 
 export function extractFirstJsonObject(content: string): string | undefined {
-  const start = content.indexOf("{");
+  return extractFirstBalanced(content, "{", "}");
+}
+
+export function extractFirstJsonArray(content: string): string | undefined {
+  return extractFirstBalanced(content, "[", "]");
+}
+
+// Balanced, string-aware extraction of the first `open…close` span. Ignores
+// brackets inside double-quoted strings (respecting escapes), so a `]`/`}`
+// inside a JSON string value or in trailing prose never terminates the span
+// early. Tolerates surrounding prose and code fences (they sit outside the
+// brackets and are skipped).
+function extractFirstBalanced(content: string, open: string, close: string): string | undefined {
+  const start = content.indexOf(open);
   if (start === -1) return undefined;
 
   let depth = 0;
@@ -96,8 +109,8 @@ export function extractFirstJsonObject(content: string): string | undefined {
     if (ch === "\\") { escape = true; continue; }
     if (ch === '"') { inString = !inString; continue; }
     if (inString) continue;
-    if (ch === "{") depth++;
-    if (ch === "}") depth--;
+    if (ch === open) depth++;
+    if (ch === close) depth--;
     if (depth === 0) return content.slice(start, i + 1);
   }
   return undefined;

@@ -38,6 +38,7 @@ import { redactJsonObject } from "../shared/redact.js";
 import { countConsecutiveUnchanged } from "./state-helpers.js";
 import type { ActionExecutionContext } from "./actions.js";
 import { createTaskContract, type TaskContract } from "./contract.js";
+import type { CriticalPoint } from "./critical-points.js";
 import { scoreRun, type RunScore } from "../eval/scoring.js";
 
 const MAX_CDP_BATCH_COMMANDS = 80;
@@ -252,6 +253,13 @@ export interface LoopState extends TaskContext, RunTrace, StepCounter {
   contract: TaskContract;
   /** How many times the artifact reviewer has rejected so far this run. */
   reviewFailureCount: number;
+  /**
+   * LLM-authored critical-point checklist, proposed once and cached for the
+   * run so retried reviews don't re-propose it. `undefined` = not yet
+   * proposed; `[]` = proposed and the objective has no verifiable points.
+   * Ephemeral — re-derived on resume rather than persisted.
+   */
+  criticalPoints?: CriticalPoint[];
 }
 
 export interface LoopResult {

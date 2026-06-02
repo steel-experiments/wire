@@ -1126,7 +1126,14 @@ export async function reviewWithCriticalPoints(
   state: LoopState,
   llm: LLMProvider,
 ): Promise<ArtifactReviewResult | undefined> {
-  const points = await proposeCriticalPoints(state.task, llm);
+  // Propose the checklist once per run and cache it on the state: retried
+  // reviews reuse it rather than spending another LLM call to re-derive it.
+  // `undefined` = not yet proposed; `[]` = proposed with no verifiable points.
+  let points = state.criticalPoints;
+  if (points === undefined) {
+    points = await proposeCriticalPoints(state.task, llm);
+    state.criticalPoints = points;
+  }
   if (points.length === 0) return undefined;
   const { evidence, artifacts } = reviewerEvidence(state);
   const review = await reviewCriticalPoints(
