@@ -499,12 +499,31 @@ export function computeRepeatStreak(events: TraceEvent[]): { sameSig: number; sa
   return { sameSig, sameResult };
 }
 
+/** Marker embedded in Wire's injected generic page-state capture so the loop
+ *  can tell that capture apart from a task-specific extraction. */
+export const VERIFICATION_PROBE_MARKER = "wire:verify";
+
 export function buildVerificationAction(): ProposedAction {
   return {
     kind: "exec",
     summary: "Verify current task result",
     payload: {
-      code: "/* wire:extract wire:verify */ return { ok: true, evidence: { title: document.title, url: location.href, text: document.body?.innerText?.slice(0, 5000) ?? '' }, reason: 'Captured current page state for task verification' }",
+      code: `/* wire:extract ${VERIFICATION_PROBE_MARKER} */ return { ok: true, evidence: { title: document.title, url: location.href, text: document.body?.innerText?.slice(0, 5000) ?? '' }, reason: 'Captured current page state for task verification' }`,
     } satisfies JsonObject,
   };
+}
+
+/**
+ * True when the agent's most recent code action was Wire's injected generic
+ * page-state capture (buildVerificationAction) rather than a task-specific
+ * extraction. Used to keep that raw page dump from standing in as the final
+ * deliverable — the artifact reviewer rightly rejects a generic dump.
+ */
+export function latestExtractionIsVerificationProbe(state: LoopState): boolean {
+  for (let i = state.events.length - 1; i >= 0; i--) {
+    const event = state.events[i]!;
+    if (event.kind !== "code-exec") continue;
+    return typeof event.payload.code === "string" && event.payload.code.includes(VERIFICATION_PROBE_MARKER);
+  }
+  return false;
 }

@@ -63,6 +63,7 @@ import {
   appendExtractedResultArtifact,
   appendTaskNoteArtifact,
   buildVerificationAction,
+  latestExtractionIsVerificationProbe,
   execActionSignature,
   codeResultDigest,
   computeRepeatStreak,
@@ -723,6 +724,11 @@ export function defaultAgentTurn(
               Array.isArray(e.payload.problems) ? e.payload.problems.slice(0, 3).join("; ") : "quality issue"
             }`;
           break;
+        case "thought-summary":
+          // Surface loop-injected guidance (e.g. the extract-real-values nudge)
+          // so the agent's next turn can act on it.
+          summary = `note: ${String(e.payload.reason ?? e.payload.summary ?? "")}`;
+          break;
         default:
           summary = String(e.payload.summary ?? e.kind);
       }
@@ -950,6 +956,7 @@ export async function resumeTask(
     // Restore reviewer-retry counter from checkpoint so a run that already
     // burned its cap can't silently get fresh retries on every resume.
     reviewFailureCount: checkpoint.reviewFailureCount ?? 0,
+    extractionRepromptCount: 0,
   };
 
   return executeWithState(checkpoint.task, config, turn, undefined, state, checkpoint.pendingAction, registry);
@@ -1594,6 +1601,30 @@ async function runMainLoop(
         // Agent extracted a navigation-only result but no real content — force extraction
         action = buildVerificationAction();
       } else if (state.task.mode === "task") {
+        // The agent is finishing on Wire's injected generic page-state capture
+        // (buildVerificationAction), not a task-specific extraction. Letting
+        // that raw dump become the deliverable makes the reviewer reject it.
+        // Nudge the agent once to extract the requested values as clean fields,
+        // then let it finish. Bounded so it can never loop.
+        if (
+          latestExtractionIsVerificationProbe(state) &&
+          state.extractionRepromptCount < 1 &&
+          state.stepCount < config.maxSteps
+        ) {
+          state.extractionRepromptCount++;
+          state.events.push({
+            id: createId("event"),
+            runId: state.run.id,
+            ts: nowIsoUtc(),
+            kind: "thought-summary",
+            payload: {
+              reason: "A generic page snapshot was captured for verification. Now return the specific values the objective asks for as clean output fields (not the raw page text), then finish.",
+            },
+          });
+          state.stepCount++;
+          await flushTraceSink(state, config, signals);
+          continue;
+        }
         if (
           hasExtractedTaskResult(state) &&
           (!hasRecordedTaskArtifact(state) || hasUnrecordedLatestTaskResult(state))

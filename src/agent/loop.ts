@@ -254,6 +254,12 @@ export interface LoopState extends TaskContext, RunTrace, StepCounter {
   /** How many times the artifact reviewer has rejected so far this run. */
   reviewFailureCount: number;
   /**
+   * How many times the loop has nudged the agent to replace Wire's generic
+   * verification capture with a task-specific extraction. Bounded so the nudge
+   * can't loop. Ephemeral — re-initialized on resume.
+   */
+  extractionRepromptCount: number;
+  /**
    * LLM-authored critical-point checklist, proposed once and cached for the
    * run so retried reviews don't re-propose it. `undefined` = not yet
    * proposed; `[]` = proposed and the objective has no verifiable points.
@@ -318,6 +324,7 @@ export function createLoopState(
     helperVersion: 0,
     contract: createTaskContract(task),
     reviewFailureCount: 0,
+    extractionRepromptCount: 0,
   };
 
   if (sessionLiveUrl !== undefined) {
@@ -841,6 +848,22 @@ function looksLikeWireCommand(returnValue: unknown): boolean {
   return Array.isArray((returnValue as Record<string, unknown>)["wireActions"]);
 }
 
+// An observe() bundle: {ok, evidence:{url|title|text, ...}}. This is a page
+// OBSERVATION, not the agent's distilled answer. Surfacing it as the result
+// dumps the whole page and fails the completion contract's item count, so it
+// is never a valid final answer — even as a last-resort fallback.
+function looksLikeObservation(returnValue: unknown): boolean {
+  if (!returnValue || typeof returnValue !== "object" || Array.isArray(returnValue)) {
+    return false;
+  }
+  const evidence = (returnValue as Record<string, unknown>)["evidence"];
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
+    return false;
+  }
+  const ev = evidence as Record<string, unknown>;
+  return "url" in ev || "title" in ev || "text" in ev;
+}
+
 export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | undefined {
   // Exclude wire's CDP-dispatch code-results entirely — those are control-plane
   // events ({frameId, loaderId} etc.), never the agent's answer. The source tag
@@ -857,18 +880,21 @@ export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | 
   );
 
   // Three-tier preference: meaningful + not-error-shaped + not-a-wire-command,
-  // then merely meaningful, then anything. Empty payloads ({}, [], "") and
-  // agent-emitted wireActions envelopes don't answer the task.
-  const nonWireCandidates = candidates.filter(
-    (event) => !looksLikeWireCommand(event.payload.returnValue),
+  // then merely meaningful, then anything. Empty payloads ({}, [], ""),
+  // agent-emitted wireActions envelopes, and page observations don't answer
+  // the task, so none of them are eligible — even as the last-resort fallback.
+  const answerCandidates = candidates.filter(
+    (event) =>
+      !looksLikeWireCommand(event.payload.returnValue) &&
+      !looksLikeObservation(event.payload.returnValue),
   );
   const latestAnswerEvent =
-    nonWireCandidates.find((event) =>
+    answerCandidates.find((event) =>
       hasMeaningfulPayload(event.payload) &&
       !looksLikeErrorReturn(event.payload.returnValue)
     ) ??
-    nonWireCandidates.find((event) => hasMeaningfulPayload(event.payload)) ??
-    nonWireCandidates[0];
+    answerCandidates.find((event) => hasMeaningfulPayload(event.payload)) ??
+    answerCandidates[0];
 
   if (latestAnswerEvent) {
     const stdout = latestAnswerEvent.payload.stdout;

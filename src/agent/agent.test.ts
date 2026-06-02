@@ -38,6 +38,8 @@ import {
   hasPostNavigationExtraction,
   isRecoverableStepError,
   computeRepeatStreak,
+  buildVerificationAction,
+  latestExtractionIsVerificationProbe,
 } from "./state-helpers.js";
 
 // ---------------------------------------------------------------------------
@@ -123,6 +125,29 @@ test("createLoopState creates state with running run", () => {
   assert.deepEqual(state.events, []);
   assert.ok(state.startedAt);
   assert.ok(state.run.startedAt);
+});
+
+test("latestExtractionIsVerificationProbe distinguishes Wire's generic capture from a real extraction", () => {
+  const state = createLoopState(makeTask(), makeSessionId());
+  const exec = (code: string): void => {
+    state.events.push({
+      id: createId("event"), runId: state.run.id, ts: new Date().toISOString(),
+      kind: "code-exec", payload: { code },
+    });
+  };
+
+  // A task-specific extraction is not a probe.
+  exec("return { userAgent: navigator.userAgent, accept: 'text/html' };");
+  assert.equal(latestExtractionIsVerificationProbe(state), false);
+
+  // Wire's injected generic page-state capture is.
+  const verifyCode = (buildVerificationAction().payload as { code: string }).code;
+  exec(verifyCode);
+  assert.equal(latestExtractionIsVerificationProbe(state), true);
+
+  // A real extraction after the probe clears it again.
+  exec("return { headers: { 'User-Agent': 'x' } };");
+  assert.equal(latestExtractionIsVerificationProbe(state), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -3501,6 +3526,65 @@ test("finalizeRun skips empty returnValue payloads when picking final result", (
   const result = finalizeRun(state);
   assert.ok(result.run.result, "expected a derived result");
   assert.ok(result.run.result!.includes("4668"), `expected to skip empty {} and pick meaningful result: ${result.run.result}`);
+});
+
+test("finalizeRun skips observation evidence bundle and picks the real extraction", () => {
+  // Repro of the Hacker News run: the agent extracted the stories, then ran
+  // observe() which returned {ok, evidence:{title,url,text}} — a page
+  // OBSERVATION, not the agent's distilled answer. deriveRunResult surfaced
+  // the whole-page dump as the result, failing the contract's item count.
+  // Observations must never be chosen as the final answer.
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+
+  state.events.push(
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, durationMs: 12, returnValue: [{ rank: 1, title: "Real Story", points: 200 }] },
+    },
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: {
+        ok: true,
+        durationMs: 5,
+        returnValue: { ok: true, evidence: { title: "Hacker News", url: "https://news.ycombinator.com/", text: "lots and lots of raw page text" } },
+      },
+    },
+  );
+
+  const result = finalizeRun(state);
+  assert.ok(result.run.result, "expected a derived result");
+  assert.ok(result.run.result!.includes("Real Story"), `expected to skip observation and pick extraction: ${result.run.result}`);
+  assert.ok(!result.run.result!.includes("raw page text"), "result must not be the observation dump");
+});
+
+test("finalizeRun does not surface an observation bundle as the only result", () => {
+  // The honest-failure case: the only meaningful code-result is an observation
+  // (the extraction came back empty). deriveRunResult must NOT dump the page;
+  // it returns nothing so the run is classified honestly as incomplete.
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: new Date().toISOString(),
+    kind: "code-result",
+    payload: {
+      ok: true,
+      durationMs: 5,
+      returnValue: { ok: true, evidence: { title: "Hacker News", url: "https://news.ycombinator.com/", text: "lots and lots of raw page text" } },
+    },
+  });
+
+  const result = finalizeRun(state);
+  assert.ok(!result.run.result?.includes("raw page text"), `observation must not become the result: ${result.run.result}`);
 });
 
 test("executeTask aborts when same exec signature fails repeatedly", async () => {
