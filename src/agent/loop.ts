@@ -864,6 +864,17 @@ function looksLikeObservation(returnValue: unknown): boolean {
   return "url" in ev || "title" in ev || "text" in ev;
 }
 
+// The navigation-only marker the prompt prescribes: `return {navigated:true}`.
+// A nav ack records that navigation happened, never the agent's answer, so it
+// must not be surfaced as the result — even as a last-resort fallback. Leaving
+// it eligible produced a misleading non-answer when extraction came back empty.
+function looksLikeNavigationMarker(returnValue: unknown): boolean {
+  if (!returnValue || typeof returnValue !== "object" || Array.isArray(returnValue)) {
+    return false;
+  }
+  return (returnValue as Record<string, unknown>)["navigated"] === true;
+}
+
 export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | undefined {
   // Exclude wire's CDP-dispatch code-results entirely — those are control-plane
   // events ({frameId, loaderId} etc.), never the agent's answer. The source tag
@@ -886,7 +897,8 @@ export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | 
   const answerCandidates = candidates.filter(
     (event) =>
       !looksLikeWireCommand(event.payload.returnValue) &&
-      !looksLikeObservation(event.payload.returnValue),
+      !looksLikeObservation(event.payload.returnValue) &&
+      !looksLikeNavigationMarker(event.payload.returnValue),
   );
   const latestAnswerEvent =
     answerCandidates.find((event) =>

@@ -455,6 +455,22 @@ test("buildActionGuidance includes the action shape line", () => {
   assert.match(guidance, /observe.*exec.*raw.*finish/u);
 });
 
+test("buildActionGuidance tells the agent to guard extraction with waitForSelector", () => {
+  // Regression: a Hacker News run navigated with window.location.href then
+  // scraped immediately, before the `.athing` rows existed, so the extraction
+  // returned []. The agent has waitForSelector but was never told to gate
+  // dynamic-content extraction on it. The guidance must instruct waiting for
+  // the content selector before reading the DOM.
+  const guidance = buildActionGuidance(makeContext());
+  // The instruction must link waitForSelector to extraction on one line:
+  // wait for the content selector, THEN scrape, to avoid empty results.
+  assert.match(
+    guidance,
+    /waitForSelector[^\n]*empty results/u,
+    "guidance should tell the agent to waitForSelector before scraping to avoid empty results",
+  );
+});
+
 test("buildActionGuidance teaches vision-first interaction with the screenshot", () => {
   // Regression: the previous prompt said "Observation gives you orientation
   // — NOT page content" which trained the model to ignore the screenshot

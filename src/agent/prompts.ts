@@ -53,6 +53,7 @@ export const BASE_ACTION_GUIDANCE = [
   "Wire auto-observes after navigation code. Do NOT emit a separate observe after navigating.",
   "After navigation, wait for Wire's auto-observe, then use a separate exec for `wire.click` or extraction on the loaded page.",
   "After navigating to a target page, always exec code to extract the answer before finishing. Navigation alone is not task completion.",
+  'When extracting content that renders after load, begin the extraction exec with `await waitForSelector("<content selector>", 5000)` and read the DOM only after it resolves; scraping before the content appears is a common cause of empty results.',
   "Only use finish after your exec code has returned the actual answer in its return value.",
   "Helpers available in every exec block — they are task-local and may be replaced with edit-helper when the current task needs a different thin helper surface:",
   '  • `const btn = [...document.querySelectorAll("button,a,[role=button]")].find(el => /continue|accept/i.test(el.textContent || "")); await wire.click(btn);` — use JS to find a visible target, then `wire.click` for a real browser click.',

@@ -3587,6 +3587,52 @@ test("finalizeRun does not surface an observation bundle as the only result", ()
   assert.ok(!result.run.result?.includes("raw page text"), `observation must not become the result: ${result.run.result}`);
 });
 
+test("finalizeRun does not surface a navigation ack as the result", () => {
+  // Repro of the post-fix Hacker News run: extraction came back empty, so the
+  // only remaining code-result was the navigation-only exec's `{navigated:true}`
+  // marker — the shape the prompt prescribes for navigation. A nav ack is never
+  // an answer; surfacing it produces a misleading non-answer (judge 0.00). The
+  // run should instead be classified honestly as incomplete.
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: new Date().toISOString(),
+    kind: "code-result",
+    payload: { ok: true, durationMs: 5, returnValue: { navigated: true } },
+  });
+
+  const result = finalizeRun(state);
+  assert.ok(!result.run.result?.includes("navigated"), `nav ack must not become the result: ${result.run.result}`);
+});
+
+test("finalizeRun skips a trailing navigation ack and picks the real extraction", () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+
+  state.events.push(
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, durationMs: 12, returnValue: [{ rank: 1, title: "Real Story", points: 200 }] },
+    },
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, durationMs: 5, returnValue: { navigated: true } },
+    },
+  );
+
+  const result = finalizeRun(state);
+  assert.ok(result.run.result?.includes("Real Story"), `expected to skip nav ack and pick extraction: ${result.run.result}`);
+});
+
 test("executeTask aborts when same exec signature fails repeatedly", async () => {
   const task = makeTask({ objective: "Test repeat-fail guard" });
   const sessionId = makeSessionId();
