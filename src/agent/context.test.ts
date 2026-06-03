@@ -547,6 +547,27 @@ test("assembleUserPrompt uses assist framing when no override", () => {
 });
 
 // ---------------------------------------------------------------------------
+// branchDirective — system prompt nudges a branch run onto a different path
+// ---------------------------------------------------------------------------
+
+test("assembleSystemPrompt surfaces the branch directive when set", () => {
+  const context = makeContext({
+    task: makeTask({ branchDirective: "Take a different path than the prior attempt." }),
+  });
+  const prompt = assembleSystemPrompt(context);
+
+  assert.match(prompt, /branch/iu);
+  assert.match(prompt, /Take a different path than the prior attempt\./u);
+});
+
+test("assembleSystemPrompt omits branch framing when no directive", () => {
+  const context = makeContext();
+  const prompt = assembleSystemPrompt(context);
+
+  assert.doesNotMatch(prompt, /This is a branch run/u);
+});
+
+// ---------------------------------------------------------------------------
 // stripInjectionPatterns — extracted helper
 // ---------------------------------------------------------------------------
 

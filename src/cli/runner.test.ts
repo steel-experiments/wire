@@ -9,7 +9,19 @@ import { saveApprovalRequest } from "../storage/approvals.js";
 import { saveRunCheckpoint, loadRunCheckpoint } from "../storage/checkpoints.js";
 import type { BrowserProvider } from "../browser/bridge.js";
 
-import { createExperimentBundleFromRuns, reapExpiredApprovals, resolveProviderSelection, resolveSkillDir } from "./runner.js";
+import { createExperimentBundleFromRuns, reapExpiredApprovals, resolveCriticalPointReview, resolveProviderSelection, resolveSkillDir } from "./runner.js";
+
+test("resolveCriticalPointReview defaults on in every mode", () => {
+  assert.equal(resolveCriticalPointReview("task", undefined), true);
+  assert.equal(resolveCriticalPointReview("investigate", undefined), true);
+  assert.equal(resolveCriticalPointReview("experiment", undefined), true);
+  assert.equal(resolveCriticalPointReview(undefined, undefined), true);
+});
+
+test("resolveCriticalPointReview honors an explicit choice over the default", () => {
+  assert.equal(resolveCriticalPointReview("task", false), false);
+  assert.equal(resolveCriticalPointReview("experiment", true), true);
+});
 
 test("resolveProviderSelection uses explicit provider", () => {
   assert.equal(resolveProviderSelection("anthropic", "claude-sonnet-4-6"), "anthropic");

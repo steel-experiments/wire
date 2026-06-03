@@ -3,6 +3,8 @@ export interface TaskObjective {
   objective: string;
   constraints: string[];
   successCriteria: string[];
+  /** Exploration guidance for an experiment-mode branch run. */
+  branchDirective?: string;
 }
 
 export interface SkillSummary {
@@ -129,6 +131,12 @@ export function assembleSystemPrompt(context: ContextBundle): string {
     sections.push(
       "Success criteria:\n" +
         context.task.successCriteria.map((c) => `- ${redactSecrets(c)}`).join("\n"),
+    );
+  }
+
+  if (context.task.branchDirective && context.task.branchDirective.trim().length > 0) {
+    sections.push(
+      `This is a branch run in an experiment. Branch directive: ${redactSecrets(context.task.branchDirective)}`,
     );
   }
 

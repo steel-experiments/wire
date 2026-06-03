@@ -1188,6 +1188,15 @@ We assume:
 ### 22.3 Auth wall rule
 If a site requires credentials the agent does not already have through profile/session state, the agent should stop and request user assistance rather than improvising credential entry from observation artifacts.
 
+### 22.4 Quarantine (watch-item, not yet built)
+Today the same agent both reads untrusted page content and proposes privileged
+actions, with the policy engine as the only gate. A future hardening is a
+reader/actor split: the context that ingests adversarial public content cannot
+itself take high-privilege actions; those are taken by a separate actor context
+acting on the reader's structured findings. This complements `22.2` rather than
+replacing it. It carries real weight (a second context per run) and is a v2
+decision — flagged here so it is not lost, not scheduled.
+
 ---
 
 ## 23) Evaluation strategy

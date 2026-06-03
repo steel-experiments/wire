@@ -11,6 +11,10 @@ export interface BranchDecision {
   reason?: string;
   branchLabel?: string;
   hypothesisId?: HypothesisId;
+  /** Concrete instruction for the branch run so it explores a different path
+   *  instead of replaying the parent. Worded to avoid domains, digits, and
+   *  format words so it can never alter the inferred completion contract. */
+  directive?: string;
 }
 
 export function shouldBranch(
@@ -26,6 +30,8 @@ export function shouldBranch(
       shouldBranch: true,
       reason: "Ambiguous outcome suggests underspecified success criteria",
       branchLabel: "clarify-criteria",
+      directive:
+        "The prior attempt ended ambiguously. Pursue a decisive, verifiable outcome this time: reach a concrete final answer rather than stopping at an exploratory state.",
     };
   }
 
@@ -38,6 +44,8 @@ export function shouldBranch(
       shouldBranch: true,
       reason: `${classification.kind} may indicate multiple failure causes; branching to isolate`,
       branchLabel: `isolate-${classification.kind}`,
+      directive:
+        "The prior attempt failed partway through. Take a different path to the same goal: prefer a direct link or an alternate route over repeating the same navigation and interaction sequence.",
     };
   }
 
@@ -47,6 +55,8 @@ export function shouldBranch(
       shouldBranch: true,
       reason: "Partial success; branching to explore alternative approaches for remaining work",
       branchLabel: "alternative-approach",
+      directive:
+        "The prior attempt only partly succeeded. Complete the remaining work with a different approach than before; do not repeat the steps that stalled.",
     };
   }
 
@@ -56,6 +66,8 @@ export function shouldBranch(
       shouldBranch: true,
       reason: "Counterexample found; branching to investigate boundary conditions",
       branchLabel: "counterexample-probe",
+      directive:
+        "A counterexample appeared. Probe the boundary condition that produced it rather than re-running the main path.",
     };
   }
 
@@ -65,6 +77,8 @@ export function shouldBranch(
       shouldBranch: true,
       reason: "Low classification confidence; branching to reduce ambiguity",
       branchLabel: "reduce-ambiguity",
+      directive:
+        "Confidence in the prior outcome was low. Gather stronger, more direct evidence for the objective this run, taking a different route than before.",
     };
   }
 

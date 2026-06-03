@@ -152,6 +152,10 @@ export interface Task {
   falsificationCriteria?: string[];
   budget?: TaskBudget;
   createdAt: string;
+  /** Exploration guidance for an experiment-mode branch run: nudges this run
+   *  onto a different path than its parent. Deliberately excluded from the
+   *  completion contract so sibling branches are graded identically. */
+  branchDirective?: string;
 }
 
 export interface RunClassification {

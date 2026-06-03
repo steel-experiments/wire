@@ -741,6 +741,7 @@ export function defaultAgentTurn(
         objective: state.task.objective,
         constraints: state.task.constraints,
         successCriteria: state.task.successCriteria,
+        ...(state.task.branchDirective ? { branchDirective: state.task.branchDirective } : {}),
       },
       skills: state.loadedSkills.map((skill) => ({
         id: skill.id,

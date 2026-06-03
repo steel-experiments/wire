@@ -191,6 +191,17 @@ function defaultMaxSteps(mode: "task" | "investigate" | "experiment"): number {
   }
 }
 
+/** Resolve whether critical-point review runs. An explicit choice (CLI flag)
+ *  always wins; otherwise it is on by default in every mode. `mode` is kept in
+ *  the signature so callers can opt a mode out later without a signature churn. */
+export function resolveCriticalPointReview(
+  _mode: "task" | "investigate" | "experiment" | undefined,
+  explicit: boolean | undefined,
+): boolean {
+  if (explicit !== undefined) return explicit;
+  return true;
+}
+
 function createRuntimeConfig(
   options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "sessionConfig" | "provider" | "model" | "yes" | "json" | "mode" | "verbose" | "quiet" | "color" | "keepSessionOpen" | "traceLlmMessages" | "criticalPointReview">,
 ): RuntimeConfig {
@@ -230,7 +241,12 @@ function createRuntimeConfig(
     },
   };
   if (options.keepSessionOpen) config.keepSessionOpen = true;
-  if (options.criticalPointReview === true) config.criticalPointReview = true;
+  // Critical-point review is the strongest anti-laziness check (judge each
+  // objective sub-point separately). On by default in every mode; opt out with
+  // --no-critical-points.
+  if (resolveCriticalPointReview(options.mode, options.criticalPointReview)) {
+    config.criticalPointReview = true;
+  }
   if (options.traceLlmMessages === true || process.env.WIRE_TRACE_LLM_MESSAGES === "1") {
     config.traceLlmMessages = true;
     config.saveTraceBlob = async (runId, kind, value, contentType) => {
@@ -514,7 +530,14 @@ export async function runTask(options: RunOptions): Promise<RunResult> {
         break;
       }
 
-      const branch = await executeTask(task, config);
+      // A branch run shares the parent's objective and contract but carries a
+      // directive that steers it onto a different path — otherwise branching is
+      // just replication. branchDirective is excluded from the contract, so
+      // siblings are still graded identically.
+      const branchTask: Task = decision.directive
+        ? { ...task, branchDirective: decision.directive }
+        : task;
+      const branch = await executeTask(branchTask, config);
       branch.run.parentRunId = parentRun.id;
       branch.run.branchLabel = decision.branchLabel ?? `branch-${runCount}`;
       branch.run.hypothesisId = hypothesis.id;
