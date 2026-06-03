@@ -313,6 +313,11 @@ export function parseArgs(argv: string[]): CliArgs {
       i++;
       continue;
     }
+    if (arg === "--no-critical-points") {
+      result.criticalPoints = false;
+      i++;
+      continue;
+    }
     if (arg === "--trace-llm") {
       result.traceLlm = true;
       i++;
@@ -419,7 +424,8 @@ export function formatHelp(): string {
     "  --quiet, -q              Suppress per-step trace stream",
     "  --no-color               Disable ANSI color in trace stream",
     "  --trace-llm              Store LLM messages/responses as blob refs",
-    "  --critical-points        Judge completion against an LLM-authored checklist",
+    "  --critical-points        Judge completion against an LLM-authored checklist (default on)",
+    "  --no-critical-points     Skip the critical-point completion check",
     "  --version, -V            Show version",
     "  --help, -h               Show this help message",
   ].join("\n");

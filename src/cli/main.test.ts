@@ -464,6 +464,13 @@ test("parseArgs parses --min-pass-rate and clamps it to 0..1", () => {
   assert.equal(parseArgs(["node", "wire", "bench"]).minPassRate, undefined);
 });
 
+test("parseArgs parses --critical-points and --no-critical-points", () => {
+  assert.equal(parseArgs(["node", "wire", "get title", "--critical-points"]).criticalPoints, true);
+  assert.equal(parseArgs(["node", "wire", "get title", "--no-critical-points"]).criticalPoints, false);
+  // Unset stays undefined so the runtime applies its mode-based default.
+  assert.equal(parseArgs(["node", "wire", "get title"]).criticalPoints, undefined);
+});
+
 test("parseArgs treats positional arg as objective", () => {
   const args = parseArgs(["node", "wire", "get", "the", "title", "of", "steel.dev"]);
 
