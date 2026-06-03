@@ -35,7 +35,7 @@ import { execRaw } from "../browser/raw.js";
 import { classifyRun, generateOutcomeSummary } from "./classify.js";
 import { detectAuthWall } from "../profiles/auth.js";
 import { redactJsonObject } from "../shared/redact.js";
-import { countConsecutiveUnchanged } from "./state-helpers.js";
+import { countConsecutiveUnchanged, latestObservation, reconfigureJustified } from "./state-helpers.js";
 import type { ActionExecutionContext } from "./actions.js";
 import { createTaskContract, type TaskContract } from "./contract.js";
 import type { CriticalPoint } from "./critical-points.js";
@@ -478,6 +478,27 @@ export async function executeStep(
     }
   }
 
+  // Reconfigure gate: refuse a session swap when the current page is not
+  // actually blocked (pre-nav about:blank, or an already-loaded content page
+  // with no anti-bot signal). This is a graceful refusal, NOT a policy denial —
+  // it does not set policyDenied (which would stop the run); the agent sees the
+  // refusal in the trace and continues by navigating/extracting instead.
+  if (action.kind === "reconfigure" && !options.skipPolicyCheck && !reconfigureJustified(latestObservation(state))) {
+    state.events.push({
+      id: createId("event"),
+      runId: state.run.id,
+      ts: nowIsoUtc(),
+      kind: "thought-summary",
+      payload: {
+        kind: "reconfigure-refused",
+        summary: action.summary,
+        reason:
+          "Reconfigure refused: the current page is not blocked (no navigation yet, or it already loaded with no anti-bot signal). Navigate and extract instead of switching the browser session.",
+      },
+    });
+    return { state, policyDenied, authWallHit };
+  }
+
   switch (action.kind) {
     case "observe": {
       const tid = action.payload?.targetId as string | undefined;
@@ -848,22 +869,6 @@ function looksLikeWireCommand(returnValue: unknown): boolean {
   return Array.isArray((returnValue as Record<string, unknown>)["wireActions"]);
 }
 
-// An observe() bundle: {ok, evidence:{url|title|text, ...}}. This is a page
-// OBSERVATION, not the agent's distilled answer. Surfacing it as the result
-// dumps the whole page and fails the completion contract's item count, so it
-// is never a valid final answer — even as a last-resort fallback.
-function looksLikeObservation(returnValue: unknown): boolean {
-  if (!returnValue || typeof returnValue !== "object" || Array.isArray(returnValue)) {
-    return false;
-  }
-  const evidence = (returnValue as Record<string, unknown>)["evidence"];
-  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
-    return false;
-  }
-  const ev = evidence as Record<string, unknown>;
-  return "url" in ev || "title" in ev || "text" in ev;
-}
-
 // The navigation-only marker the prompt prescribes: `return {navigated:true}`.
 // A nav ack records that navigation happened, never the agent's answer, so it
 // must not be surfaced as the result — even as a last-resort fallback. Leaving
@@ -892,12 +897,11 @@ export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | 
 
   // Three-tier preference: meaningful + not-error-shaped + not-a-wire-command,
   // then merely meaningful, then anything. Empty payloads ({}, [], ""),
-  // agent-emitted wireActions envelopes, and page observations don't answer
+  // agent-emitted wireActions envelopes, and bare navigation acks don't answer
   // the task, so none of them are eligible — even as the last-resort fallback.
   const answerCandidates = candidates.filter(
     (event) =>
       !looksLikeWireCommand(event.payload.returnValue) &&
-      !looksLikeObservation(event.payload.returnValue) &&
       !looksLikeNavigationMarker(event.payload.returnValue),
   );
   const latestAnswerEvent =

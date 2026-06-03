@@ -58,7 +58,7 @@ npx tsx benchmarks/compare/run-compare.ts \
 | `--arms a,b` | all four | which arms to run |
 | `--reps N` | 1 | repetitions per (task, arm) — raise for variance |
 | `--cc-model` | `claude-sonnet-4-6` | model for the Claude Code arms |
-| `--wire-provider` / `--wire-model` | env / openai | Wire's LLM |
+| `--wire-provider` / `--wire-model` | `anthropic` / `claude-sonnet-4-6` | Wire's LLM (defaults match the CC arms for a fair, model-controlled comparison) |
 | `--skill` | `steel-browser` | browser skill name used by `cc-skill` |
 | `--judge-model` | `claude-haiku-4-5-20251001` | the shared judge |
 | `--judge-threshold` | `0.7` | judge score that counts as success |

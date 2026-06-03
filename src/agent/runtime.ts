@@ -48,6 +48,7 @@ import { findMatchingSkillDocMatches, loadSkillDocsFromDir } from "../skills/loa
 import { extractFirstJsonObject, parseActionFromLlm, registerActionKind } from "./llm-parse.js";
 import {
   latestObservation,
+  reconfigureJustified,
   latestError,
   latestCodeResult,
   hasRecordedTaskArtifact,
@@ -1394,6 +1395,10 @@ async function tryAntiBotRecovery(
   if (signals.policyDenied || isCancelled(config)) return false;
   if (signals.antiBotRecoveryAttempted) return false;
   if (!latestObservationMatchesRecoverableSkillBarrier(state)) return false;
+  // Gate: only recover when the current page is actually blocked. A pre-nav
+  // about:blank or an already-loaded content page is not a block — proxying it
+  // is wasteful (easy sites) or outright destructive (it broke SEC EDGAR).
+  if (!reconfigureJustified(latestObservation(state))) return false;
   if (!actionRegistry?.get("reconfigure")) return false;
 
   signals.antiBotRecoveryAttempted = true;

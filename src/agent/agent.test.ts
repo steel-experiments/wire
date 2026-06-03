@@ -3061,6 +3061,15 @@ test("executeStep reconfigure creates new session, stops old, updates state", as
   const oldSessionId = makeSessionId();
   const newSessionId = makeSessionId();
   const state = createLoopState(task, oldSessionId);
+  // Reconfigure is gated on real block evidence: give the state a blocked-page
+  // observation so the swap is justified and the handler runs.
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: new Date().toISOString(),
+    kind: "observation",
+    payload: { url: "https://blocked.example/", title: "Just a moment...", pageSummary: { headings: [], forms: 0, buttons: 0, dialogs: 0, tables: 0, links: 0, inputs: 0 } },
+  });
 
   let createdSessionInput: import("../shared/types.js").CreateSessionInput | undefined;
   let stoppedSessionId: SessionId | undefined;
@@ -3172,6 +3181,15 @@ test("executeStep reconfigure merges with existing sessionConfig", async () => {
   const state = createLoopState(task, oldSessionId, undefined, {
     sessionConfig: { useProxy: true, region: "us-east-1" },
   });
+  // Reconfigure is gated on real block evidence: give the state a blocked-page
+  // observation so the swap is justified and the handler runs.
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: new Date().toISOString(),
+    kind: "observation",
+    payload: { url: "https://blocked.example/", title: "Just a moment...", pageSummary: { headings: [], forms: 0, buttons: 0, dialogs: 0, tables: 0, links: 0, inputs: 0 } },
+  });
 
   let createdSessionInput: import("../shared/types.js").CreateSessionInput | undefined;
   const provider = createMockProvider({
@@ -3243,6 +3261,55 @@ test("executeStep reconfigure merges with existing sessionConfig", async () => {
   assert.equal(createdSessionInput!.sessionConfig?.useProxy, true);
   assert.equal(createdSessionInput!.sessionConfig?.solveCaptcha, true);
   assert.equal(createdSessionInput!.sessionConfig?.region, "us-east-1");
+});
+
+test("executeStep refuses reconfigure on an unblocked loaded page without stopping the run", async () => {
+  const task = makeTask();
+  const oldSessionId = makeSessionId();
+  const state = createLoopState(task, oldSessionId);
+  // A page that already loaded real content with no anti-bot signal — a proxy
+  // swap here would needlessly discard a working session (the SEC EDGAR case).
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: new Date().toISOString(),
+    kind: "observation",
+    payload: { url: "https://www.sec.gov/cgi-bin/browse-edgar", title: "EDGAR Search Results", pageSummary: { headings: ["EDGAR Search Results"], forms: 1, buttons: 2, dialogs: 0, tables: 1, links: 30, inputs: 3 } },
+  });
+
+  let createSessionCalled = false;
+  const provider = createMockProvider({
+    async createSession() {
+      createSessionCalled = true;
+      return { id: makeSessionId(), provider: "steel", createdAt: new Date().toISOString(), status: "ready" } satisfies BrowserSession;
+    },
+  });
+  const policy = createMockPolicyEngine();
+  const registry = new ActionRegistry();
+  registry.register({
+    kind: "reconfigure",
+    description: "test reconfigure",
+    async execute(s, _action, prov) {
+      await prov.createSession({ sessionConfig: {} });
+      return {};
+    },
+  });
+
+  const result = await executeStep(
+    state,
+    { kind: "reconfigure", summary: "Recover from anti-bot challenge with proxy and captcha support", payload: { useProxy: true, solveCaptcha: true } },
+    provider,
+    policy,
+    { actionRegistry: registry },
+  );
+
+  assert.equal(createSessionCalled, false, "reconfigure handler must not run on an unblocked page");
+  assert.equal(result.policyDenied, false, "graceful refusal must not terminate the run");
+  assert.equal(result.state.sessionId, oldSessionId, "session must be unchanged");
+  const refusal = result.state.events.find(
+    (e) => e.kind === "thought-summary" && e.payload.kind === "reconfigure-refused",
+  );
+  assert.ok(refusal, "should record a reconfigure-refused trace event");
 });
 
 test("executeTask aborts when same exec succeeds with same return value repeatedly", async () => {
@@ -3526,65 +3593,6 @@ test("finalizeRun skips empty returnValue payloads when picking final result", (
   const result = finalizeRun(state);
   assert.ok(result.run.result, "expected a derived result");
   assert.ok(result.run.result!.includes("4668"), `expected to skip empty {} and pick meaningful result: ${result.run.result}`);
-});
-
-test("finalizeRun skips observation evidence bundle and picks the real extraction", () => {
-  // Repro of the Hacker News run: the agent extracted the stories, then ran
-  // observe() which returned {ok, evidence:{title,url,text}} — a page
-  // OBSERVATION, not the agent's distilled answer. deriveRunResult surfaced
-  // the whole-page dump as the result, failing the contract's item count.
-  // Observations must never be chosen as the final answer.
-  const task = makeTask();
-  const state = createLoopState(task, makeSessionId());
-
-  state.events.push(
-    {
-      id: createId("event"),
-      runId: state.run.id,
-      ts: new Date().toISOString(),
-      kind: "code-result",
-      payload: { ok: true, durationMs: 12, returnValue: [{ rank: 1, title: "Real Story", points: 200 }] },
-    },
-    {
-      id: createId("event"),
-      runId: state.run.id,
-      ts: new Date().toISOString(),
-      kind: "code-result",
-      payload: {
-        ok: true,
-        durationMs: 5,
-        returnValue: { ok: true, evidence: { title: "Hacker News", url: "https://news.ycombinator.com/", text: "lots and lots of raw page text" } },
-      },
-    },
-  );
-
-  const result = finalizeRun(state);
-  assert.ok(result.run.result, "expected a derived result");
-  assert.ok(result.run.result!.includes("Real Story"), `expected to skip observation and pick extraction: ${result.run.result}`);
-  assert.ok(!result.run.result!.includes("raw page text"), "result must not be the observation dump");
-});
-
-test("finalizeRun does not surface an observation bundle as the only result", () => {
-  // The honest-failure case: the only meaningful code-result is an observation
-  // (the extraction came back empty). deriveRunResult must NOT dump the page;
-  // it returns nothing so the run is classified honestly as incomplete.
-  const task = makeTask();
-  const state = createLoopState(task, makeSessionId());
-
-  state.events.push({
-    id: createId("event"),
-    runId: state.run.id,
-    ts: new Date().toISOString(),
-    kind: "code-result",
-    payload: {
-      ok: true,
-      durationMs: 5,
-      returnValue: { ok: true, evidence: { title: "Hacker News", url: "https://news.ycombinator.com/", text: "lots and lots of raw page text" } },
-    },
-  });
-
-  const result = finalizeRun(state);
-  assert.ok(!result.run.result?.includes("raw page text"), `observation must not become the result: ${result.run.result}`);
 });
 
 test("finalizeRun does not surface a navigation ack as the result", () => {

@@ -237,6 +237,60 @@ export function countConsecutiveUnchanged(events: TraceEvent[]): number {
   return count;
 }
 
+// Reconfigure gate — page-state evidence for an anti-bot session swap.
+
+/** Text markers of a real anti-bot / block / challenge page, matched against
+ *  the page title and headings. */
+const RECONFIGURE_BLOCK_SIGNAL =
+  /captcha|are you (?:a )?human|verif(?:y|ying) you|access denied|forbidden|rate.?limit|request rate|unusual traffic|bot detection|cloudflare|just a moment|attention required|checking your browser/iu;
+
+function reconfigureSummary(payload: JsonObject): { headings: string[]; hasContent: boolean } {
+  const summary = payload.pageSummary;
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) {
+    return { headings: [], hasContent: false };
+  }
+  const record = summary as Record<string, unknown>;
+  const headings = Array.isArray(record.headings)
+    ? record.headings.filter((h): h is string => typeof h === "string")
+    : [];
+  let hasContent = headings.length > 0;
+  if (!hasContent) {
+    for (const key of ["forms", "buttons", "dialogs", "tables", "links", "inputs"]) {
+      if (typeof record[key] === "number" && (record[key] as number) > 0) {
+        hasContent = true;
+        break;
+      }
+    }
+  }
+  return { headings, hasContent };
+}
+
+/**
+ * Whether a session reconfigure (enabling a proxy/captcha solver by spinning a
+ * new browser session) is justified by the current page. A reconfigure should
+ * fire only when there is real block evidence on a page we actually navigated
+ * to:
+ *  - the initial pre-navigation `about:blank` (and other non-http(s)/internal
+ *    URLs) is NOT a block — treating it as one fired spurious proxy swaps that
+ *    broke otherwise-fine runs;
+ *  - a page that already rendered real content with no anti-bot signal is
+ *    working — a proxy swap would needlessly discard it (the SEC EDGAR
+ *    self-block);
+ *  - a genuine challenge page (captcha / "verify you are human" / rate limit),
+ *    or a navigated page that rendered nothing, IS a plausible block.
+ */
+export function reconfigureJustified(observation: TraceEvent | undefined): boolean {
+  if (!observation) return false;
+  const url = typeof observation.payload.url === "string" ? observation.payload.url : "";
+  if (!/^https?:\/\//iu.test(url)) return false;
+
+  const { headings, hasContent } = reconfigureSummary(observation.payload);
+  const title = typeof observation.payload.title === "string" ? observation.payload.title : "";
+  if (RECONFIGURE_BLOCK_SIGNAL.test([title, ...headings].join(" "))) return true;
+
+  return !hasContent;
+}
+
 interface ArtifactEnvelope {
   filename?: string;
   kind?: string;

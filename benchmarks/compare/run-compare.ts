@@ -2,8 +2,9 @@
 // ABOUTME: (Wire, Claude Code +browser-skill, Claude Code +wire-CLI, Claude Code bare) and scores them with one shared blind LLM judge.
 
 import { spawn } from "node:child_process";
-import { mkdir, writeFile, appendFile, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, appendFile, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 // ---- Types -----------------------------------------------------------------
@@ -132,49 +133,71 @@ async function runWire(task: SuiteTask, cfg: ArmConfig): Promise<ArmOutcome> {
   };
 }
 
-/** Run `claude -p` and normalise its JSON result. */
+/**
+ * Run `claude -p` and normalise its JSON result. Each call runs in a throwaway
+ * temp dir so Claude cannot read the wire repo or pick up its AGENTS.md/CLAUDE.md
+ * as project instructions — every arm and every run starts from an identical,
+ * empty filesystem context. Auth is user-global (~/.claude), so a fresh cwd does
+ * not affect login.
+ */
 async function runClaude(prompt: string, cfg: ArmConfig, extra: string[]): Promise<ArmOutcome> {
-  const args = [
-    "-p", prompt,
-    "--output-format", "json",
-    "--model", cfg.ccModel,
-    "--dangerously-skip-permissions",
-    ...extra,
-  ];
-  const r = await sh("claude", args, { timeoutMs: cfg.timeoutMs, cwd: WIRE_DIR });
-  const env = lastJsonObject(r.stdout);
-  const answer = typeof env?.result === "string" ? env.result : "";
-  const usage = env?.usage ?? {};
-  return {
-    answer,
-    wallMs: r.ms,
-    ok: !r.timedOut && env?.is_error !== true && !!answer,
-    native: {
-      costUsd: env?.total_cost_usd ?? null,
-      numTurns: env?.num_turns ?? null,
-      ccDurationMs: env?.duration_ms ?? null,
-      inputTokens: usage.input_tokens ?? null,
-      outputTokens: usage.output_tokens ?? null,
-      permissionDenials: Array.isArray(env?.permission_denials) ? env.permission_denials.length : null,
-      model: cfg.ccModel,
-      isError: env?.is_error ?? null,
-    },
-    note: r.timedOut ? "TIMEOUT" : (answer ? undefined : (r.stderr || "no answer").slice(0, 400)),
-  };
+  const workdir = await mkdtemp(join(tmpdir(), "wire-cmp-"));
+  try {
+    const args = [
+      "-p", prompt,
+      "--output-format", "json",
+      "--model", cfg.ccModel,
+      "--dangerously-skip-permissions",
+      ...extra,
+    ];
+    const r = await sh("claude", args, { timeoutMs: cfg.timeoutMs, cwd: workdir });
+    const env = lastJsonObject(r.stdout);
+    const answer = typeof env?.result === "string" ? env.result : "";
+    const usage = env?.usage ?? {};
+    return {
+      answer,
+      wallMs: r.ms,
+      ok: !r.timedOut && env?.is_error !== true && !!answer,
+      native: {
+        costUsd: env?.total_cost_usd ?? null,
+        numTurns: env?.num_turns ?? null,
+        ccDurationMs: env?.duration_ms ?? null,
+        inputTokens: usage.input_tokens ?? null,
+        outputTokens: usage.output_tokens ?? null,
+        permissionDenials: Array.isArray(env?.permission_denials) ? env.permission_denials.length : null,
+        model: cfg.ccModel,
+        isError: env?.is_error ?? null,
+      },
+      note: r.timedOut ? "TIMEOUT" : (answer ? undefined : (r.stderr || "no answer").slice(0, 400)),
+    };
+  } finally {
+    await rm(workdir, { recursive: true, force: true });
+  }
 }
 
 function ccSkill(task: SuiteTask, cfg: ArmConfig): Promise<ArmOutcome> {
-  // Skills stay enabled; a one-line hint names the browser skill so the arm
-  // genuinely exercises it rather than improvising.
+  // Skills stay enabled; `steel-browser` is a user-global skill so it's available
+  // in the fresh cwd. Deny the competing local browser skill's tools so this arm
+  // exercises steel-browser specifically (not agent-browser). A one-line hint
+  // names the intended skill.
   const hint = `A browser-automation skill named "${cfg.skillName}" is available. Use it to complete web tasks. Return only the requested answer.`;
-  return runClaude(task.objective, cfg, ["--append-system-prompt", hint]);
+  return runClaude(task.objective, cfg, [
+    "--disallowedTools", "Bash(agent-browser:*)", "Bash(npx agent-browser:*)",
+    "--append-system-prompt", hint,
+  ]);
 }
 
 function ccWireCli(task: SuiteTask, cfg: ArmConfig): Promise<ArmOutcome> {
-  // Skills off; expose the wire CLI as the only browser capability.
+  // Skills off; expose the wire CLI as the only browser capability. Pin the
+  // nested wire to the same model as every other arm so cc-wire-cli's browser
+  // work reasons with the same model, not wire's env default.
+  const wireCmd =
+    'wire "<objective>" --json --quiet' +
+    (cfg.wireProvider ? ` --provider ${cfg.wireProvider}` : "") +
+    (cfg.wireModel ? ` --model ${cfg.wireModel}` : "");
   const hint = [
     "You have a CLI tool named `wire` that autonomously completes web/browser tasks.",
-    'Run it as: wire "<objective>" --json --quiet',
+    `Run it as: ${wireCmd}`,
     "It prints a JSON envelope whose final answer is at .data.result.",
     "Use wire to accomplish browser objectives instead of fetching pages yourself.",
     "Return only the requested answer.",
@@ -214,12 +237,23 @@ async function judge(objective: string, answer: string, judgeModel: string, time
     "Agent output:",
     answer.slice(0, 4000),
   ].join("\n");
-  const r = await sh("claude", ["-p", prompt, "--output-format", "json", "--model", judgeModel], { timeoutMs, cwd: WIRE_DIR });
-  const env = lastJsonObject(r.stdout);
-  const raw = typeof env?.result === "string" ? env.result : "";
-  const score = parseFloat(raw.trim());
-  if (Number.isNaN(score)) return null;
-  return Math.min(1, Math.max(0, score));
+  // Judge in a throwaway dir with skills off, so it scores purely from the
+  // objective + answer and never picks up the repo's AGENTS.md or a skill.
+  const workdir = await mkdtemp(join(tmpdir(), "wire-judge-"));
+  try {
+    const r = await sh(
+      "claude",
+      ["-p", prompt, "--output-format", "json", "--model", judgeModel, "--disable-slash-commands"],
+      { timeoutMs, cwd: workdir },
+    );
+    const env = lastJsonObject(r.stdout);
+    const raw = typeof env?.result === "string" ? env.result : "";
+    const score = parseFloat(raw.trim());
+    if (Number.isNaN(score)) return null;
+    return Math.min(1, Math.max(0, score));
+  } finally {
+    await rm(workdir, { recursive: true, force: true });
+  }
 }
 
 // ---- Aggregation + report --------------------------------------------------
@@ -294,10 +328,17 @@ function loadProjectEnv(): void {
 
 // Refuse to run the wire arm without its keys rather than report a misleading
 // 0%. The CC arms authenticate independently, so they are not checked here.
-function assertWireEnv(): void {
+function assertWireEnv(provider: string | undefined): void {
   const missing: string[] = [];
   if (!process.env.STEEL_API_KEY) missing.push("STEEL_API_KEY");
-  if (!process.env.OPENAI_API_KEY && !process.env.ANTHROPIC_API_KEY) {
+  // Require the key for the *selected* provider, not just any LLM key — an
+  // OpenAI key does not let the anthropic provider authenticate, and wire would
+  // crash instantly and be scored a misleading 0.
+  if (provider === "anthropic") {
+    if (!process.env.ANTHROPIC_API_KEY) missing.push("ANTHROPIC_API_KEY (wire --provider anthropic)");
+  } else if (provider === "openai") {
+    if (!process.env.OPENAI_API_KEY) missing.push("OPENAI_API_KEY (wire --provider openai)");
+  } else if (!process.env.OPENAI_API_KEY && !process.env.ANTHROPIC_API_KEY) {
     missing.push("OPENAI_API_KEY or ANTHROPIC_API_KEY");
   }
   if (missing.length > 0) {
@@ -346,8 +387,10 @@ async function main() {
 
   const cfg: ArmConfig = {
     ccModel: flags["cc-model"] ?? "claude-sonnet-4-6",
-    wireProvider: flags["wire-provider"] ?? process.env.WIRE_PROVIDER ?? "openai",
-    wireModel: flags["wire-model"] ?? process.env.WIRE_MODEL,
+    // Default Wire to the same reasoning model as the Claude Code arms so the
+    // comparison isolates the agent, not the model. Override with --wire-*.
+    wireProvider: flags["wire-provider"] ?? process.env.WIRE_PROVIDER ?? "anthropic",
+    wireModel: flags["wire-model"] ?? process.env.WIRE_MODEL ?? "claude-sonnet-4-6",
     skillName: flags.skill ?? "steel-browser",
     timeoutMs: parseInt(flags["timeout"] ?? "360000", 10),
   };
@@ -355,8 +398,12 @@ async function main() {
   // Load .env and guard/build the wire arm before doing any work, so a missing
   // key or stale dist fails loudly here instead of silently scoring wire 0.
   loadProjectEnv();
+  // The steel-browser skill shells out to the `steel` CLI (~/.steel/bin); make
+  // sure spawned arms can find it regardless of how the harness was launched.
+  const steelBin = join(process.env.HOME ?? "", ".steel", "bin");
+  process.env.PATH = `${steelBin}:${process.env.PATH ?? ""}`;
   if (armOrder.includes("wire")) {
-    assertWireEnv();
+    assertWireEnv(cfg.wireProvider);
     if (!flags["skip-build"]) await buildWire();
   }
 
