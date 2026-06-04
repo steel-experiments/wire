@@ -60,13 +60,6 @@ test("classifyError: invalid task-file JSON → INVALID_TASK_FILE", () => {
   assert.equal(result.retryable, false);
 });
 
-test("classifyError: 'multiple providers' → MULTIPLE_PROVIDERS", () => {
-  const err = new Error("Multiple LLM providers are configured");
-  const result = classifyError(err);
-  assert.equal(result.error_code, "MULTIPLE_PROVIDERS");
-  assert.equal(result.error_class, "input");
-});
-
 test("classifyError: provider/model mismatch → PROVIDER_MODEL_MISMATCH", () => {
   const err = new Error('Model "claude-3" does not match provider "openai".');
   const result = classifyError(err);

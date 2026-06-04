@@ -42,17 +42,19 @@ test("resolveProviderSelection rejects mismatched provider and model", () => {
   );
 });
 
-test("resolveProviderSelection rejects ambiguous provider choice when both keys exist", () => {
+test("resolveProviderSelection defaults to openai when both keys exist", () => {
   const originalOpenAi = process.env.OPENAI_API_KEY;
   const originalAnthropic = process.env.ANTHROPIC_API_KEY;
   process.env.OPENAI_API_KEY = "openai-test-key";
   process.env.ANTHROPIC_API_KEY = "anthropic-test-key";
 
   try {
-    assert.throws(
-      () => resolveProviderSelection(undefined, undefined),
-      /Multiple LLM providers are configured/u,
-    );
+    // No explicit provider or model: prefer openai, then anthropic.
+    assert.equal(resolveProviderSelection(undefined, undefined), "openai");
+
+    // openai key removed -> fall back to anthropic.
+    delete process.env.OPENAI_API_KEY;
+    assert.equal(resolveProviderSelection(undefined, undefined), "anthropic");
   } finally {
     if (originalOpenAi === undefined) {
       delete process.env.OPENAI_API_KEY;

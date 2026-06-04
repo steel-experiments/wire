@@ -155,16 +155,15 @@ export function resolveProviderSelection(provider?: LlmProvider, model?: string)
   const hasOpenAi = Boolean(process.env.OPENAI_API_KEY);
   const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY);
 
-  if (hasOpenAi && !hasAnthropic) {
+  // Deterministic default precedence when only an API key is present:
+  // prefer openai, then anthropic. Override with `llm.provider`,
+  // `WIRE_PROVIDER`, or `--provider`.
+  if (hasOpenAi) {
     return "openai";
   }
 
-  if (hasAnthropic && !hasOpenAi) {
+  if (hasAnthropic) {
     return "anthropic";
-  }
-
-  if (hasOpenAi && hasAnthropic) {
-    throw new Error("Multiple LLM providers are configured. Set `llm.provider`, `WIRE_PROVIDER`, or `--provider`.");
   }
 
   return undefined;

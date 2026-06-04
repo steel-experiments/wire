@@ -91,15 +91,6 @@ export function classifyError(error: unknown): WireError {
       };
     }
 
-    if (/multiple.*provider/i.test(msg)) {
-      return {
-        error_class: "input",
-        error_code: "MULTIPLE_PROVIDERS",
-        retryable: false,
-        hint: "Set llm.provider, WIRE_PROVIDER, or --provider to disambiguate.",
-      };
-    }
-
     if (/does not match provider/i.test(msg)) {
       return {
         error_class: "input",
