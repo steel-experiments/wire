@@ -437,6 +437,30 @@ test("loadSkillsFromDir returns parsed skills from .md files", async () => {
   assert.ok(ids.includes("skill_gh-prs"));
 });
 
+test("loadSkillsFromDir ignores proposals by default and includes them on opt-in", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  const proposalDir = join(dir, ".proposals");
+  await mkdir(proposalDir, { recursive: true });
+
+  await writeFile(join(dir, "stripe.md"), STRIPE_SKILL_MD, "utf-8");
+  await writeFile(
+    join(proposalDir, "stripe-proposed.md"),
+    STRIPE_SKILL_MD
+      .replace("skill_stripe-dashboard", "skill_stripe-proposed")
+      .replace("scope: domain", "scope: domain\nstatus: proposed"),
+    "utf-8",
+  );
+
+  const defaultSkills = await loadSkillsFromDir(dir);
+  assert.deepEqual(defaultSkills.map((skill) => skill.id), ["skill_stripe-dashboard"]);
+
+  const withProposals = await loadSkillsFromDir(dir, { includeProposals: true });
+  const proposed = withProposals.find((skill) => skill.id === "skill_stripe-proposed");
+  assert.equal(withProposals.length, 2);
+  assert.equal(proposed?.status, "proposed");
+});
+
 test("loadSkillsFromDir skips non-.md files", async () => {
   testRoot = makeRoot();
   const dir = join(testRoot, "skills");
@@ -641,6 +665,28 @@ test("findMatchingSkills excludes inactive skills before scoring", async () => {
   assert.equal((await findMatchingSkills(dir, "dashboard.stripe.com")).length, 0);
   assert.equal((await findMatchingSkills(dir, undefined, ["code-review"])).length, 0);
   assert.equal((await findMatchingSkills(dir)).length, 1);
+});
+
+test("findMatchingSkills can include matching proposal docs as provisional guidance", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  const proposalDir = join(dir, ".proposals");
+  await mkdir(proposalDir, { recursive: true });
+
+  await writeFile(
+    join(proposalDir, "stripe-proposed.md"),
+    STRIPE_SKILL_MD
+      .replace("skill_stripe-dashboard", "skill_stripe-proposed")
+      .replace("scope: domain", "scope: domain\nstatus: proposed"),
+    "utf-8",
+  );
+
+  assert.equal((await findMatchingSkills(dir, "dashboard.stripe.com")).length, 0);
+
+  const matched = await findMatchingSkills(dir, "dashboard.stripe.com", undefined, { includeProposals: true });
+  assert.equal(matched.length, 1);
+  assert.equal(matched[0]!.id, "skill_stripe-proposed");
+  assert.equal(matched[0]!.status, "proposed");
 });
 
 test("findMatchingSkills excludes skills with no actual match signal when filters are provided", async () => {

@@ -8,6 +8,7 @@ import { deriveRunResult, type LoopState } from "./loop.js";
 import { extractFirstJsonObject } from "./llm-parse.js";
 import { recordLlmCall, tracingProvider, type LlmTraceOptions } from "./llm-trace.js";
 import { hasExtractedTaskResult } from "./state-helpers.js";
+import { progressLedgerText } from "./progress-ledger.js";
 
 export interface ArtifactReviewResult {
   passed: boolean;
@@ -123,7 +124,10 @@ function reviewerEvidence(state: LoopState): { evidence: string; artifacts: stri
     return `Artifact: ${label}\n${sanitize(content)}`;
   }).join("\n\n");
   const result = deriveRunResult(state.events, state.task.mode);
-  const evidence = result ? sanitize(result) : "(none)";
+  const ledger = state.progressLedger.length > 0
+    ? `\n\nProgress ledger:\n${sanitize(progressLedgerText(state.progressLedger))}`
+    : "";
+  const evidence = `${result ? sanitize(result) : "(none)"}${ledger}`;
   return { evidence, artifacts };
 }
 

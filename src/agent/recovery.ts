@@ -13,7 +13,6 @@ export interface RecoverySignals {
   maxStepsReached: boolean;
   awaitingApproval: boolean;
   userCancelled: boolean;
-  keepSessionOpenRequested: boolean;
   pendingApproval: LoopResult["pendingApproval"];
   pendingAction: LoopResult["pendingAction"];
   flushedEvents: number;

@@ -48,6 +48,11 @@ export const ACTION_GUIDANCE_ITEMS: ActionGuidanceItem[] = [
     text: 'When the user asks to save or produce a file, return an artifact envelope from exec: `{artifacts:[{filename:"result.md",kind:"markdown",mimeType:"text/markdown",content:"..."}],data:{...}}`. Choose the filename, kind, MIME type, and complete file content yourself; this also works for CSV, JSON, TXT, HTML, JS, Python, and other text files.',
   },
   {
+    id: "progress-ledger-envelope",
+    home: "core",
+    text: 'For multi-source, list/table, or repeated-unit tasks, preserve task-specific evidence across turns by returning a progress ledger from exec: `{progress:[{key:"source-or-unit", fields:{...}, evidence:"what proves this row"}], data:{...}}`. Use your own schema from the objective; Wire stores it without interpreting site-specific fields.',
+  },
+  {
     id: "exec-timeout",
     home: "core",
     text: "Each exec call defaults to a 12-second CDP timeout and payload.timeoutMs is capped at 12000. Keep scripts short; avoid sleep/poll loops. For long sequences, split across turns or return wireActions.",
@@ -138,11 +143,6 @@ export const ACTION_GUIDANCE_ITEMS: ActionGuidanceItem[] = [
     text: "Only use finish after your exec code has returned the actual answer in its return value.",
   },
   {
-    id: "keep-session-open-finish",
-    home: "core",
-    text: 'If the objective wants the browser left running after you finish (e.g. "keep the session open", "leave it running", "don\'t close the browser"), set payload.keepSessionOpen to true on the finish action. Otherwise omit it and the session closes normally.',
-  },
-  {
     id: "helper-section-intro",
     home: "helper",
     text: "Helpers available in every exec block — they are task-local and may be replaced with edit-helper when the current task needs a different thin helper surface:",
@@ -170,7 +170,7 @@ export const ACTION_GUIDANCE_ITEMS: ActionGuidanceItem[] = [
   {
     id: "helper-wait-for-selector",
     home: "helper",
-    text: '  • `await waitForSelector(".game-container", 5000)` — resolves when the selector appears, rejects after timeoutMs.',
+    text: '  • `await waitForSelector("main, article, [data-loaded]", 5000)` — resolves when the selector appears, rejects after timeoutMs.',
   },
   {
     id: "helper-errors",

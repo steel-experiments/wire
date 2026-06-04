@@ -38,6 +38,7 @@ export type TraceEventKind =
   | "contract-check"
   | "critical-points"
   | "artifact-review"
+  | "progress-ledger"
   | "llm-call"
   | "llm-usage"
   | "user-message"
@@ -78,6 +79,7 @@ export type ActionKind =
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
 export type JsonObject = { [key: string]: JsonValue };
+export type ProgressLedgerEntry = JsonObject;
 
 export interface LlmUsage {
   promptTokens?: number;
@@ -171,10 +173,16 @@ export interface Run {
   parentRunId?: RunId;
   branchLabel?: string;
   hypothesisId?: HypothesisId;
+  sessionId?: SessionId;
   status: RunStatus;
   startedAt?: string;
   finishedAt?: string;
+  stepCount?: number;
+  eventCount?: number;
+  artifactCount?: number;
+  reviewFailureCount?: number;
   result?: string;
+  resultPayload?: JsonValue;
   outcomeSummary?: string;
   classification?: RunClassification;
 }

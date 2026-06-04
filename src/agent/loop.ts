@@ -4,6 +4,7 @@ import type {
   ApprovalRequest,
   JsonObject,
   LlmUsage,
+  ProgressLedgerEntry,
   ProposedAction,
   ProposedActionDetail,
   Run,
@@ -46,6 +47,7 @@ import {
   isLikelyInteractionCode,
   wireActionsSignal,
 } from "./action-dispatch.js";
+import { appendProgressLedgerEntries, progressEntriesFromExecResult } from "./progress-ledger.js";
 
 const DEFAULT_EXEC_TIMEOUT_MS = 12_000;
 const APPROVAL_CODE_EXCERPT_MAX = 2000;
@@ -202,6 +204,9 @@ export interface LoopState extends TaskContext, RunTrace, StepCounter {
   contract: TaskContract;
   /** How many times the artifact reviewer has rejected so far this run. */
   reviewFailureCount: number;
+  /** Run-scoped model-authored task evidence. In-memory for now; snapshots are
+   *  emitted as trace events so a future durable store can replay the same data. */
+  progressLedger: ProgressLedgerEntry[];
   /**
    * How many times the loop has nudged the agent to replace Wire's generic
    * verification capture with a task-specific extraction. Bounded so the nudge
@@ -273,6 +278,7 @@ export function createLoopState(
     helperVersion: 0,
     contract: createTaskContract(task),
     reviewFailureCount: 0,
+    progressLedger: [],
     extractionRepromptCount: 0,
   };
 
@@ -524,6 +530,11 @@ export async function executeStep(
           kind: "code-result",
           payload: redactJsonObject(resultPayload),
         });
+
+        appendProgressLedgerEntries(
+          state,
+          progressEntriesFromExecResult(result.returnValue, result.stdout),
+        );
 
         if (result.ok && result.returnValue !== undefined) {
           await executeWireActionsEnvelope(state, provider, result.returnValue);

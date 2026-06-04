@@ -355,6 +355,26 @@ test("saveRun preserves final result text", async () => {
   assert.equal(loaded.result, "Extracted answer");
 });
 
+test("saveRun preserves optional audit linkage fields", async () => {
+  testRoot = makeRoot();
+  const run = makeRun({
+    sessionId: createId("session"),
+    stepCount: 4,
+    eventCount: 12,
+    artifactCount: 2,
+    reviewFailureCount: 1,
+  });
+
+  await saveRun(testRoot, run);
+  const loaded = await loadRun(testRoot, run.id);
+
+  assert.equal(loaded.sessionId, run.sessionId);
+  assert.equal(loaded.stepCount, 4);
+  assert.equal(loaded.eventCount, 12);
+  assert.equal(loaded.artifactCount, 2);
+  assert.equal(loaded.reviewFailureCount, 1);
+});
+
 test("loadRun throws NotFoundError for missing run", async () => {
   testRoot = makeRoot();
 
@@ -579,13 +599,24 @@ test("saveTraceEvents + loadTraceEvent round-trips runtime-only event kinds", as
       kind: "user-message",
       payload: { message: "pause after this step" },
     }),
+    makeTraceEvent({
+      runId,
+      kind: "progress-ledger",
+      payload: {
+        entries: [{ key: "site-a", fields: { title: "Example" } }],
+        ledger: [{ key: "site-a", fields: { title: "Example" } }],
+        count: 1,
+        total: 1,
+      },
+    }),
   ];
 
   await saveTraceEvents(testRoot, events);
 
   assert.equal((await loadTraceEvent(testRoot, events[0]!.id)).kind, "llm-usage");
   assert.equal((await loadTraceEvent(testRoot, events[1]!.id)).kind, "user-message");
-  assert.equal((await listTraceEvents(testRoot, runId)).length, 2);
+  assert.equal((await loadTraceEvent(testRoot, events[2]!.id)).kind, "progress-ledger");
+  assert.equal((await listTraceEvents(testRoot, runId)).length, 3);
 });
 
 test("loadSession throws CorruptError for schema-invalid file", async () => {

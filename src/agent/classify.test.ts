@@ -236,31 +236,12 @@ describe("classifyRun", () => {
       objective: "Open grants.gov, search for active funding opportunities containing 'artificial intelligence', and return top 5 with agency, deadline, and CFDA number.",
     }));
     assert.equal(result.kind, "partial-success");
-    assert.ok(result.notes?.some((n) => /does not.*address/i.test(n)));
+    assert.ok(result.notes?.some((n) => /generic failure shape/i.test(n)));
   });
 
-  it("downgrades task-complete to partial-success when output does not address objective", () => {
-    const events = [
-      makeEvent("code-result", { ok: true, stdout: '{"title":"Booking.com","url":"https://www.booking.com/"}' }),
-      makeEvent("artifact", { kind: "json-output", content: '{"title":"Booking.com"}' }),
-    ];
-    const result = classifyRun(makeInput({
-      mode: "task",
-      events,
-      errorCount: 0,
-      objective: "search for hotels in San Francisco and extract names and prices",
-    }));
-    assert.equal(result.kind, "partial-success");
-    assert.ok(result.confidence < 0.6);
-    assert.ok(result.notes?.some((n) => /does not.*address/i.test(n)));
-  });
-
-  it("downgrades when the result is a clue-solver page echoing the query (bubble-gum repro)", () => {
-    // Repro of run_7bc93c0e: the agent stopped on a wordplays.com crossword-solver
-    // SEO page that reflected the query back. Every objective keyword is present by
-    // construction (the page is the query), so the keyword check passes even though
-    // no answer was found. Note the %22 artifacts — the agent read back its own
-    // percent-encoded query, not real content.
+  it("downgrades when the result is a search page echoing the query", () => {
+    // The %22 artifacts show the agent read back its own percent-encoded query,
+    // not extracted content.
     const dump = {
       matches: [
         "%22BUBBLE GUM%22 %22GREAT AMERICA%22 5K RACE CROSSWORD CLUE",
@@ -280,12 +261,12 @@ describe("classifyRun", () => {
       objective: "What was the name of the 5K race hosted at the old Great America theme park in California that had 'bubble gum' in its title?",
     }));
     assert.equal(result.kind, "partial-success");
-    assert.ok(result.notes?.some((n) => /does not.*address/i.test(n)));
+    assert.ok(result.notes?.some((n) => /generic failure shape/i.test(n)));
   });
 
   it("downgrades when result echoes a percent-encoded query instead of an answer", () => {
-    // Isolates the %22 tell on a short, non-crossword result so the page-dump
-    // guard can't be the thing firing.
+    // Isolates the %22 tell on a short result so the page-dump guard can't be
+    // the thing firing.
     const stdout = JSON.stringify({ heading: "%22acme widget%22 specifications at DuckDuckGo", results: [] });
     const events = [
       makeEvent("code-result", { ok: true, stdout }),
@@ -297,6 +278,7 @@ describe("classifyRun", () => {
       objective: "find the specifications for the acme widget",
     }));
     assert.equal(result.kind, "partial-success");
+    assert.ok(result.notes?.some((n) => /generic failure shape/i.test(n)));
   });
 
   it("downgrades when the result is a raw whole-page dump rather than an extracted answer", () => {
@@ -321,7 +303,7 @@ describe("classifyRun", () => {
       objective: "find the name of the CEO of Acme Corporation",
     }));
     assert.equal(result.kind, "partial-success");
-    assert.ok(result.notes?.some((n) => /does not.*address/i.test(n)));
+    assert.ok(result.notes?.some((n) => /generic failure shape/i.test(n)));
   });
 
   it("keeps task-complete for a long structured extraction without page chrome", () => {
@@ -342,14 +324,14 @@ describe("classifyRun", () => {
     assert.equal(result.kind, "task-complete");
   });
 
-  it("credits structured iteration evidence for repeat objectives", () => {
+  it("classifies structured task output without interpreting repeat semantics", () => {
     const payload = {
       runs: [
-        { run: 1, score: 2872 },
-        { run: 2, score: 8728 },
-        { run: 3, score: 8520 },
-        { run: 4, score: 5120 },
-        { run: 5, score: 9664 },
+        { run: 1, status: "completed", score: 2872, over: true },
+        { run: 2, status: "completed", score: 8728, over: true },
+        { run: 3, status: "completed", score: 8520, over: true },
+        { run: 4, status: "completed", score: 5120, over: true },
+        { run: 5, status: "completed", score: 9664, over: true },
       ],
       sessionOpen: true,
     };
@@ -360,22 +342,6 @@ describe("classifyRun", () => {
       objective: "play 2048 and achieve high score for 5 games",
     }));
     assert.equal(result.kind, "task-complete");
-  });
-
-  it("downgrades recovered task-complete when output does not address objective", () => {
-    const events = [
-      makeEvent("code-result", { ok: true, stdout: "some unrelated data" }),
-      makeEvent("code-result", { ok: false, stderr: "error" }),
-      makeEvent("artifact", { kind: "answer", content: "unrelated data" }),
-    ];
-    const result = classifyRun(makeInput({
-      mode: "task",
-      events,
-      errorCount: 0,
-      objective: "search for hotels in San Francisco and extract names and prices",
-    }));
-    assert.equal(result.kind, "partial-success");
-    assert.ok(result.notes?.some((n) => /does not.*address/i.test(n)));
   });
 
   it("classifies site-error when all code execs failed", () => {

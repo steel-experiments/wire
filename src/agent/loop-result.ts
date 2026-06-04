@@ -1,5 +1,6 @@
 import type {
   ApprovalRequest,
+  JsonValue,
   ProposedAction,
   Run,
   TaskMode,
@@ -10,6 +11,7 @@ import { scoreRun } from "../eval/scoring.js";
 import { classifyRun, generateOutcomeSummary } from "./classify.js";
 import { countConsecutiveUnchanged } from "./state-helpers.js";
 import type { LoopResult, LoopState } from "./loop.js";
+import { progressLedgerFromEvents, progressLedgerText } from "./progress-ledger.js";
 
 export interface FinalizeOptions {
   authWallHit?: boolean;
@@ -124,6 +126,11 @@ export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | 
   }
 
   if (mode === "task") {
+    const progressLedger = progressLedgerFromEvents(events);
+    if (progressLedger.length > 0) {
+      return progressLedgerText(progressLedger);
+    }
+
     const latestNoteArtifact = [...events].reverse().find((event) =>
       event.kind === "artifact" &&
       event.payload.kind === "note" &&
@@ -187,6 +194,27 @@ export function computeFinalClassification(
     };
   }
 
+  const stoppedForReplan = typeof options.stopReason === "string" &&
+    /aborting to force re-plan/iu.test(options.stopReason);
+  if (stoppedForReplan && classification.kind === "task-complete") {
+    const latestValidation = [...state.events].reverse().find((event) =>
+      event.kind === "contract-check" && event.payload.phase === "validated"
+    );
+    if (latestValidation?.payload.passed !== true) {
+      return hasMeaningfulDerivedResult(derivedResult)
+        ? {
+          kind: "partial-success",
+          confidence: 0.5,
+          notes: [`Stopped for re-plan before completion: ${options.stopReason}`],
+        }
+        : {
+          kind: "agent-error",
+          confidence: 0.75,
+          notes: [`Stopped for re-plan before producing a meaningful answer: ${options.stopReason}`],
+        };
+    }
+  }
+
   return classification;
 }
 
@@ -207,6 +235,11 @@ export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): Lo
 
   const finishedRun: Run = {
     ...state.run,
+    sessionId: state.sessionId,
+    stepCount: state.stepCount,
+    eventCount: state.events.length,
+    artifactCount: state.events.filter((event) => event.kind === "artifact").length,
+    reviewFailureCount: state.reviewFailureCount,
     status,
     classification,
     outcomeSummary,
@@ -217,6 +250,12 @@ export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): Lo
     (options.userCancelled === true && !hasMeaningfulDerivedResult(derivedResult));
   if (derivedResult !== undefined && !resultBlocked) {
     finishedRun.result = derivedResult;
+    try {
+      const resultPayload = JSON.parse(derivedResult) as JsonValue;
+      finishedRun.resultPayload = resultPayload;
+    } catch {
+      // Keep the compatibility string for non-JSON answers.
+    }
   }
 
   if (!options.awaitingApproval) {

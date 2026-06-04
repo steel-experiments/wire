@@ -33,8 +33,8 @@ function deriveSkillTags(task: Task): string[] {
   return [...tags];
 }
 
-const SKILL_GUIDANCE_MAX = 1000;
-const SECTION_BUDGETS = [400, 300, 200];
+const SKILL_GUIDANCE_MAX = 1800;
+const SECTION_BUDGETS = [1300, 300, 150];
 
 export function skillGuidance(skill: LoadedSkill): string {
   const preferredSections = ["Known Traps", "Traps", "Workflow", "Wait Patterns", "Facts", "Routes", "Selectors"];
@@ -63,10 +63,16 @@ export function skillGuidance(skill: LoadedSkill): string {
   }
 
   if (snippets.length === 0) {
-    return skill.body.replace(/\s+/gu, " ").trim().slice(0, SKILL_GUIDANCE_MAX);
+    const fallback = skill.body.replace(/\s+/gu, " ").trim();
+    return provisionalPrefix(skill, fallback).slice(0, SKILL_GUIDANCE_MAX);
   }
 
-  return snippets.join(" | ").slice(0, SKILL_GUIDANCE_MAX);
+  return provisionalPrefix(skill, snippets.join(" | ")).slice(0, SKILL_GUIDANCE_MAX);
+}
+
+function provisionalPrefix(skill: LoadedSkill, guidance: string): string {
+  if (skill.status !== "proposed") return guidance;
+  return `PROVISIONAL learned proposal from prior run. Verify before relying on it; use durable facts, selectors, waits, and traps, not unproven end-to-end workflow. ${guidance}`;
 }
 
 export async function syncMatchedSkills(state: LoopState, skillDir?: string): Promise<void> {
@@ -77,7 +83,7 @@ export async function syncMatchedSkills(state: LoopState, skillDir?: string): Pr
 
   const hostname = hostnameFromState(state);
   const tags = deriveSkillTags(state.task);
-  const matches = await findMatchingSkillDocMatches(skillDir, hostname, tags);
+  const matches = await findMatchingSkillDocMatches(skillDir, hostname, tags, { includeProposals: true });
   const matched = matches.map((entry) => entry.skill);
   const previousIds = state.loadedSkills.map((skill) => skill.id).join(",");
   const nextIds = matched.map((skill) => skill.id).join(",");
@@ -89,7 +95,7 @@ export async function syncMatchedSkills(state: LoopState, skillDir?: string): Pr
   // creates an empty one, no warning ever surfaces) becomes loud failure.
   const alreadyWarned = state.events.some((e) => e.kind === "skill-empty");
   if (!alreadyWarned) {
-    const all = await loadSkillDocsFromDir(skillDir);
+    const all = await loadSkillDocsFromDir(skillDir, { includeProposals: true });
     if (all.length === 0) {
       state.events.push({
         id: createId("event"),

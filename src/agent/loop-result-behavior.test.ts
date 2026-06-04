@@ -204,6 +204,37 @@ test("finalizeRun exposes a RunScore with 5 components on LoopResult", () => {
   }
 });
 
+test("finalizeRun persists lightweight run audit linkage", () => {
+  const sessionId = makeSessionId();
+  const state = createLoopState(makeTask(), sessionId);
+  state.stepCount = 3;
+  state.reviewFailureCount = 1;
+  state.events.push(
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, durationMs: 10, returnValue: { answer: "done" } },
+    },
+    {
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "artifact",
+      payload: { kind: "answer", content: "done" },
+    },
+  );
+
+  const result = finalizeRun(state);
+
+  assert.equal(result.run.sessionId, sessionId);
+  assert.equal(result.run.stepCount, 3);
+  assert.equal(result.run.eventCount, 2);
+  assert.equal(result.run.artifactCount, 1);
+  assert.equal(result.run.reviewFailureCount, 1);
+});
+
 test("finalizeRun persists final result from successful code output", () => {
   const task = makeTask();
   const state = createLoopState(task, makeSessionId());

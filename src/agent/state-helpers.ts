@@ -50,23 +50,6 @@ export function hasExtractedTaskResult(state: LoopState): boolean {
   );
 }
 
-export function hasObjectiveCardinalityEvidence(state: LoopState): boolean {
-  const needed = state.task.objective.match(/\b(\d+)\s+(?:times|runs?|plays?|games?)\b/iu);
-  if (!needed) return true;
-  const target = Number(needed[1]);
-  const result = latestCodeResult(state);
-  if (!result || result.payload.ok !== true) return false;
-  const parts = [
-    typeof result.payload.stdout === "string" ? result.payload.stdout : "",
-    result.payload.returnValue === undefined ? "" : JSON.stringify(result.payload.returnValue),
-  ];
-  const text = parts.join("\n");
-  const repeatedItems = text.match(/"(?:run|game|play)"\s*:/giu)?.length ?? 0;
-  if (repeatedItems >= target) return true;
-  const count = text.match(/"(?:runsCount|playsCompleted|playsDone|gamesCompleted|completed)"\s*:\s*(\d+)/iu);
-  return count ? Number(count[1]) >= target : false;
-}
-
 /** Detect code-results that only confirm navigation without extracting meaningful content. */
 export function isNavigationOnlyResult(event: TraceEvent): boolean {
   const rv = event.payload.returnValue;
@@ -498,8 +481,8 @@ export function codeResultDigest(event: TraceEvent | undefined): string | undefi
 /**
  * The "shape" of a code-result: the sorted set of top-level keys of its
  * returnValue, independent of the values. A stable shape whose values keep
- * changing is the signature of a progressing probe (e.g. polling a live game
- * score) — real work, not a stuck loop. A shape that keeps morphing is the
+ * changing is the signature of a progressing probe (e.g. polling live task
+ * state) — real work, not a stuck loop. A shape that keeps morphing is the
  * signature of flailing. The sig-only loop backstop uses this to tell the two
  * apart. Returns undefined for non-object return values (scalars/arrays), where
  * shape can't be assessed.

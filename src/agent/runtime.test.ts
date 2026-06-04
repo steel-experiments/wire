@@ -125,6 +125,35 @@ test("executeTask exits immediately when cancelSignal is already aborted", async
   assert.equal(observeCalls, 0, "should not run the initial observation after early cancellation");
 });
 
+test("executeTask returns a failed run when session startup fails", async () => {
+  let observeCalls = 0;
+  const base = makeConfig();
+  const config = makeConfig({
+    provider: {
+      ...base.provider,
+      createSession: async () => {
+        throw new Error("startup unavailable");
+      },
+      observe: async (_input: BrowserObserveInput) => {
+        observeCalls++;
+        return makeObservation();
+      },
+    },
+  });
+
+  const result = await executeTask(makeTask(), config);
+
+  assert.equal(observeCalls, 0, "startup failure should not observe a missing session");
+  assert.equal(result.run.status, "failed");
+  assert.equal(result.run.sessionId, result.sessionId);
+  assert.equal(result.run.stepCount, 0);
+  assert.ok(result.events.some((event) =>
+    event.kind === "error" &&
+    event.payload.code === "ESESSIONSTART" &&
+    String(event.payload.message).includes("startup unavailable")
+  ));
+});
+
 test("executeTask without cancelSignal behaves normally (fallback to no-op)", async () => {
   const config = makeConfig();
 
@@ -766,7 +795,7 @@ test("skillGuidance includes Traps section when skill uses Traps instead of Know
   assert.match(guidance, /Avoid clicking the ads/u);
 });
 
-test("skillGuidance truncates at 1000 chars but preserves first matched section", () => {
+test("skillGuidance truncates at 1800 chars but preserves first matched section", () => {
   const skill = makeSkill({
     sections: {
       "Known Traps": "A".repeat(500),
@@ -775,9 +804,27 @@ test("skillGuidance truncates at 1000 chars but preserves first matched section"
     },
   });
   const guidance = skillGuidance(skill);
-  assert.ok(guidance.length <= 1000, `guidance should be capped at 1000 chars, got ${guidance.length}`);
+  assert.ok(guidance.length <= 1800, `guidance should be capped at 1800 chars, got ${guidance.length}`);
   assert.match(guidance, /Known Traps/u, "should still include Known Traps section header");
   assert.match(guidance, /A{10,}/u, "should include traps content even with long sections");
+});
+
+test("skillGuidance keeps late trap bullets before workflow details", () => {
+  const skill = makeSkill({
+    sections: {
+      "Known Traps": [
+        "- First trap " + "A".repeat(250),
+        "- Second trap " + "B".repeat(250),
+        "- Third trap " + "C".repeat(250),
+        "- Do NOT click Start Bot; use the visible Play control instead.",
+        "- Do NOT parse score text by stripping non-digits; read the first numeric line.",
+      ].join("\n"),
+      "Workflow": "1. Navigate. 2. Click. 3. Extract.",
+    },
+  });
+  const guidance = skillGuidance(skill);
+  assert.match(guidance, /Do NOT click Start Bot/u);
+  assert.match(guidance, /Do NOT parse score text/u);
 });
 
 test("skillGuidance falls back to body when no sections match", () => {
@@ -787,6 +834,19 @@ test("skillGuidance falls back to body when no sections match", () => {
   });
   const guidance = skillGuidance(skill);
   assert.equal(guidance, "Fallback guidance content from the body.");
+});
+
+test("skillGuidance labels proposed skills as provisional", () => {
+  const skill = makeSkill({
+    status: "proposed",
+    sections: {
+      "Facts": "The page exposes a Start Bot control.",
+    },
+  });
+  const guidance = skillGuidance(skill);
+  assert.match(guidance, /PROVISIONAL learned proposal/u);
+  assert.match(guidance, /Verify before relying/u);
+  assert.match(guidance, /Start Bot/u);
 });
 
 // ---------------------------------------------------------------------------

@@ -1,34 +1,6 @@
 import type { RunClassification, RunClassificationKind, TaskMode, TraceEvent } from "../shared/types.js";
 import { isNavigationOnlyResult } from "./state-helpers.js";
 
-const STOP_WORDS = new Set([
-  "the", "and", "for", "with", "from", "this", "that", "then", "than",
-  "are", "was", "has", "have", "been", "will", "would", "could", "should",
-  "into", "about", "after", "their", "them", "they", "when", "what", "which",
-  "extract", "return", "using", "page",
-]);
-
-const ACTION_VERBS = new Set([
-  "win", "find", "get", "solve", "complete", "extract", "navigate", "open",
-  "click", "fill", "submit", "download", "upload", "create", "delete",
-  "update", "read", "verify", "check", "confirm", "score", "reach",
-  "achieve", "beat", "finish", "play",
-]);
-
-function objectiveKeywords(text: string): Set<string> {
-  const matches = text.match(/[a-z0-9]{3,}/giu) ?? [];
-  return new Set(matches.map((m) => m.toLowerCase()).filter((w) => !STOP_WORDS.has(w)));
-}
-
-function objectiveVerbPhrases(text: string): Set<string> {
-  const matches = text.match(/[a-z0-9]{3,}/giu) ?? [];
-  return new Set(
-    matches.map((m) => m.toLowerCase())
-      .filter((w) => !STOP_WORDS.has(w))
-      .filter((w) => ACTION_VERBS.has(w) || w.length >= 4),
-  );
-}
-
 function extractFinalResultText(events: TraceEvent[]): string | undefined {
   const lastResult = [...events].reverse().find((e) =>
     e.kind === "code-result" &&
@@ -64,16 +36,6 @@ function extractFinalResultText(events: TraceEvent[]): string | undefined {
   return undefined;
 }
 
-function objectiveIterationSatisfied(resultText: string | undefined, objective: string): boolean {
-  const needed = objective.match(/\b(\d+)\s+(?:times|runs?|plays?|games?)\b/iu);
-  if (!needed || !resultText) return false;
-  const target = Number(needed[1]);
-  const repeatedItems = resultText.match(/"(?:run|game|play)"\s*:/giu)?.length ?? 0;
-  if (repeatedItems >= target) return true;
-  const count = resultText.match(/"(?:runsCount|playsCompleted|playsDone|gamesCompleted|completed)"\s*:\s*(\d+)/iu);
-  return count ? Number(count[1]) >= target : false;
-}
-
 // Detects "JSON-shaped extraction with mostly empty fields" — the classic
 // false-positive shape where the agent built a result schema but couldn't
 // fill it (e.g. grants.gov run_48b5ae4d returned {agency:"",cfda:"",...}).
@@ -99,14 +61,11 @@ function hasMostlyEmptyFields(resultText: string): boolean {
   return total >= 3 && empty / total >= 0.5;
 }
 
-// Markers that the result is a search-engine / clue-solver results page that
-// reflected the query back rather than an answer source. Such a page contains
-// every objective keyword by construction (it *is* the query), so the keyword
-// check below passes even though no answer was found. A reflected %22 (encoded
-// quote) is a strong tell: the agent read back its own percent-encoded query.
+// Markers that the result is a search/results page echoing the query rather
+// than an answer source. A reflected %22 (encoded quote) is a strong tell: the
+// agent read back its own percent-encoded query instead of extracted content.
 const QUERY_ECHO_MARKERS: RegExp[] = [
   /%22/,
-  /crossword (?:clue|solver)/i,
   /(?:found|returned) \d+ answers? to/i,
   /showing results for\b/i,
 ];
@@ -139,31 +98,10 @@ function looksLikeRawPageDump(resultText: string): boolean {
   return chromeHits >= 2;
 }
 
-function resultAddressesObjective(resultText: string | undefined, objective: string): boolean {
-  if (!resultText || !objective) return true;
-  if (objectiveIterationSatisfied(resultText, objective)) return true;
-  if (hasMostlyEmptyFields(resultText)) return false;
-  if (looksLikeQueryEcho(resultText)) return false;
-  if (looksLikeRawPageDump(resultText)) return false;
-
-  const verbPhrases = objectiveVerbPhrases(objective);
-  if (verbPhrases.size === 0) return true;
-
-  const resultLower = resultText.toLowerCase();
-  for (const word of verbPhrases) {
-    if (resultLower.includes(word)) {
-      return true;
-    }
-  }
-
-  const objWords = objectiveKeywords(objective);
-  for (const word of objWords) {
-    if (resultLower.includes(word)) {
-      return true;
-    }
-  }
-
-  return false;
+function hasGenericExtractionFailure(resultText: string | undefined): boolean {
+  if (!resultText) return false;
+  if (hasMostlyEmptyFields(resultText)) return true;
+  return looksLikeQueryEcho(resultText) || looksLikeRawPageDump(resultText);
 }
 
 function latestFailedContractCheck(events: TraceEvent[]): string[] {
@@ -200,7 +138,6 @@ export function classifyRun(input: ClassificationInput): RunClassification {
   const {
     mode,
     events,
-    objective,
     errorCount,
     authWallHit,
     policyDenied,
@@ -342,13 +279,8 @@ export function classifyRun(input: ClassificationInput): RunClassification {
     );
   const terminalIsNavOnly = terminalEvent?.kind === "code-result" && isNavigationOnlyResult(terminalEvent);
 
-  // In task mode, check whether the extracted result addresses the objective.
-  // This prevents classifying runs as "task-complete" when the agent extracted
-  // unrelated content (e.g. homepage text instead of search results).
-  // In investigate/experiment mode, skip this check — the objective is exploratory.
-  const objectiveRelevant = mode === "task" && objective;
   const finalResultText = extractFinalResultText(events);
-  const addressesObjective = !objectiveRelevant || resultAddressesObjective(finalResultText, objective!);
+  const genericExtractionFailure = mode === "task" && hasGenericExtractionFailure(finalResultText);
   const contractFailures = latestFailedContractCheck(events);
   const contractPassed = contractFailures.length === 0;
   const artifactReviewFailures = latestFailedArtifactReview(events);
@@ -375,7 +307,7 @@ export function classifyRun(input: ClassificationInput): RunClassification {
           notes: ["Artifact review failed", ...artifactReviewFailures.slice(0, 3)],
         };
       }
-      if (addressesObjective) {
+      if (!genericExtractionFailure) {
         if (errorCount > 0) {
           const recovered: RunClassification = {
             kind: "task-complete",
@@ -391,11 +323,11 @@ export function classifyRun(input: ClassificationInput): RunClassification {
           ? complete
           : applyStagnationDowngrade(complete, consecutiveUnchanged);
       }
-      // Has output but it doesn't address the objective
+      // Has output, but its shape matches a generic extraction failure.
       return {
         kind: "partial-success",
         confidence: 0.55,
-        notes: ["Extracted output does not appear to address the task objective"],
+        notes: ["Extracted output has a generic failure shape"],
       };
     }
 
@@ -435,20 +367,20 @@ export function classifyRun(input: ClassificationInput): RunClassification {
         ],
       };
     }
-    if (mode === "task" && hasAnswerArtifact && addressesObjective) {
+    if (mode === "task" && hasAnswerArtifact && !genericExtractionFailure) {
       return {
         kind: "task-complete",
         confidence: 0.7,
         notes: [`Recovered after ${codeFailCount} failed code execution${codeFailCount === 1 ? "" : "s"}`],
       };
     }
-    if (mode === "task" && hasAnswerArtifact && !addressesObjective) {
+    if (mode === "task" && hasAnswerArtifact && genericExtractionFailure) {
       return {
         kind: "partial-success",
         confidence: 0.55,
         notes: [
           `Recovered after ${codeFailCount} failed code execution${codeFailCount === 1 ? "" : "s"}`,
-          "Extracted output does not appear to address the task objective",
+          "Extracted output has a generic failure shape",
         ],
       };
     }

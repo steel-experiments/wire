@@ -11,34 +11,65 @@ import { sanitizeSkillContent } from "../agent/context.js";
 
 // Load all skills from a directory
 
+export interface SkillLoadOptions {
+  includeProposals?: boolean;
+}
+
+export interface SkillMatchOptions extends SkillLoadOptions {}
+
 /**
  * Scan `dir` for `*.md` files, parse each one's frontmatter, and return
  * the resulting `SkillMetadata[]`. Files that fail to parse are skipped
  * (logged via a thrown-on-read error path, silently ignored here to keep
  * the loader resilient).
  */
-export async function loadSkillsFromDir(dir: string): Promise<SkillMetadata[]> {
-  const loaded = await loadSkillDocsFromDir(dir);
+export async function loadSkillsFromDir(dir: string, options: SkillLoadOptions = {}): Promise<SkillMetadata[]> {
+  const loaded = await loadSkillDocsFromDir(dir, options);
   return loaded.map(toSkillMetadata);
 }
 
-export async function loadSkillDocsFromDir(dir: string): Promise<LoadedSkill[]> {
+interface SkillFileCandidate {
+  filePath: string;
+}
+
+async function skillFileCandidates(dir: string, options: SkillLoadOptions): Promise<SkillFileCandidate[]> {
   await ensureDir(dir);
-
-  let entries: string[];
-
+  const candidates: SkillFileCandidate[] = [];
   try {
-    entries = await readdir(dir);
+    const entries = await readdir(dir);
+    candidates.push(
+      ...entries
+        .filter((name) => name.endsWith(".md"))
+        .sort()
+        .map((name) => ({ filePath: join(dir, name) })),
+    );
   } catch {
-    return [];
+    return candidates;
   }
 
-  const mdFiles = entries.filter((name) => name.endsWith(".md")).sort();
+  if (options.includeProposals === true) {
+    const proposalDir = join(dir, ".proposals");
+    try {
+      const proposalEntries = await readdir(proposalDir);
+      candidates.push(
+        ...proposalEntries
+          .filter((name) => name.endsWith(".md"))
+          .sort()
+          .map((name) => ({ filePath: join(proposalDir, name) })),
+      );
+    } catch {
+      // No proposal directory yet.
+    }
+  }
+
+  return candidates;
+}
+
+export async function loadSkillDocsFromDir(dir: string, options: SkillLoadOptions = {}): Promise<LoadedSkill[]> {
+  const candidates = await skillFileCandidates(dir, options);
   const results: LoadedSkill[] = [];
 
-  for (const name of mdFiles) {
-    const filePath = join(dir, name);
-
+  for (const { filePath } of candidates) {
     let raw: string;
     try {
       raw = await readFile(filePath, "utf-8");
@@ -99,8 +130,9 @@ export async function findMatchingSkills(
   skillsDir: string,
   hostname?: string,
   tags?: string[],
+  options: SkillMatchOptions = {},
 ): Promise<SkillMetadata[]> {
-  const matched = await findMatchingSkillDocs(skillsDir, hostname, tags);
+  const matched = await findMatchingSkillDocs(skillsDir, hostname, tags, options);
   return matched.map(toSkillMetadata);
 }
 
@@ -108,18 +140,20 @@ export async function findMatchingSkillDocs(
   skillsDir: string,
   hostname?: string,
   tags?: string[],
+  options: SkillMatchOptions = {},
 ): Promise<LoadedSkill[]> {
-  return (await findMatchingSkillDocMatches(skillsDir, hostname, tags)).map((entry) => entry.skill);
+  return (await findMatchingSkillDocMatches(skillsDir, hostname, tags, options)).map((entry) => entry.skill);
 }
 
 export async function findMatchingSkillDocMatches(
   skillsDir: string,
   hostname?: string,
   tags?: string[],
+  options: SkillMatchOptions = {},
 ): Promise<Array<SkillMatchScore<LoadedSkill>>> {
-  const all = await loadSkillDocsFromDir(skillsDir);
+  const all = await loadSkillDocsFromDir(skillsDir, options);
   const statsBySkillId = await loadStatsForSkills(skillsDir, all);
-  return filterMatchingSkillDocMatches(all, hostname, tags, statsBySkillId);
+  return filterMatchingSkillDocMatches(all, hostname, tags, statsBySkillId, options);
 }
 
 async function loadStatsForSkills(skillsDir: string, skills: LoadedSkill[]): Promise<Record<string, SkillStats>> {
@@ -143,12 +177,13 @@ function filterMatchingSkillDocMatches(
   hostname?: string,
   tags?: string[],
   statsBySkillId: Record<string, SkillStats> = {},
+  options: SkillMatchOptions = {},
 ): Array<SkillMatchScore<LoadedSkill>> {
 
   const hasHostname = hostname !== undefined && hostname.length > 0;
   const hasTags = tags !== undefined && tags.length > 0;
   const active = all.filter((skill) =>
-    skill.status !== "proposed" &&
+    (options.includeProposals === true || skill.status !== "proposed") &&
     skill.status !== "rejected" &&
     skill.status !== "superseded"
   );

@@ -19,7 +19,6 @@ import {
   buildVerificationAction,
   hasAttemptedExtraction,
   hasExtractedTaskResult,
-  hasObjectiveCardinalityEvidence,
   hasPostNavigationExtraction,
   hasRecordedTaskArtifact,
   latestExtractionIsVerificationProbe,
@@ -33,7 +32,6 @@ export interface FinishFlowSignals {
   maxStepsReached: boolean;
   awaitingApproval: boolean;
   userCancelled: boolean;
-  keepSessionOpenRequested: boolean;
   pendingApproval: LoopResult["pendingApproval"];
   pendingAction: LoopResult["pendingAction"];
   flushedEvents: number;
@@ -67,18 +65,6 @@ export async function handleFinishAction(
   signals: FinishFlowSignals,
   flushTraceSink: FlushTraceSink,
 ): Promise<FinishFlowResult> {
-  if (action.payload?.["keepSessionOpen"] === true) {
-    signals.keepSessionOpenRequested = true;
-  }
-
-  if (
-    state.task.mode === "task" &&
-    !hasObjectiveCardinalityEvidence(state) &&
-    state.stepCount < config.maxSteps
-  ) {
-    return { kind: "execute", action: buildVerificationAction() };
-  }
-
   if (
     state.stepCount < 3 &&
     state.task.mode === "task" &&
@@ -192,6 +178,17 @@ export async function handleFinishAction(
     });
     if (payload.passed === false) {
       state.reviewFailureCount++;
+      state.events.push({
+        id: createId("event"),
+        runId: state.run.id,
+        ts: nowIsoUtc(),
+        kind: "thought-summary",
+        payload: {
+          kind: "artifact-repair-required",
+          reason: "Artifact review failed; next action must repair the artifact using the listed problems.",
+          problems: Array.isArray(payload.problems) ? payload.problems : [],
+        },
+      });
       if (state.reviewFailureCount <= 1 && state.stepCount < config.maxSteps) {
         state.stepCount++;
         await flushTraceSink(state, config, signals);

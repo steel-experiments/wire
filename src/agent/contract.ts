@@ -213,6 +213,11 @@ function combinedAnswerText(events: TraceEvent[], result?: string): string {
   for (const event of artifactEvents(events)) {
     parts.push(String(event.payload.content));
   }
+  for (const event of events) {
+    if (event.kind === "progress-ledger") {
+      parts.push(eventText(event));
+    }
+  }
   const latestResult = [...events].reverse().find((event) =>
     event.kind === "code-result" &&
     event.payload.ok === true &&

@@ -273,9 +273,10 @@ export function defaultAgentTurn(
       skills: state.loadedSkills.map((skill) => ({
         id: skill.id,
         scope: skill.scope,
-        matchReason: skill.hostnamePatterns?.length
-          ? `Matched current site and task tags`
-          : "Matched task tags",
+        matchReason: [
+          skill.status === "proposed" ? "Provisional learned proposal" : undefined,
+          skill.hostnamePatterns?.length ? "matched current site and task tags" : "matched task tags",
+        ].filter(Boolean).join("; "),
         guidance: skillGuidance(skill),
       })),
       observations,
@@ -284,6 +285,20 @@ export function defaultAgentTurn(
       plan: planToContext(taskPlan),
       contract: contractToPrompt(state.contract),
     };
+
+    if (state.progressLedger.length > 0) {
+      context.progressLedger = state.progressLedger;
+    }
+
+    const latestFailedReview = [...state.events].reverse().find((event) =>
+      event.kind === "artifact-review" && event.payload.passed === false
+    );
+    if (latestFailedReview && Array.isArray(latestFailedReview.payload.problems)) {
+      context.repairInstructions = latestFailedReview.payload.problems
+        .map(String)
+        .filter((problem) => problem.trim().length > 0)
+        .slice(0, 8);
+    }
 
     const evidence = latestExtractionsPerUrl(state.events);
     if (evidence.length > 0) {

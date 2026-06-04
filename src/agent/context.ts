@@ -1,3 +1,5 @@
+import type { JsonObject } from "../shared/types.js";
+
 export interface TaskObjective {
   mode: string;
   objective: string;
@@ -72,6 +74,10 @@ export interface ContextBundle {
   /** Latest substantive extraction per URL visited this run. Lets the agent
    *  reuse what it has already pulled instead of re-navigating to re-extract. */
   evidence?: UrlEvidence[];
+  /** Model-authored structured evidence accumulated across actions. */
+  progressLedger?: JsonObject[];
+  /** Concrete reviewer failures that must be repaired before finishing. */
+  repairInstructions?: string[];
 }
 
 import { redactSecrets } from "../shared/redact.js";
@@ -230,6 +236,20 @@ export function assembleUserPrompt(context: ContextBundle): string {
     sections.push(
       "Evidence already extracted this run (do not re-navigate to re-fetch):\n\n" +
         blocks.join("\n\n"),
+    );
+  }
+
+  if (context.progressLedger && context.progressLedger.length > 0) {
+    sections.push(
+      "Progress ledger (preserve and build on this structured evidence; do not replace it with a generic page snapshot):\n" +
+        redactSecrets(JSON.stringify(context.progressLedger, null, 2)),
+    );
+  }
+
+  if (context.repairInstructions && context.repairInstructions.length > 0) {
+    sections.push(
+      "Required artifact repair before finishing:\n" +
+        context.repairInstructions.map((problem) => `- ${redactSecrets(problem)}`).join("\n"),
     );
   }
 

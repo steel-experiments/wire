@@ -27,6 +27,7 @@ import type { LLMProvider } from "../providers/llm/openai.js";
 
 import {
   createLoopState,
+  deriveRunResult,
   executeStep,
   finalizeRun,
   computeFinalClassification,
@@ -37,7 +38,6 @@ import {
 } from "./loop.js";
 import { observeBrowser, toObservationPayload } from "../browser/observe.js";
 import { detectAuthWall } from "../profiles/auth.js";
-import { llmProposeSkill, generateSkillProposal, manageSkillPromotion } from "../skills/promote.js";
 import { registerActionKind } from "./llm-parse.js";
 import {
   latestError,
@@ -57,6 +57,8 @@ import { updateSkillStatsFromRun } from "../skills/stats.js";
 import {
   contractCreatedPayload,
   createTaskContract,
+  contractValidationPayload,
+  validateTaskContract,
 } from "./contract.js";
 import { tracingProvider, type LlmTraceOptions } from "./llm-trace.js";
 import { syncMatchedSkills } from "./skill-context.js";
@@ -68,6 +70,9 @@ import {
 } from "./artifact-review.js";
 import { tryAntiBotRecovery } from "./recovery.js";
 import { handleFinishAction } from "./finish-flow.js";
+import { progressLedgerFromEvents } from "./progress-ledger.js";
+import { appendSkillProposalEvents } from "./skill-proposals.js";
+import { createStartupFailureResult } from "./startup-failure.js";
 
 export { skillGuidance } from "./skill-context.js";
 export { latestExtractionsPerUrl } from "./evidence.js";
@@ -101,6 +106,9 @@ export interface RuntimeConfig {
   onSessionCreated?: (session: BrowserSession) => Promise<void> | void;
   onSessionReconfigured?: (
     details: { oldSessionId: SessionId; newSession: BrowserSession; summary: string },
+  ) => Promise<void> | void;
+  onSessionEnded?: (
+    details: { sessionId: SessionId; status: "stopped" | "failed"; reason?: string },
   ) => Promise<void> | void;
   traceSink?: TraceSink;
   traceLlmMessages?: boolean;
@@ -145,72 +153,13 @@ function withResolvedSkillDir(config: RuntimeConfig): RuntimeConfig {
 
 function createCancelledState(task: Task, config: RuntimeConfig): LoopState {
   const session = config.existingSession;
-  const loopOptions: { sessionConfig?: SessionConfig; profileId?: ProfileId } = {};
-  if (config.sessionInput?.sessionConfig) {
-    loopOptions.sessionConfig = config.sessionInput.sessionConfig;
-  }
-  if (session?.profileId) {
-    loopOptions.profileId = session.profileId;
-  } else if (config.sessionInput?.profileId) {
-    loopOptions.profileId = config.sessionInput.profileId;
-  }
 
   return createLoopState(
     task,
     session?.id ?? createId("session"),
     session?.debugUrl ?? session?.liveUrl,
-    loopOptions,
+    loopOptionsForConfig(config, session),
   );
-}
-
-async function appendSkillProposalEvents(
-  state: LoopState,
-  skillDir?: string,
-  llmProvider?: LLMProvider,
-): Promise<void> {
-  if (!llmProvider) {
-    return;
-  }
-
-  const alreadyProposed = state.events.some((event) => event.kind === "skill-proposal");
-  if (alreadyProposed) {
-    return;
-  }
-
-  const candidate = await llmProposeSkill(state.events, state.run.id, llmProvider);
-  if (!candidate) {
-    return;
-  }
-
-  const payload: JsonObject = {
-    skillId: candidate.skillId,
-    scope: "domain",
-    hostname: candidate.hostname,
-    confidence: candidate.confidence,
-    rationale: `Reusable browser knowledge detected for ${candidate.hostname}`,
-    proposal: generateSkillProposal(candidate),
-  };
-
-  if (skillDir) {
-    try {
-      const result = await manageSkillPromotion(candidate, skillDir);
-      if (result.proposalPath) payload.proposalPath = result.proposalPath;
-      if (result.activePath) payload.path = result.activePath;
-      if (!result.activePath && result.proposalPath) payload.path = result.proposalPath;
-      payload.promoted = result.promoted;
-      payload.promotionReason = result.reason;
-    } catch (err) {
-      payload.writeError = err instanceof Error ? err.message : String(err);
-    }
-  }
-
-  state.events.push({
-    id: createId("event"),
-    runId: state.run.id,
-    ts: nowIsoUtc(),
-    kind: "skill-proposal",
-    payload,
-  });
 }
 
 export async function executeTask(
@@ -230,8 +179,12 @@ export async function executeTask(
   if (config.existingSession) {
     session = config.existingSession;
   } else {
-    session = await createBrowserSession(config.provider, config.sessionInput);
-    await config.onSessionCreated?.(session);
+    try {
+      session = await createBrowserSession(config.provider, config.sessionInput);
+      await config.onSessionCreated?.(session);
+    } catch (err) {
+      return createStartupFailureResult(task, config, err);
+    }
   }
 
   return executeWithState(task, config, turn, session, undefined, undefined, registry);
@@ -259,6 +212,7 @@ export async function resumeTask(
     // Restore reviewer-retry counter from checkpoint so a run that already
     // burned its cap can't silently get fresh retries on every resume.
     reviewFailureCount: checkpoint.reviewFailureCount ?? 0,
+    progressLedger: progressLedgerFromEvents(checkpoint.events),
     extractionRepromptCount: 0,
   };
 
@@ -285,14 +239,37 @@ interface LoopSignals {
   maxStepsReached: boolean;
   awaitingApproval: boolean;
   userCancelled: boolean;
-  /** The agent asked to leave the browser session open after finishing — set
-   *  when it emits a finish action with payload.keepSessionOpen. Lets the model
-   *  honor a "keep the session open" objective by understanding it, rather than
-   *  Wire string-matching the task text. */
-  keepSessionOpenRequested: boolean;
+  stopReason?: string;
   pendingApproval: LoopResult["pendingApproval"];
   pendingAction: LoopResult["pendingAction"];
   flushedEvents: number;
+}
+
+function createLoopSignals(): LoopSignals {
+  return {
+    policyDenied: false,
+    authWallHit: false,
+    antiBotRecoveryAttempted: false,
+    maxStepsReached: false,
+    awaitingApproval: false,
+    userCancelled: false,
+    pendingApproval: undefined,
+    pendingAction: undefined,
+    flushedEvents: 0,
+  };
+}
+
+function loopOptionsForConfig(config: RuntimeConfig, session?: BrowserSession): { sessionConfig?: SessionConfig; profileId?: ProfileId } {
+  const loopOptions: { sessionConfig?: SessionConfig; profileId?: ProfileId } = {};
+  if (config.sessionInput?.sessionConfig) {
+    loopOptions.sessionConfig = config.sessionInput.sessionConfig;
+  }
+  if (session?.profileId) {
+    loopOptions.profileId = session.profileId;
+  } else if (config.sessionInput?.profileId) {
+    loopOptions.profileId = config.sessionInput.profileId;
+  }
+  return loopOptions;
 }
 
 async function flushTraceSink(
@@ -322,18 +299,7 @@ async function initializeState(
   approvedPendingAction: ProposedAction | undefined,
   actionRegistry?: ActionRegistry,
 ): Promise<LoopSignals> {
-  const signals: LoopSignals = {
-    policyDenied: false,
-    authWallHit: false,
-    antiBotRecoveryAttempted: false,
-    maxStepsReached: false,
-    awaitingApproval: false,
-    userCancelled: false,
-    keepSessionOpenRequested: false,
-    pendingApproval: undefined,
-    pendingAction: undefined,
-    flushedEvents: 0,
-  };
+  const signals = createLoopSignals();
 
   if (isCancelled(config)) {
     return signals;
@@ -529,6 +495,7 @@ async function runMainLoop(
       if (stopResult.reason === "User cancelled") {
         signals.userCancelled = true;
       }
+      signals.stopReason = stopResult.reason ?? "Unknown stop condition";
       // Record the stop reason as a trace event
       state.events.push({
         id: createId("event"),
@@ -601,15 +568,15 @@ async function runMainLoop(
         if (lastResultForProgress.payload.ok === true && isNoProgressResult(lastResultForProgress)) {
           noProgressCount += 1;
           if (noProgressCount > NO_PROGRESS_THRESHOLD) {
+            const reason = `${noProgressCount} consecutive no-progress results — aborting to force re-plan`;
             state.events.push({
               id: createId("event"),
               runId: state.run.id,
               ts: nowIsoUtc(),
               kind: "thought-summary",
-              payload: {
-                reason: `${noProgressCount} consecutive no-progress results — aborting to force re-plan`,
-              },
+              payload: { reason },
             });
+            signals.stopReason = reason;
             await flushTraceSink(state, config, signals);
             break;
           }
@@ -650,15 +617,15 @@ async function runMainLoop(
         lastSigOnlyShape = shape;
         lastSigOnlyDigest = digest;
         if (sigOnlyCount > SIG_ONLY_THRESHOLD) {
+          const reason = `Same action attempted ${sigOnlyCount + 1} times in a row — aborting to force re-plan`;
           state.events.push({
             id: createId("event"),
             runId: state.run.id,
             ts: nowIsoUtc(),
             kind: "thought-summary",
-            payload: {
-              reason: `Same action attempted ${sigOnlyCount + 1} times in a row — aborting to force re-plan`,
-            },
+            payload: { reason },
           });
+          signals.stopReason = reason;
           await flushTraceSink(state, config, signals);
           break;
         }
@@ -676,15 +643,15 @@ async function runMainLoop(
           stuckCount = 0;
 
           if (repeatFailCount > REPEAT_FAIL_THRESHOLD) {
+            const reason = `Same code failed ${repeatFailCount} times in a row — aborting to force re-plan`;
             state.events.push({
               id: createId("event"),
               runId: state.run.id,
               ts: nowIsoUtc(),
               kind: "thought-summary",
-              payload: {
-                reason: `Same code failed ${repeatFailCount} times in a row — aborting to force re-plan`,
-              },
+              payload: { reason },
             });
+            signals.stopReason = reason;
             await flushTraceSink(state, config, signals);
             break;
           }
@@ -695,15 +662,15 @@ async function runMainLoop(
           if (sig === lastActionSig && digest !== undefined && digest === lastResultDigest) {
             stuckCount += 1;
             if (stuckCount > STUCK_THRESHOLD) {
+              const reason = `Same action returned the same result ${stuckCount + 1} times — aborting to force re-plan`;
               state.events.push({
                 id: createId("event"),
                 runId: state.run.id,
                 ts: nowIsoUtc(),
                 kind: "thought-summary",
-                payload: {
-                  reason: `Same action returned the same result ${stuckCount + 1} times — aborting to force re-plan`,
-                },
+                payload: { reason },
               });
+              signals.stopReason = reason;
               await flushTraceSink(state, config, signals);
               break;
             }
@@ -800,19 +767,71 @@ async function runMainLoop(
 
 // finalizeExecution — artifact persistence, skill proposals, finalization
 
+function contractHasChecks(state: LoopState): boolean {
+  return state.contract.mustVisit.length > 0 ||
+    state.contract.mustMention.length > 0 ||
+    state.contract.mustProduce !== undefined ||
+    state.contract.mustNotContain.length > 0;
+}
+
+function latestEventIndex(state: LoopState, predicate: (event: TraceEvent) => boolean): number {
+  for (let i = state.events.length - 1; i >= 0; i--) {
+    if (predicate(state.events[i]!)) return i;
+  }
+  return -1;
+}
+
+function recordFinalContractCheckIfNeeded(state: LoopState): void {
+  if (state.task.mode !== "task" || !contractHasChecks(state)) return;
+
+  const latestValidation = latestEventIndex(
+    state,
+    (event) => event.kind === "contract-check" && event.payload.phase === "validated",
+  );
+  const latestEvidence = latestEventIndex(
+    state,
+    (event) => event.kind === "code-result" || event.kind === "artifact" || event.kind === "observation",
+  );
+  if (latestValidation >= latestEvidence && latestValidation !== -1) return;
+
+  const validation = validateTaskContract(
+    state.contract,
+    state.events,
+    deriveRunResult(state.events, state.task.mode),
+  );
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: nowIsoUtc(),
+    kind: "contract-check",
+    payload: contractValidationPayload(validation),
+  });
+}
+
 async function finalizeExecution(
   state: LoopState,
   config: RuntimeConfig,
   signals: LoopSignals,
 ): Promise<LoopResult> {
-  const finalizeOptions = {
+  const finalizeOptions: {
+    authWallHit: boolean;
+    policyDenied: boolean;
+    budgetExhausted: false;
+    maxStepsReached: boolean;
+    awaitingApproval: boolean;
+    userCancelled: boolean;
+    stopReason?: string;
+  } = {
     authWallHit: signals.authWallHit,
     policyDenied: signals.policyDenied,
     budgetExhausted: false,
     maxStepsReached: signals.maxStepsReached,
     awaitingApproval: signals.awaitingApproval,
     userCancelled: signals.userCancelled,
-  } as const;
+  };
+  if (signals.stopReason !== undefined) {
+    finalizeOptions.stopReason = signals.stopReason;
+  }
 
   if (signals.pendingApproval) {
     const approvalOptions: {
@@ -822,6 +841,7 @@ async function finalizeExecution(
       maxStepsReached: boolean;
       awaitingApproval: boolean;
       pendingApproval: NonNullable<typeof signals.pendingApproval>;
+      stopReason?: string;
       pendingAction?: ProposedAction;
     } = {
       ...finalizeOptions,
@@ -843,6 +863,8 @@ async function finalizeExecution(
     }
   }
 
+  recordFinalContractCheckIfNeeded(state);
+
   // Only mint a skill from a run that actually accomplished something. A skill
   // captures durable, working browser knowledge; proposing one from a run
   // classified as an error or dead-end (agent-error, site-error, blocked-auth,
@@ -852,7 +874,9 @@ async function finalizeExecution(
     finalClassification.kind === "task-complete" ||
     finalClassification.kind === "partial-success"
   ) {
-    await appendSkillProposalEvents(state, config.skillDir, config.llmProvider);
+    await appendSkillProposalEvents(state, config.skillDir, config.llmProvider, {
+      completed: finalClassification.kind === "task-complete",
+    });
   }
   await flushTraceSink(state, config, signals);
 
@@ -881,21 +905,12 @@ async function executeWithState(
   const callerOwnedSessionId = config.existingSession && !config.releaseExistingSessionOnExit
     ? config.existingSession.id
     : undefined;
-  const loopOptions: { sessionConfig?: SessionConfig; profileId?: ProfileId } = {};
-  if (config.sessionInput?.sessionConfig) {
-    loopOptions.sessionConfig = config.sessionInput.sessionConfig;
-  }
-  if (session?.profileId) {
-    loopOptions.profileId = session.profileId;
-  } else if (config.sessionInput?.profileId) {
-    loopOptions.profileId = config.sessionInput.profileId;
-  }
 
   const state = initialState ?? createLoopState(
     task,
     session!.id,
     session?.debugUrl ?? session?.liveUrl,
-    loopOptions,
+    loopOptionsForConfig(config, session),
   );
 
   const signals = await initializeState(state, config, initialState, approvedPendingAction, actionRegistry);
@@ -904,11 +919,17 @@ async function executeWithState(
     await runMainLoop(state, config, turn, signals, actionRegistry);
   } finally {
     const callerOwnsSession = callerOwnedSessionId !== undefined && state.sessionId === callerOwnedSessionId;
-    const keepOpen = config.keepSessionOpen || signals.keepSessionOpenRequested;
+    const keepOpen = config.keepSessionOpen === true;
     if (!signals.awaitingApproval && !keepOpen && !callerOwnsSession) {
       try {
         await stopBrowserSession(config.provider, state.sessionId);
-      } catch {
+        await config.onSessionEnded?.({ sessionId: state.sessionId, status: "stopped" });
+      } catch (err) {
+        await config.onSessionEnded?.({
+          sessionId: state.sessionId,
+          status: "failed",
+          reason: err instanceof Error ? err.message : String(err),
+        });
         // Best-effort cleanup — don't mask the real result
       }
     }

@@ -183,6 +183,24 @@ test("createTaskContract does not invent requirements from incidental numbers", 
   assert.equal(validateTaskContract(contract, [], "no numbers here").passed, true);
 });
 
+test("createTaskContract does not invent repeated-work completion semantics", () => {
+  const gameContract = createTaskContract(makeTask({
+    objective: "Play 2048 and achieve high score for 5 games",
+  }));
+  assert.equal(gameContract.mustProduce, undefined);
+  assert.equal(validateTaskContract(gameContract, [], "one page snapshot").passed, true);
+
+  const jobContract = createTaskContract(makeTask({
+    objective: "Apply to 5 jobs and keep a record of each submission",
+  }));
+  assert.equal(jobContract.mustProduce?.minItems, undefined);
+
+  const listContract = createTaskContract(makeTask({
+    objective: "Return the top 5 stories from news.ycombinator.com",
+  }));
+  assert.equal(listContract.mustProduce?.minItems, 5);
+});
+
 test("createTaskContract validates a minItems requirement exactly once", () => {
   // "find/list/top N" sets mustProduce.minItems. It must be checked a single
   // time — previously it was also mirrored into a redundant mustReach entry and

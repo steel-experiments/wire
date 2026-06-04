@@ -27,6 +27,7 @@ export interface SkillPromotionPolicy {
   autoPromoteMinConfidence: number;
   requireReusableSignal: boolean;
   proposalCapPerHostname: number;
+  allowAutoPromote?: boolean;
 }
 
 export interface ManagedSkillPromotion {
@@ -40,6 +41,7 @@ export const DEFAULT_SKILL_PROMOTION_POLICY: SkillPromotionPolicy = {
   autoPromoteMinConfidence: 0.9,
   requireReusableSignal: true,
   proposalCapPerHostname: 5,
+  allowAutoPromote: true,
 };
 
 const SECRET_PATTERNS: RegExp[] = [
@@ -162,6 +164,7 @@ export async function llmProposeSkill(
   events: TraceEvent[],
   runId: RunId,
   llmProvider: LLMProvider,
+  options: { completed?: boolean } = {},
 ): Promise<PromotionCandidate | null> {
   try {
     const trace = serializeTraceForLLM(events);
@@ -179,6 +182,9 @@ export async function llmProposeSkill(
       "If the trace contains useful domain knowledge (routes, selectors, wait patterns, working approaches, common pitfalls), return a JSON object with this shape:",
       '{"hostname":"example.com","workflow":["Step 1: ...","Step 2: ..."],"facts":["..."],"selectors":["..."],"routes":["..."],"waits":["..."],"traps":["..."],"confidence":0.8}',
       "The workflow field is an ordered list of concise steps that produced the shortest reliable path. Include it when the trace reveals a repeatable sequence. Prefer the cheapest method: if an API endpoint was discovered, lead with that before browser steps. Include fallback conditions when the trace shows a primary method failing and an alternative working.",
+      options.completed === false
+        ? "This run did NOT fully complete its task. Save only durable facts, selectors, routes, waits, and traps that the trace proves. Do not present an incomplete wait/probe/finish sequence as the workflow; leave workflow empty unless a reusable subroutine clearly worked."
+        : "This run completed its task. You may include the proven end-to-end workflow when the trace supports it.",
       "If nothing is worth saving, respond with exactly: NONE",
       "Do not wrap the JSON in prose or code fences.",
     ].join("\n");
@@ -391,6 +397,14 @@ export async function manageSkillPromotion(
       proposalPath,
       promoted: false,
       reason: "proposal-only: no reusable facts, selectors, routes, waits, or traps",
+    };
+  }
+
+  if (policy.allowAutoPromote === false) {
+    return {
+      proposalPath,
+      promoted: false,
+      reason: "proposal-only: source run did not fully satisfy its completion contract",
     };
   }
 

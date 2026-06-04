@@ -990,7 +990,7 @@ test("executeTask does not propose a skill from a failed run", async () => {
   }
 });
 
-test("executeTask leaves the session open when the agent finishes with keepSessionOpen", async () => {
+test("executeTask releases the session even when finish payload asks to keep it open", async () => {
   const task = makeTask({ objective: "Do the thing, then keep the session open" });
   const sessionId = makeSessionId();
   let stopCalled = false;
@@ -1017,7 +1017,7 @@ test("executeTask leaves the session open when the agent finishes with keepSessi
     },
   );
 
-  assert.equal(stopCalled, false, "session should stay open when the agent requests keepSessionOpen");
+  assert.equal(stopCalled, true, "task text or model payload must not skip provider cleanup");
 });
 
 test("executeTask stops the session when the agent finishes without keepSessionOpen", async () => {
@@ -1403,7 +1403,7 @@ test("appendExtractedResultArtifact accepts multiple generic artifact kinds and 
   assert.equal(artifactEvents[1]!.payload.kind, "python");
 });
 
-test("executeTask blocks finish until numeric objective evidence is present", async () => {
+test("executeTask does not invent numeric repeat-objective finish gates", async () => {
   const task = makeTask({ objective: "play 2048 and refresh for new game 5 times" });
   const sessionId = makeSessionId();
   let execCount = 0;
@@ -1418,7 +1418,7 @@ test("executeTask blocks finish until numeric objective evidence is present", as
         durationMs: 10,
         returnValue: execCount === 1
           ? { score: 68, runs: [{ run: 1, score: 68 }] }
-          : { game: "2048", runs: [1, 2, 3, 4, 5].map((run) => ({ run, score: run * 10 })) },
+          : { game: "2048", runs: [1, 2, 3, 4, 5].map((run) => ({ run, status: "completed", score: run * 10, over: true })) },
       };
     },
     async stopSession() {},
@@ -1432,7 +1432,7 @@ test("executeTask blocks finish until numeric objective evidence is present", as
       : { kind: "finish", summary: "Done" },
   );
 
-  assert.equal(execCount, 2);
+  assert.equal(execCount, 1);
   assert.equal(result.run.status, "succeeded");
 });
 
@@ -2178,6 +2178,56 @@ test("executeTask aborts when same exec succeeds with same return value repeated
   assert.ok(stopReason, "expected a stuck-on-success stop reason");
 });
 
+test("executeTask aborts repeated page snapshots as stuck work", async () => {
+  const task = makeTask({ objective: "play 2048 and achieve high score for 5 games" });
+  const sessionId = makeSessionId();
+  let execCallCount = 0;
+  const snapshot = {
+    ok: true,
+    evidence: {
+      title: "Play 2048 Game",
+      url: "https://elgoog.im/2048/",
+      text: "2048\n12036\nStop Bot!\nNew Game\nHOW TO PLAY: Use your arrow keys",
+    },
+    reason: "Captured current page state for task verification",
+  };
+  const provider = createMockProvider({
+    async createSession() {
+      return {
+        id: sessionId,
+        provider: "custom",
+        createdAt: new Date().toISOString(),
+        status: "ready",
+      };
+    },
+    async exec(): Promise<BrowserExecResult> {
+      execCallCount++;
+      return {
+        ok: true,
+        durationMs: 10,
+        returnValue: snapshot,
+      };
+    },
+    async stopSession() {},
+  });
+
+  const result = await executeTask(
+    task,
+    { provider, policyEngine: createMockPolicyEngine(), maxSteps: 30 },
+    async () => ({
+      kind: "exec",
+      summary: "Capture page",
+      payload: {
+        code: "/* wire:extract wire:verify */ return window.snapshot",
+      },
+    }),
+  );
+
+  assert.ok(execCallCount <= 6, `expected stuck guard to bail, got ${execCallCount} exec calls`);
+  assert.equal(result.run.status, "partial");
+  assert.equal(result.run.classification?.kind, "partial-success");
+});
+
 test("executeTask aborts when same exec sig repeats with cosmetically varying results", async () => {
   // Reproduces the slow-stuck case: same probe code, return value differs in
   // small ways each time (added field, renamed field) but the agent isn't
@@ -2426,4 +2476,3 @@ test("computeNoProgressStreak resets when a meaningful result lands at the tail"
 // ---------------------------------------------------------------------------
 // finalizeRun — userCancelled result gate
 // ---------------------------------------------------------------------------
-

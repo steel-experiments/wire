@@ -211,7 +211,6 @@ async function handleRun(
     );
 
     const opts: RunOptions = { objective };
-    if (/\bkeep(?:ing)?\s+(?:the\s+)?session\s+open\b/iu.test(objective)) opts.keepSessionOpen = true;
     if (config.browser?.session) opts.sessionConfig = { ...config.browser.session };
     if (args.mode) opts.mode = args.mode;
     if (args.profileId) opts.profileId = args.profileId;

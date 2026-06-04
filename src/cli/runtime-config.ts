@@ -7,7 +7,7 @@ import type { LLMProvider } from "../providers/llm/openai.js";
 import { createOpenAIProvider } from "../providers/llm/openai.js";
 import { createAnthropicProvider } from "../providers/llm/anthropic.js";
 import type { RuntimeConfig } from "../agent/runtime.js";
-import { saveSession } from "../storage/sessions.js";
+import { loadSession, saveSession } from "../storage/sessions.js";
 import { saveTraceBlobValue } from "../storage/blobs.js";
 import { defaultSkillDir, defaultStorageRoot } from "../shared/paths.js";
 import { createConsoleTraceSink } from "../ui/stream.js";
@@ -134,6 +134,12 @@ export function createRuntimeConfig(
         console.log("");
       }
       await saveSession(defaultStorageRoot(), newSession);
+    },
+    async onSessionEnded({ sessionId, status }) {
+      const root = defaultStorageRoot();
+      const session = await loadSession(root, sessionId).catch(() => undefined);
+      if (!session) return;
+      await saveSession(root, { ...session, status });
     },
   };
 
