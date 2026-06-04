@@ -255,6 +255,93 @@ describe("classifyRun", () => {
     assert.ok(result.notes?.some((n) => /does not.*address/i.test(n)));
   });
 
+  it("downgrades when the result is a clue-solver page echoing the query (bubble-gum repro)", () => {
+    // Repro of run_7bc93c0e: the agent stopped on a wordplays.com crossword-solver
+    // SEO page that reflected the query back. Every objective keyword is present by
+    // construction (the page is the query), so the keyword check passes even though
+    // no answer was found. Note the %22 artifacts — the agent read back its own
+    // percent-encoded query, not real content.
+    const dump = {
+      matches: [
+        "%22BUBBLE GUM%22 %22GREAT AMERICA%22 5K RACE CROSSWORD CLUE",
+        "The Crossword Solver found 30 answers to \"%22bubble gum%22 %22Great America%22 5K race\", 6 letters crossword clue.",
+        "5K race, perhaps",
+      ],
+      textSnippet: "Crossword Solver \n Dictionary \n Scrabble Word Finder \n sign in \n Advertisement",
+    };
+    const stdout = JSON.stringify(dump);
+    const events = [
+      makeEvent("code-result", { ok: true, stdout }),
+      makeEvent("artifact", { kind: "json-output", content: stdout }),
+    ];
+    const result = classifyRun(makeInput({
+      mode: "task",
+      events,
+      objective: "What was the name of the 5K race hosted at the old Great America theme park in California that had 'bubble gum' in its title?",
+    }));
+    assert.equal(result.kind, "partial-success");
+    assert.ok(result.notes?.some((n) => /does not.*address/i.test(n)));
+  });
+
+  it("downgrades when result echoes a percent-encoded query instead of an answer", () => {
+    // Isolates the %22 tell on a short, non-crossword result so the page-dump
+    // guard can't be the thing firing.
+    const stdout = JSON.stringify({ heading: "%22acme widget%22 specifications at DuckDuckGo", results: [] });
+    const events = [
+      makeEvent("code-result", { ok: true, stdout }),
+      makeEvent("artifact", { kind: "json-output", content: stdout }),
+    ];
+    const result = classifyRun(makeInput({
+      mode: "task",
+      events,
+      objective: "find the specifications for the acme widget",
+    }));
+    assert.equal(result.kind, "partial-success");
+  });
+
+  it("downgrades when the result is a raw whole-page dump rather than an extracted answer", () => {
+    // The agent pasted the page innerText (nav chrome, ads, boilerplate) instead
+    // of extracting. A page dump doesn't prove an answer (MANIFESTO), even though
+    // the answer text happens to be buried in it.
+    const dump = [
+      "Skip to main content",
+      "Sign in   Subscribe",
+      "Acme Corporation — Leadership Team",
+      "Advertisement",
+      "Our CEO is Jane Doe. ".repeat(70),
+      "Privacy Policy   Terms of Service   All rights reserved 2026 Acme",
+    ].join("\n");
+    const events = [
+      makeEvent("code-result", { ok: true, stdout: dump }),
+      makeEvent("artifact", { kind: "note", content: dump }),
+    ];
+    const result = classifyRun(makeInput({
+      mode: "task",
+      events,
+      objective: "find the name of the CEO of Acme Corporation",
+    }));
+    assert.equal(result.kind, "partial-success");
+    assert.ok(result.notes?.some((n) => /does not.*address/i.test(n)));
+  });
+
+  it("keeps task-complete for a long structured extraction without page chrome", () => {
+    // Guards against the page-dump check over-firing on legitimately large
+    // structured results: length alone must not downgrade a clean extraction.
+    const payload = JSON.stringify({
+      hotels: Array.from({ length: 40 }, (_, i) => ({ name: `Hotel ${i}`, price: `$${100 + i}` })),
+    });
+    const events = [
+      makeEvent("code-result", { ok: true, stdout: payload }),
+      makeEvent("artifact", { kind: "json-output", content: payload }),
+    ];
+    const result = classifyRun(makeInput({
+      mode: "task",
+      events,
+      objective: "search for hotels in San Francisco and extract names and prices",
+    }));
+    assert.equal(result.kind, "task-complete");
+  });
+
   it("credits structured iteration evidence for repeat objectives", () => {
     const payload = {
       runs: [

@@ -99,10 +99,52 @@ function hasMostlyEmptyFields(resultText: string): boolean {
   return total >= 3 && empty / total >= 0.5;
 }
 
+// Markers that the result is a search-engine / clue-solver results page that
+// reflected the query back rather than an answer source. Such a page contains
+// every objective keyword by construction (it *is* the query), so the keyword
+// check below passes even though no answer was found. A reflected %22 (encoded
+// quote) is a strong tell: the agent read back its own percent-encoded query.
+const QUERY_ECHO_MARKERS: RegExp[] = [
+  /%22/,
+  /crossword (?:clue|solver)/i,
+  /(?:found|returned) \d+ answers? to/i,
+  /showing results for\b/i,
+];
+
+function looksLikeQueryEcho(resultText: string): boolean {
+  return QUERY_ECHO_MARKERS.some((m) => m.test(resultText));
+}
+
+// Page-chrome markers — nav, ads, and boilerplate that ride along when the agent
+// dumps a whole page's innerText instead of extracting from it.
+const PAGE_CHROME_MARKERS = [
+  "advertisement",
+  "skip to main content",
+  "sign in",
+  "subscribe",
+  "cookie policy",
+  "privacy policy",
+  "terms of service",
+  "all rights reserved",
+];
+
+// Detects a large blob of page innerText passed off as the answer. Per the
+// MANIFESTO, a page dump doesn't prove an answer — the agent pasted the page
+// instead of extracting from it. Gated on ≥2 chrome markers so a legitimately
+// large structured result isn't penalized for length alone.
+function looksLikeRawPageDump(resultText: string): boolean {
+  if (resultText.length < 1200) return false;
+  const lower = resultText.toLowerCase();
+  const chromeHits = PAGE_CHROME_MARKERS.filter((m) => lower.includes(m)).length;
+  return chromeHits >= 2;
+}
+
 function resultAddressesObjective(resultText: string | undefined, objective: string): boolean {
   if (!resultText || !objective) return true;
   if (objectiveIterationSatisfied(resultText, objective)) return true;
   if (hasMostlyEmptyFields(resultText)) return false;
+  if (looksLikeQueryEcho(resultText)) return false;
+  if (looksLikeRawPageDump(resultText)) return false;
 
   const verbPhrases = objectiveVerbPhrases(objective);
   if (verbPhrases.size === 0) return true;
