@@ -12,7 +12,6 @@ import type {
   SessionConfig,
   ProfileId,
   Task,
-  TaskMode,
   TraceEvent,
 } from "../shared/types.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
@@ -21,7 +20,6 @@ import type { BrowserProvider } from "../browser/bridge.js";
 import type { PolicyEngine } from "../policy/engine.js";
 import type { PolicyAction } from "../policy/rules.js";
 import { createApprovalRequest } from "../policy/approvals.js";
-import { stableJsonStringify } from "../shared/ids.js";
 
 import { observeBrowser, toObservationPayload } from "../browser/observe.js";
 import { execCode, isLikelyNavigationCode } from "../browser/exec.js";
@@ -32,14 +30,14 @@ import {
   validateHelperSource,
 } from "../browser/helpers.js";
 import { execRaw } from "../browser/raw.js";
-import { classifyRun, generateOutcomeSummary } from "./classify.js";
+import { classifyRun } from "./classify.js";
 import { detectAuthWall } from "../profiles/auth.js";
 import { redactJsonObject } from "../shared/redact.js";
-import { countConsecutiveUnchanged, latestObservation, reconfigureJustified } from "./state-helpers.js";
+import { latestObservation, reconfigureJustified } from "./state-helpers.js";
 import type { ActionExecutionContext } from "./actions.js";
 import { createTaskContract, type TaskContract } from "./contract.js";
 import type { CriticalPoint } from "./critical-points.js";
-import { scoreRun, type RunScore } from "../eval/scoring.js";
+import type { RunScore } from "../eval/scoring.js";
 
 const MAX_CDP_BATCH_COMMANDS = 80;
 const DEFAULT_EXEC_TIMEOUT_MS = 12_000;
@@ -206,18 +204,23 @@ function buildProposedActionDetail(
       detail.codeExcerpt = redacted;
     }
   }
+  const methods = collectCdpMethods(action.payload as Record<string, unknown> | undefined);
+  if (methods.length > 0) detail.cdpMethods = methods;
+  return detail;
+}
+
+function collectCdpMethods(payload: Record<string, unknown> | undefined): string[] {
   const methods: string[] = [];
-  const single = action.payload?.method;
+  const single = payload?.method;
   if (typeof single === "string") methods.push(single);
-  const batch = action.payload?.commands;
+  const batch = payload?.commands;
   if (Array.isArray(batch)) {
     for (const cmd of batch) {
       const m = (cmd as { method?: unknown })?.method;
       if (typeof m === "string") methods.push(m);
     }
   }
-  if (methods.length > 0) detail.cdpMethods = methods;
-  return detail;
+  return methods;
 }
 
 /** Static input: task identity and browser session. */
@@ -413,6 +416,17 @@ export async function executeStep(
     if (action.payload) {
       policyAction.payload = action.payload as Record<string, unknown>;
     }
+    const cdpMethods = collectCdpMethods(policyAction.payload);
+    if (execRisk || cdpMethods.length > 0) {
+      policyAction.metadata = {};
+      if (execRisk) {
+        policyAction.metadata.riskKind = execRisk.kind;
+        policyAction.metadata.riskReasons = execRisk.reasons;
+      }
+      if (cdpMethods.length > 0) {
+        policyAction.metadata.cdpMethods = cdpMethods;
+      }
+    }
     const decision = policyEngine.check(actionId, policyAction);
 
     const policyPayload: JsonObject = { actionKind: action.kind, policyKind, result: decision.result };
@@ -421,6 +435,9 @@ export async function executeStep(
         kind: execRisk.kind,
         reasons: execRisk.reasons,
       };
+    }
+    if (cdpMethods.length > 0) {
+      policyPayload.cdpMethods = cdpMethods;
     }
     if (decision.reason) {
       policyPayload.reason = decision.reason;
@@ -801,291 +818,9 @@ export async function executeStep(
   return { state, policyDenied, authWallHit };
 }
 
-export interface FinalizeOptions {
-  authWallHit?: boolean;
-  policyDenied?: boolean;
-  budgetExhausted?: boolean;
-  maxStepsReached?: boolean;
-  awaitingApproval?: boolean;
-  userCancelled?: boolean;
-  stopReason?: string;
-  pendingApproval?: ApprovalRequest;
-  pendingAction?: ProposedAction;
-}
-
-function looksLikeErrorReturn(returnValue: unknown): boolean {
-  if (!returnValue || typeof returnValue !== "object" || Array.isArray(returnValue)) {
-    return false;
-  }
-  const obj = returnValue as Record<string, unknown>;
-  if (typeof obj["error"] === "string" && obj["error"].length > 0) return true;
-  if (obj["clicked"] === false) return true;
-  if (obj["success"] === false) return true;
-  if (typeof obj["status"] === "string" && /error|fail|notfound/iu.test(obj["status"] as string)) return true;
-  return false;
-}
-
-function hasMeaningfulPayload(payload: TraceEvent["payload"]): boolean {
-  const stdout = payload["stdout"];
-  if (typeof stdout === "string" && stdout.trim().length > 0) return true;
-  const ret = payload["returnValue"];
-  return hasMeaningfulValue(ret);
-}
-
-function hasMeaningfulValue(value: unknown): boolean {
-  if (value === undefined || value === null) return false;
-  if (typeof value === "string") return value.trim().length > 0;
-  if (typeof value === "number" || typeof value === "boolean") return true;
-  if (Array.isArray(value)) return value.some(hasMeaningfulValue);
-  if (typeof value !== "object") return false;
-
-  const entries = Object.entries(value as Record<string, unknown>);
-  if (entries.length === 0) return false;
-  return entries.some(([key, entryValue]) => {
-    if (key === "results" && Array.isArray(entryValue) && entryValue.length === 0) return false;
-    if (key === "answer" && typeof entryValue === "string" && entryValue.trim().length === 0) return false;
-    return hasMeaningfulValue(entryValue);
-  });
-}
-
-function hasMeaningfulDerivedResult(result: string | undefined): boolean {
-  if (result === undefined) return false;
-  const trimmed = result.trim();
-  if (trimmed.length === 0) return false;
-  try {
-    return hasMeaningfulValue(JSON.parse(trimmed) as unknown);
-  } catch {
-    return true;
-  }
-}
-
-// Pre-dispatch wireActions envelope returned BY THE AGENT'S OWN CODE
-// (e.g. `return {wireActions: [...]}`). Distinct from the post-dispatch
-// CDP ack — those are filtered upstream via payload.source ∈ {"wireActions","raw"}.
-function looksLikeWireCommand(returnValue: unknown): boolean {
-  if (!returnValue || typeof returnValue !== "object" || Array.isArray(returnValue)) {
-    return false;
-  }
-  return Array.isArray((returnValue as Record<string, unknown>)["wireActions"]);
-}
-
-// Interaction acks the prompt prescribes: `return {navigated:true}` after a
-// navigation, `return {clicked:true}` after a click. An ack records that an
-// action happened, never the agent's answer, so it must not be surfaced as the
-// result — even as a last-resort fallback. Leaving it eligible produced a
-// misleading non-answer (e.g. `{"clicked":true}` on a SEC extraction task) when
-// extraction came back empty.
-function looksLikeActionAck(returnValue: unknown): boolean {
-  if (!returnValue || typeof returnValue !== "object" || Array.isArray(returnValue)) {
-    return false;
-  }
-  const obj = returnValue as Record<string, unknown>;
-  return obj["navigated"] === true || obj["clicked"] === true;
-}
-
-export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | undefined {
-  // Exclude wire's CDP-dispatch code-results entirely — those are control-plane
-  // events ({frameId, loaderId} etc.), never the agent's answer. The source tag
-  // is set by both the wireActions branch and the raw-action branch in executeStep.
-  const candidates = [...events].reverse().filter((event) =>
-    event.kind === "code-result" &&
-    event.payload.ok === true &&
-    event.payload.source !== "wireActions" &&
-    event.payload.source !== "raw" &&
-    (
-      typeof event.payload.stdout === "string" ||
-      event.payload.returnValue !== undefined
-    )
-  );
-
-  // Three-tier preference: meaningful + not-error-shaped + not-a-wire-command,
-  // then merely meaningful, then anything. Empty payloads ({}, [], ""),
-  // agent-emitted wireActions envelopes, and bare navigation acks don't answer
-  // the task, so none of them are eligible — even as the last-resort fallback.
-  const answerCandidates = candidates.filter(
-    (event) =>
-      !looksLikeWireCommand(event.payload.returnValue) &&
-      !looksLikeActionAck(event.payload.returnValue),
-  );
-  const latestAnswerEvent =
-    answerCandidates.find((event) =>
-      hasMeaningfulPayload(event.payload) &&
-      !looksLikeErrorReturn(event.payload.returnValue)
-    ) ??
-    answerCandidates.find((event) => hasMeaningfulPayload(event.payload)) ??
-    answerCandidates[0];
-
-  if (latestAnswerEvent) {
-    const stdout = latestAnswerEvent.payload.stdout;
-    if (typeof stdout === "string" && stdout.trim().length > 0) {
-      return stdout;
-    }
-
-    const returnValue = latestAnswerEvent.payload.returnValue;
-    if (returnValue !== undefined) {
-      return typeof returnValue === "string"
-        ? returnValue
-        : stableJsonStringify(returnValue);
-    }
-  }
-
-  if (mode === "task") {
-    const latestNoteArtifact = [...events].reverse().find((event) =>
-      event.kind === "artifact" &&
-      event.payload.kind === "note" &&
-      typeof event.payload.content === "string" &&
-      event.payload.content.trim().length > 0
-    );
-
-    if (latestNoteArtifact && typeof latestNoteArtifact.payload.content === "string") {
-      return latestNoteArtifact.payload.content;
-    }
-
-    return undefined;
-  }
-
-  const latestFinishSummary = [...events].reverse().find((event) =>
-    event.kind === "thought-summary" &&
-    event.payload.kind === "finish" &&
-    typeof event.payload.summary === "string" &&
-    event.payload.summary.trim().length > 0
-  );
-
-  if (latestFinishSummary && typeof latestFinishSummary.payload.summary === "string") {
-    return latestFinishSummary.payload.summary;
-  }
-
-  return undefined;
-}
-
-/**
- * The run's final classification — the verdict classifyRun returns, with the
- * maxSteps-without-a-real-answer downgrade applied. Pulled out of finalizeRun
- * so other finalization steps (e.g. the skill-proposal gate) can read the same
- * verdict the run will report instead of recomputing or guessing.
- */
-export function computeFinalClassification(
-  state: LoopState,
-  options: FinalizeOptions = {},
-): ReturnType<typeof classifyRun> {
-  const errorCount = state.events.filter((e) => e.kind === "error").length;
-  const derivedResult = deriveRunResult(state.events, state.task.mode);
-  const classification = classifyRun({
-    mode: state.task.mode,
-    events: state.events,
-    successCriteria: state.task.successCriteria,
-    objective: state.task.objective,
-    errorCount,
-    authWallHit: options.authWallHit ?? false,
-    policyDenied: options.policyDenied ?? false,
-    budgetExhausted: options.budgetExhausted ?? false,
-    awaitingApproval: options.awaitingApproval ?? false,
-    consecutiveUnchanged: countConsecutiveUnchanged(state.events),
-  });
-
-  if (
-    options.maxStepsReached === true &&
-    !hasMeaningfulDerivedResult(derivedResult) &&
-    (
-      classification.kind === "task-complete" ||
-      classification.kind === "partial-success" ||
-      classification.kind === "ambiguous"
-    )
-  ) {
-    return {
-      kind: "agent-error",
-      confidence: 0.9,
-      notes: ["Maximum steps reached before producing a meaningful answer"],
-    };
-  }
-
-  return classification;
-}
-
-export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): LoopResult {
-  const derivedResult = deriveRunResult(state.events, state.task.mode);
-  const classification = computeFinalClassification(state, options);
-
-  const outcomeSummary = generateOutcomeSummary(classification, state.events);
-
-  // A run is "succeeded" only when fully complete and "failed" when it
-  // accomplished nothing usable. A partial-success did real, usable work
-  // short of full completion — report that honestly rather than flattening it
-  // to the same "failed" the user sees for a hard error.
-  let status: Run["status"] = "failed";
-  if (options.awaitingApproval) {
-    status = "awaiting-approval";
-  } else if (classification.kind === "task-complete") {
-    status = "succeeded";
-  } else if (classification.kind === "partial-success") {
-    status = "partial";
-  }
-
-  const finishedRun: Run = {
-    ...state.run,
-    status,
-    classification,
-    outcomeSummary,
-  };
-
-  const resultBlocked =
-    (options.maxStepsReached === true && !hasMeaningfulDerivedResult(derivedResult)) ||
-    (options.userCancelled === true && !hasMeaningfulDerivedResult(derivedResult));
-  if (derivedResult !== undefined && !resultBlocked) {
-    finishedRun.result = derivedResult;
-  }
-
-  if (!options.awaitingApproval) {
-    finishedRun.finishedAt = nowIsoUtc();
-  }
-
-  const result: LoopResult = {
-    run: finishedRun,
-    events: state.events,
-    classification,
-    outcomeSummary,
-    sessionId: state.sessionId,
-    stepCount: state.stepCount,
-    startedAt: state.startedAt,
-    helperSource: state.helperSource,
-    helperVersion: state.helperVersion,
-    reviewFailureCount: state.reviewFailureCount,
-    // Pass an empty artifacts list: scoring.ts evidenceScore reads from
-    // events via OR-style fallbacks, so artifact-event presence still
-    // contributes. The eval/CLI paths that have persisted Artifact records
-    // can call scoreRun directly with the richer input.
-    score: scoreRun(state.task, finishedRun, state.events, []),
-  };
-
-  if (state.sessionLiveUrl !== undefined) {
-    result.sessionLiveUrl = state.sessionLiveUrl;
-  }
-
-  if (options.pendingApproval) {
-    result.pendingApproval = options.pendingApproval;
-  }
-  if (options.pendingAction) {
-    result.pendingAction = options.pendingAction;
-  }
-
-  // Aggregate LLM usage from trace events
-  const usageEvents = state.events.filter((e) => e.kind === "llm-usage");
-  if (usageEvents.length > 0) {
-    let promptTokens = 0;
-    let completionTokens = 0;
-    for (const e of usageEvents) {
-      const u = e.payload.usage as { inputTokens?: number; outputTokens?: number } | undefined;
-      if (u) {
-        promptTokens += u.inputTokens ?? 0;
-        completionTokens += u.outputTokens ?? 0;
-      }
-    }
-    result.usage = {
-      promptTokens,
-      completionTokens,
-      totalTokens: promptTokens + completionTokens,
-    };
-  }
-
-  return result;
-}
+export {
+  computeFinalClassification,
+  deriveRunResult,
+  finalizeRun,
+  type FinalizeOptions,
+} from "./loop-result.js";

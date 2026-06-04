@@ -31,7 +31,7 @@ Remote Chrome Session
 
 ### 1. Browser infrastructure layer
 
-**Owned by:** `src/providers/browser/steel.ts`, the Steel API
+**Owned by:** `src/providers/browser/steel.ts` (stable entrypoint), `src/providers/browser/steel/`, the Steel API
 
 - Browser process lifecycle
 - WebSocket/session lifecycle
@@ -65,14 +65,21 @@ The bridge exposes exactly three first-class operations: `observe()`, `exec()`, 
 | File | Responsibility |
 |------|---------------|
 | `runtime.ts` | Top-level `executeTask()` orchestrator, state setup, main loop |
-| `loop.ts` | Loop state, step execution, stopping conditions, finalization |
+| `turn.ts` | LLM prompt context construction and next-action selection |
+| `loop.ts` | Loop state, step execution, stopping conditions |
+| `loop-result.ts` | Final result derivation, run classification, scoring |
 | `context.ts` | System/user prompt assembly, action guidance |
+| `action-guidance.ts` | Structured base action guidance with core/helper/skill ownership metadata |
 | `planning.ts` | Task plan creation and advancement |
 | `classify.ts` | Post-run classification (task-complete, partial-success, etc.) |
 | `branching.ts` | Experiment-mode branching decisions |
 | `state-helpers.ts` | Pure functions for inspecting loop state |
 | `actions.ts` | Action registry for provider-specific actions |
 | `llm-parse.ts` | LLM response parsing and action extraction |
+| `skill-context.ts` | Runtime skill matching and prompt-ready skill guidance |
+| `artifact-review.ts` | Artifact review prompts, dedupe, retry bookkeeping |
+| `evidence.ts` | Latest extraction evidence per URL for prompt reuse |
+| `llm-trace.ts` | Optional LLM call/usage trace events |
 | `contract.ts` | Completion contracts — verified before finish is accepted |
 | `refine.ts` | Run result refinement |
 | `compare.ts` | Cross-run comparison logic |

@@ -1,5 +1,8 @@
 // LLM provider contract
 
+import { fetchWithRetry, resolveTransportOptions } from "./transport.js";
+import type { TransportOptions } from "./transport.js";
+
 export type ContentPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string } };
@@ -81,6 +84,8 @@ export interface OpenAIProviderConfig {
   baseUrl?: string;
   model?: string;
   reasoningEffort?: OpenAIReasoningEffort;
+  timeoutMs?: number;
+  maxRetries?: number;
 }
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
@@ -120,12 +125,17 @@ export class OpenAIProvider implements LLMProvider {
   private readonly baseUrl: string;
   public readonly model: string;
   public readonly reasoningEffort: OpenAIReasoningEffort | undefined;
+  private readonly transport: TransportOptions;
 
   constructor(config: OpenAIProviderConfig) {
     this.apiKey = config.apiKey;
     this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
     this.model = config.model ?? DEFAULT_MODEL;
     this.reasoningEffort = config.reasoningEffort;
+    this.transport = resolveTransportOptions(
+      { timeoutMs: config.timeoutMs, maxRetries: config.maxRetries },
+      process.env,
+    );
   }
 
   async chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResponse> {
@@ -183,16 +193,12 @@ export class OpenAIProvider implements LLMProvider {
       "Content-Type": "application/json",
     };
 
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-      });
-    } catch (err) {
-      throw new LLMNetworkError("openai", err as Error);
-    }
+    const response = await fetchWithRetry(
+      "openai",
+      url,
+      { method: "POST", headers, body: JSON.stringify(body) },
+      this.transport,
+    );
 
     if (!response.ok) {
       let detail: string;

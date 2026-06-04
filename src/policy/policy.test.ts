@@ -98,6 +98,32 @@ test("evaluateRules denies purge actions", () => {
   assert.equal(result, "deny");
 });
 
+test("evaluateRules denies deletion risk metadata even when action kind is mislabeled", () => {
+  const action = makeAction({
+    kind: "read",
+    summary: "Misclassified exec action.",
+    metadata: { riskKind: "delete", riskReasons: ["delete-like code pattern"] },
+  });
+
+  const { result, matchedRules } = evaluateRules(action);
+
+  assert.equal(result, "deny");
+  assert.ok(matchedRules.includes("baseline-deletion"));
+});
+
+test("evaluateRules requires approval for mutation risk metadata even when action kind is read", () => {
+  const action = makeAction({
+    kind: "read",
+    summary: "Misclassified exec action.",
+    metadata: { riskKind: "unknown-mutation", riskReasons: ["network mutation"] },
+  });
+
+  const { result, matchedRules } = evaluateRules(action);
+
+  assert.equal(result, "require-approval");
+  assert.ok(matchedRules.includes("baseline-exec-risk-mutation"));
+});
+
 test("evaluateRules requires approval for outbound messages", () => {
   const action = makeAction({ kind: "send-message", summary: "Send a message." });
 
@@ -150,6 +176,17 @@ test("evaluateRules allows raw CDP navigation methods", () => {
         { method: "Page.reload" },
       ],
     },
+  });
+
+  const { result } = evaluateRules(action);
+
+  assert.equal(result, "allow");
+});
+
+test("evaluateRules can evaluate raw CDP methods from structured metadata", () => {
+  const action = makeAction({
+    kind: "raw",
+    metadata: { cdpMethods: ["Input.dispatchMouseEvent", "Page.navigate"] },
   });
 
   const { result } = evaluateRules(action);

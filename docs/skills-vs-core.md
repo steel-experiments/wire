@@ -15,7 +15,7 @@ small core quietly grows site lore and task-pattern lore that compounds forever.
 Before reaching for a skill, know what triggers one, because the trigger
 constrains what a skill can carry.
 
-Each step, `syncMatchedSkills` (`src/agent/runtime.ts`) computes two signals
+Each step, `syncMatchedSkills` (`src/agent/skill-context.ts`) computes two signals
 and asks the matcher to score every skill against them:
 
 1. **Hostname** — the current page's hostname, matched against a skill's

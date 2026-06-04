@@ -65,7 +65,7 @@ Test files are co-located with source: `src/**/*.test.ts`. The test runner disco
 
 ## Code size
 
-- Source is capped at 12,000 lines (`src/`)
+- Source size is a pressure signal, not a quota (`src/`)
 - Update `METRICS.md` with the current LOC count on every code change
 - If a file grows large, a module mixes domains, or a helper becomes a DSL, pause and simplify
 
@@ -79,6 +79,7 @@ Test files are co-located with source: `src/**/*.test.ts`. The test runner disco
 | `pnpm test` | Run all tests |
 | `pnpm typecheck` | Type-check without emitting |
 | `pnpm check` | typecheck + test |
+| `pnpm metrics` | Print source/test file and LOC counts |
 
 ## Technical requirements
 

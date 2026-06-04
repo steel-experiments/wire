@@ -8,6 +8,7 @@ The agent runtime is the heart of Wire. It owns the turn loop that drives a brow
 |----------|--------|---------|
 | `executeTask()` | `src/agent/runtime.ts` | Start a new task from scratch |
 | `resumeTask()` | `src/agent/runtime.ts` | Resume from an approval checkpoint |
+| `defaultAgentTurn()` | `src/agent/turn.ts` | Build prompt context and choose the next action |
 
 Both return a `LoopResult` containing the final run state, trace events, artifacts, and any pending approval.
 
@@ -37,7 +38,7 @@ Both return a `LoopResult` containing the final run state, trace events, artifac
 - Syncs skills by matching hostname and task tags
 - If resuming from approval, re-executes the previously approved action
 
-### Step 5-6: Agent turn (`defaultAgentTurn`)
+### Step 5-6: Agent turn (`defaultAgentTurn`, `src/agent/turn.ts`)
 
 The turn function builds a context bundle from the current loop state and sends it to the LLM:
 
@@ -155,7 +156,7 @@ The proposal includes: scope, hostname, confidence, rationale, and the generated
 
 ## Classification
 
-Post-run classification in `src/agent/classify.ts` considers:
+Post-run classification in `src/agent/classify.ts` considers these signals; final result derivation and the run verdict are assembled in `src/agent/loop-result.ts`:
 
 1. **Infra signals** — browser crash, network timeout, rate limiting
 2. **Policy signals** — policy denied, auth wall

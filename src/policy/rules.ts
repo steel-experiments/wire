@@ -6,6 +6,13 @@ export interface PolicyAction {
   kind: string;
   summary: string;
   payload?: Record<string, unknown>;
+  metadata?: PolicyActionMetadata;
+}
+
+export interface PolicyActionMetadata {
+  riskKind?: ExecRiskKind;
+  riskReasons?: string[];
+  cdpMethods?: string[];
 }
 
 // Policy rule — a single check
@@ -108,10 +115,17 @@ function isSafeCdpMethod(method: string | undefined): boolean {
   return SAFE_CDP_METHOD_PREFIXES.includes(method);
 }
 
+function actionRiskKind(action: PolicyAction): string | undefined {
+  return typeof action.metadata?.riskKind === "string" ? action.metadata.riskKind : undefined;
+}
+
 function rawCdpRequiresApproval(action: PolicyAction): boolean {
   if (action.kind !== "raw") return false;
 
   const methods: string[] = [];
+  if (Array.isArray(action.metadata?.cdpMethods)) {
+    methods.push(...action.metadata.cdpMethods);
+  }
   if (typeof action.payload?.method === "string") {
     methods.push(action.payload.method);
   }
@@ -140,25 +154,25 @@ export const BASELINE_RULES: PolicyRule[] = [
     "baseline-submit-purchase-send",
     "Submit, purchase, and send actions require human approval.",
     "require-approval",
-    (a) => SUBMIT_KINDS.has(a.kind),
+    (a) => SUBMIT_KINDS.has(a.kind) || actionRiskKind(a) === "submit",
   ),
   makeRule(
     "baseline-exec-risk-mutation",
     "Exec code with unknown mutation or download risk requires human approval.",
     "require-approval",
-    (a) => EXEC_RISK_APPROVAL_KINDS.has(a.kind),
+    (a) => EXEC_RISK_APPROVAL_KINDS.has(a.kind) || EXEC_RISK_APPROVAL_KINDS.has(actionRiskKind(a) ?? ""),
   ),
   makeRule(
     "baseline-account-billing-permission",
     "Account, billing, and permission changes require human approval.",
     "require-approval",
-    (a) => ACCOUNT_KINDS.has(a.kind),
+    (a) => ACCOUNT_KINDS.has(a.kind) || actionRiskKind(a) === "account-change",
   ),
   makeRule(
     "baseline-deletion",
     "Deletion actions are denied by default.",
     "deny",
-    (a) => DELETE_KINDS.has(a.kind),
+    (a) => DELETE_KINDS.has(a.kind) || actionRiskKind(a) === "delete",
   ),
   makeRule(
     "baseline-outbound-message",

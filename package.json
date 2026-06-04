@@ -33,6 +33,7 @@
     "lint": "pnpm run typecheck",
     "test": "node --import tsx --test 'src/**/*.test.ts'",
     "typecheck": "tsc --noEmit",
+    "metrics": "node scripts/metrics.mjs",
     "emit-schema": "tsx benchmarks/emit-schema.ts",
     "compare": "tsx benchmarks/compare/run-compare.ts"
   },

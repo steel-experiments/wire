@@ -362,7 +362,8 @@ test("OpenAIProvider.chat throws LLMNetworkError on fetch failure", async () => 
   };
 
   try {
-    const provider = new OpenAIProvider({ apiKey: "test-key" });
+    // maxRetries: 0 keeps this focused on error mapping, not retry timing.
+    const provider = new OpenAIProvider({ apiKey: "test-key", maxRetries: 0 });
     await assert.rejects(
       () => provider.chat(makeMessages()),
       (err: unknown) => err instanceof LLMNetworkError,
@@ -623,7 +624,8 @@ test("AnthropicProvider.chat throws LLMNetworkError on fetch failure", async () 
   };
 
   try {
-    const provider = new AnthropicProvider({ apiKey: "test-key" });
+    // maxRetries: 0 keeps this focused on error mapping, not retry timing.
+    const provider = new AnthropicProvider({ apiKey: "test-key", maxRetries: 0 });
     await assert.rejects(
       () => provider.chat(makeMessages()),
       (err: unknown) => err instanceof LLMNetworkError,

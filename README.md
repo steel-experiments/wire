@@ -12,7 +12,7 @@ That's the core loop. Everything else — classification, skills, policy, benchm
 
 ```bash
 pnpm install
-pnpm test          # 600+ tests across 19 files
+pnpm test          # 828 tests across 37 files
 
 # Set up API keys
 export STEEL_API_KEY=...     # browser infrastructure
@@ -112,6 +112,8 @@ If both API keys are present, you must specify which provider to use. Wire rejec
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `WIRE_PROVIDER` | Override LLM provider (`openai` or `anthropic`) |
 | `WIRE_MODEL` | Override LLM model |
+| `WIRE_LLM_TIMEOUT_MS` | LLM request timeout (default: `60000`) |
+| `WIRE_LLM_MAX_RETRIES` | LLM transient network retry count (default: `2`) |
 | `WIRE_HOME` | User-level Wire home (default: `~/.wire`) |
 | `WIRE_ROOT` | Storage root (default: `$WIRE_HOME/state`) |
 | `WIRE_SKILLS` | Skills directory (default: `$WIRE_HOME/skills`) |
@@ -142,11 +144,12 @@ src/
 | `pnpm install` | Install dependencies |
 | `pnpm dev` | Run via tsx |
 | `pnpm build` | Compile to dist/ |
-| `pnpm test` | Run all tests (600+ across 19 files) |
+| `pnpm test` | Run all tests |
 | `pnpm typecheck` | Type-check without emitting |
 | `pnpm check` | typecheck + test |
+| `pnpm metrics` | Print current source/test file and LOC counts |
 
-Node.js 22+, pnpm, strict TypeScript, ESM only. One dependency: `zod` (boundary validation only). Source capped at 12,000 lines.
+Node.js 22+, pnpm, strict TypeScript, ESM only. One dependency: `zod` (boundary validation only). Treat source size as pressure: update `METRICS.md` on every code change and simplify when core modules grow or mix domains.
 
 ## Documentation
 

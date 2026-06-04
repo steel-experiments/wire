@@ -68,3 +68,7 @@ Track lightweight project size signals here when code changes.
 | 2026-06-04 | `src/` test TypeScript LOC | 16,913 | `find src -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) -print0 \| xargs -0 wc -l \| tail -1` |
 | 2026-06-04 | `src/` production TypeScript LOC | 16,583 | `find src -type f \( -name '*.ts' -o -name '*.tsx' \) ! -name '*.test.ts' ! -name '*.test.tsx' -print0 \| xargs -0 wc -l \| tail -1` |
 | 2026-06-04 | `src/` test TypeScript LOC | 16,908 | `find src -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) -print0 \| xargs -0 wc -l \| tail -1` |
+| 2026-06-04 | `src/` production TypeScript LOC | 16,686 | `find src -type f \( -name '*.ts' -o -name '*.tsx' \) ! -name '*.test.ts' ! -name '*.test.tsx' -print0 \| xargs -0 wc -l \| tail -1` |
+| 2026-06-04 | `src/` test TypeScript LOC | 17,063 | `find src -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) -print0 \| xargs -0 wc -l \| tail -1` |
+| 2026-06-04 | `src/` production TypeScript LOC | 16,865 | `pnpm metrics` |
+| 2026-06-04 | `src/` test TypeScript LOC | 17,149 | `pnpm metrics` |

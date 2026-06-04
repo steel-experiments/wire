@@ -17,7 +17,7 @@ interface BrowserProvider {
 }
 ```
 
-The Steel provider (`src/providers/browser/steel.ts`) implements this interface using the Steel API.
+The Steel provider entrypoint (`src/providers/browser/steel.ts`) implements this interface using focused modules under `src/providers/browser/steel/`.
 
 ## The three operations
 
@@ -172,7 +172,7 @@ These are forwarded to the Steel provider. The `reconfigure` provider action can
 
 ## Steel provider
 
-`src/providers/browser/steel.ts` implements the `BrowserProvider` interface using the Steel cloud browser API.
+`src/providers/browser/steel.ts` is the stable entrypoint for the Steel cloud browser provider. The implementation is split across focused modules in `src/providers/browser/steel/`:
 
 Key features:
 - Session creation with profile, region, proxy, and captcha support

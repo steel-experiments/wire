@@ -546,6 +546,38 @@ test("approval requests carry proposed code, risk, and reason", async () => {
   assert.equal(eventDetail?.riskKind, "unknown-mutation");
 });
 
+test("executeStep sends classified exec risk as structured policy metadata", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  const provider = createMockProvider();
+  let seenRisk: string | undefined;
+  let seenPolicyKind: string | undefined;
+  const policy = createMockPolicyEngine({
+    check(_actionId, action) {
+      seenPolicyKind = action.kind;
+      seenRisk = action.metadata?.riskKind;
+      return { id: createId("policy"), actionId: _actionId, result: "allow" };
+    },
+  });
+
+  await executeStep(
+    state,
+    {
+      kind: "exec",
+      summary: "Badly labeled delete",
+      payload: {
+        policyKind: "read",
+        code: "await fetch('/items/1', { method: 'DELETE' }); return 'done';",
+      },
+    },
+    provider,
+    policy,
+  );
+
+  assert.equal(seenPolicyKind, "read");
+  assert.equal(seenRisk, "delete");
+});
+
 test("approval request truncates very long code excerpts", async () => {
   const task = makeTask();
   const state = createLoopState(task, makeSessionId());

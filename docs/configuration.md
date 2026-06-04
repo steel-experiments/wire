@@ -38,6 +38,8 @@ Override with `--model` or `WIRE_MODEL`.
 | `ANTHROPIC_API_KEY` | Anthropic API key | — |
 | `WIRE_PROVIDER` | Override LLM provider | — |
 | `WIRE_MODEL` | Override LLM model | — |
+| `WIRE_LLM_TIMEOUT_MS` | Per-request LLM transport timeout | `60000` |
+| `WIRE_LLM_MAX_RETRIES` | Bounded retry count for transient LLM network failures | `2` |
 | `WIRE_HOME` | User-level Wire home | `~/.wire` |
 | `WIRE_ROOT` | Storage root | `$WIRE_HOME/state` |
 | `WIRE_SKILLS` | Skills directory | `$WIRE_HOME/skills` |

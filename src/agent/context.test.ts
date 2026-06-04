@@ -8,6 +8,7 @@ import {
   buildActionGuidance,
   stripInjectionPatterns,
 } from "./context.js";
+import { ACTION_GUIDANCE_ITEMS, BASE_ACTION_GUIDANCE } from "./prompts.js";
 import type {
   ContextBundle,
   TaskObjective,
@@ -495,6 +496,22 @@ test("buildActionGuidance promotes a dedicated helpers section with examples", (
   // At least one concrete usage example for each helper.
   assert.match(guidance, /clickVisibleText\(["'`]/u);
   assert.match(guidance, /fillByLabel\(["'`]/u);
+});
+
+test("base action guidance has stable governance metadata", () => {
+  const ids = new Set<string>();
+  for (const item of ACTION_GUIDANCE_ITEMS) {
+    assert.match(item.id, /^[a-z0-9]+(?:-[a-z0-9]+)*$/u);
+    assert.ok(item.text.trim().length > 0);
+    assert.ok(["core", "helper", "skill"].includes(item.home));
+    assert.equal(ids.has(item.id), false, `duplicate guidance id: ${item.id}`);
+    ids.add(item.id);
+  }
+
+  assert.deepEqual(BASE_ACTION_GUIDANCE, ACTION_GUIDANCE_ITEMS.map((item) => item.text));
+  assert.equal(ACTION_GUIDANCE_ITEMS.find((item) => item.id === "wire-click-only")?.home, "core");
+  assert.equal(ACTION_GUIDANCE_ITEMS.find((item) => item.id === "helper-fill-by-label")?.home, "helper");
+  assert.equal(ACTION_GUIDANCE_ITEMS.find((item) => item.id === "loaded-skill-guidance")?.home, "skill");
 });
 
 // ---------------------------------------------------------------------------

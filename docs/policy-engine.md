@@ -13,6 +13,17 @@ interface PolicyEngine {
 The engine evaluates a list of `PolicyRule` objects against each proposed action:
 
 ```ts
+interface PolicyAction {
+  kind: string;
+  summary: string;
+  payload?: Record<string, unknown>;
+  metadata?: {
+    riskKind?: ExecRiskKind;
+    riskReasons?: string[];
+    cdpMethods?: string[];
+  };
+}
+
 interface PolicyRule {
   id: string;
   description: string;
@@ -57,6 +68,8 @@ type ExecRiskKind =
   | "unknown-mutation" // mutating fetch (PUT/PATCH/DELETE/POST), WebSocket, XMLHttpRequest
 ```
 
+The runtime sends this classification as `PolicyAction.metadata.riskKind` even when an action payload declares a different `policyKind`. Baseline rules inspect both the action kind and metadata, so a mislabeled exec cannot downgrade delete or mutation risk.
+
 Classification priority (first match wins):
 1. **Delete** — `delete`, `remove`, `method: "DELETE"` patterns
 2. **Account change** — billing/permission/role keywords
@@ -84,8 +97,12 @@ These CDP methods are auto-allowed without approval:
 - `Input.dispatchMouseEvent`
 - `Input.insertText`
 - `Input.dispatchTouchEvent`
+- `Input.dispatchDragEvent`
+- `Page.navigate`
+- `Page.reload`
+- `Page.navigateToHistoryEntry`
 
-They are equivalent to physical user input and no more dangerous than `exec()`.
+Input methods are equivalent to physical user input, and navigation methods match the normal exec-navigation risk. Other raw CDP methods require approval.
 
 ## Approval flow
 

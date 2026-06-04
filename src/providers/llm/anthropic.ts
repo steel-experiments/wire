@@ -1,5 +1,7 @@
 import type { ChatMessage, ChatOptions, ChatResponse, ContentPart, LLMProvider } from "./openai.js";
-import { LLMNetworkError, LLMApiError } from "./openai.js";
+import { LLMApiError } from "./openai.js";
+import { fetchWithRetry, resolveTransportOptions } from "./transport.js";
+import type { TransportOptions } from "./transport.js";
 
 // Anthropic provider configuration
 
@@ -18,6 +20,8 @@ export interface AnthropicProviderConfig {
   baseUrl?: string;
   model?: string;
   reasoningEffort?: AnthropicReasoningEffort;
+  timeoutMs?: number;
+  maxRetries?: number;
 }
 
 const DEFAULT_BASE_URL = "https://api.anthropic.com/v1";
@@ -56,12 +60,17 @@ export class AnthropicProvider implements LLMProvider {
   private readonly baseUrl: string;
   public readonly model: string;
   public readonly reasoningEffort: AnthropicReasoningEffort | undefined;
+  private readonly transport: TransportOptions;
 
   constructor(config: AnthropicProviderConfig) {
     this.apiKey = config.apiKey;
     this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
     this.model = config.model ?? DEFAULT_MODEL;
     this.reasoningEffort = config.reasoningEffort;
+    this.transport = resolveTransportOptions(
+      { timeoutMs: config.timeoutMs, maxRetries: config.maxRetries },
+      process.env,
+    );
   }
 
   async chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResponse> {
@@ -129,16 +138,12 @@ export class AnthropicProvider implements LLMProvider {
       "Content-Type": "application/json",
     };
 
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-      });
-    } catch (err) {
-      throw new LLMNetworkError("anthropic", err as Error);
-    }
+    const response = await fetchWithRetry(
+      "anthropic",
+      url,
+      { method: "POST", headers, body: JSON.stringify(body) },
+      this.transport,
+    );
 
     if (!response.ok) {
       let detail: string;
