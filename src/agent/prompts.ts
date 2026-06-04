@@ -55,6 +55,7 @@ export const BASE_ACTION_GUIDANCE = [
   "After navigating to a target page, always exec code to extract the answer before finishing. Navigation alone is not task completion.",
   'When extracting content that renders after load, begin the extraction exec with `await waitForSelector("<content selector>", 5000)` and read the DOM only after it resolves; scraping before the content appears is a common cause of empty results.',
   "Only use finish after your exec code has returned the actual answer in its return value.",
+  'If the objective wants the browser left running after you finish (e.g. "keep the session open", "leave it running", "don\'t close the browser"), set payload.keepSessionOpen to true on the finish action. Otherwise omit it and the session closes normally.',
   "Helpers available in every exec block — they are task-local and may be replaced with edit-helper when the current task needs a different thin helper surface:",
   '  • `const btn = [...document.querySelectorAll("button,a,[role=button]")].find(el => /continue|accept/i.test(el.textContent || "")); await wire.click(btn);` — use JS to find a visible target, then `wire.click` for a real browser click.',
   '  • `await clickVisibleText("Skip")` — clicks the first visible button/link whose text contains the argument. Use this to dismiss modals, accept cookies, follow CTAs.',

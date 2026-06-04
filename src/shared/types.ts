@@ -7,6 +7,7 @@ export type RunStatus =
   | "running"
   | "awaiting-approval"
   | "succeeded"
+  | "partial"
   | "failed"
   | "aborted";
 export type RunClassificationKind =

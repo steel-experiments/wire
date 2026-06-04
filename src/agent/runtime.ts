@@ -32,6 +32,7 @@ import {
   deriveRunResult,
   executeStep,
   finalizeRun,
+  computeFinalClassification,
   shouldStop,
   type LoopState,
   type LoopResult,
@@ -67,6 +68,7 @@ import {
   latestExtractionIsVerificationProbe,
   execActionSignature,
   codeResultDigest,
+  codeResultShape,
   computeRepeatStreak,
   computeNoProgressStreak,
   isNoProgressResult,
@@ -984,6 +986,11 @@ interface LoopSignals {
   maxStepsReached: boolean;
   awaitingApproval: boolean;
   userCancelled: boolean;
+  /** The agent asked to leave the browser session open after finishing — set
+   *  when it emits a finish action with payload.keepSessionOpen. Lets the model
+   *  honor a "keep the session open" objective by understanding it, rather than
+   *  Wire string-matching the task text. */
+  keepSessionOpenRequested: boolean;
   pendingApproval: LoopResult["pendingApproval"];
   pendingAction: LoopResult["pendingAction"];
   flushedEvents: number;
@@ -1264,6 +1271,7 @@ async function initializeState(
     maxStepsReached: false,
     awaitingApproval: false,
     userCancelled: false,
+    keepSessionOpenRequested: false,
     pendingApproval: undefined,
     pendingAction: undefined,
     flushedEvents: 0,
@@ -1465,11 +1473,16 @@ async function runMainLoop(
   // tolerate legitimate brief retries.
   const STUCK_THRESHOLD = 3;
   let lastSigOnly: string | undefined;
+  let lastSigOnlyShape: string | undefined;
+  let lastSigOnlyDigest: string | undefined;
   let sigOnlyCount = 0;
   // Safety net for the cosmetic-variation case: same action, slightly
   // different result each time. Threshold of 6 means 7 identical-signature
   // attempts before bailing — looser so it doesn't false-positive on
-  // legitimate sequential work, but still bounds the worst case.
+  // legitimate sequential work, but still bounds the worst case. The counter
+  // is progress-aware: a stable result shape whose values keep changing (a
+  // probe polling live state, e.g. a climbing game score) resets it, so this
+  // backstop only fires on real spinning, not on a legitimate watch loop.
   const SIG_ONLY_THRESHOLD = 6;
   // Cross-signature stall: consecutive no-progress results (nav-only,
   // empty payload, error-shaped) regardless of which code produced them.
@@ -1574,6 +1587,12 @@ async function runMainLoop(
 
     // If the agent wants to finish, record and break
     if (action.kind === "finish") {
+      // Capture a keep-session-open request before any verification rewrite can
+      // drop the payload. The agent sets this when it reads the objective as
+      // wanting the browser left running after the task ends.
+      if (action.payload?.["keepSessionOpen"] === true) {
+        signals.keepSessionOpenRequested = true;
+      }
       // Prevent finish when step count is too low for real progress
       if (
         state.task.mode === "task" &&
@@ -1793,13 +1812,26 @@ async function runMainLoop(
         const lastResult = latestCodeResult(state);
         const failed = lastResult?.payload["ok"] === false;
         const digest = codeResultDigest(lastResult);
+        const shape = codeResultShape(lastResult);
 
         if (sig === lastSigOnly) {
-          sigOnlyCount += 1;
+          // Treat this as progress — and reset the backstop — when the result
+          // keeps the same shape (key set) but changes its values: a stable
+          // probe returning fresh data. A morphing shape, or an unchanged
+          // result, still counts toward bailing.
+          const stableShape = shape !== undefined && shape === lastSigOnlyShape;
+          const valuesChanged = digest !== undefined && digest !== lastSigOnlyDigest;
+          if (stableShape && valuesChanged) {
+            sigOnlyCount = 0;
+          } else {
+            sigOnlyCount += 1;
+          }
         } else {
           lastSigOnly = sig;
           sigOnlyCount = 0;
         }
+        lastSigOnlyShape = shape;
+        lastSigOnlyDigest = digest;
         if (sigOnlyCount > SIG_ONLY_THRESHOLD) {
           state.events.push({
             id: createId("event"),
@@ -1994,7 +2026,17 @@ async function finalizeExecution(
     }
   }
 
-  await appendSkillProposalEvents(state, config.skillDir, config.llmProvider);
+  // Only mint a skill from a run that actually accomplished something. A skill
+  // captures durable, working browser knowledge; proposing one from a run
+  // classified as an error or dead-end (agent-error, site-error, blocked-auth,
+  // ambiguous, …) would bake a broken trajectory into a reusable skill.
+  const finalClassification = computeFinalClassification(state, finalizeOptions);
+  if (
+    finalClassification.kind === "task-complete" ||
+    finalClassification.kind === "partial-success"
+  ) {
+    await appendSkillProposalEvents(state, config.skillDir, config.llmProvider);
+  }
   await flushTraceSink(state, config, signals);
 
   const result = finalizeRun(state, finalizeOptions);
@@ -2045,7 +2087,8 @@ async function executeWithState(
     await runMainLoop(state, config, turn, signals, actionRegistry);
   } finally {
     const callerOwnsSession = callerOwnedSessionId !== undefined && state.sessionId === callerOwnedSessionId;
-    if (!signals.awaitingApproval && !config.keepSessionOpen && !callerOwnsSession) {
+    const keepOpen = config.keepSessionOpen || signals.keepSessionOpenRequested;
+    if (!signals.awaitingApproval && !keepOpen && !callerOwnsSession) {
       try {
         await stopBrowserSession(config.provider, state.sessionId);
       } catch {

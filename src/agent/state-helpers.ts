@@ -496,6 +496,24 @@ export function codeResultDigest(event: TraceEvent | undefined): string | undefi
 }
 
 /**
+ * The "shape" of a code-result: the sorted set of top-level keys of its
+ * returnValue, independent of the values. A stable shape whose values keep
+ * changing is the signature of a progressing probe (e.g. polling a live game
+ * score) — real work, not a stuck loop. A shape that keeps morphing is the
+ * signature of flailing. The sig-only loop backstop uses this to tell the two
+ * apart. Returns undefined for non-object return values (scalars/arrays), where
+ * shape can't be assessed.
+ */
+export function codeResultShape(event: TraceEvent | undefined): string | undefined {
+  if (!event || event.kind !== "code-result") return undefined;
+  const rv = event.payload["returnValue"];
+  if (rv === undefined || rv === null || typeof rv !== "object" || Array.isArray(rv)) {
+    return undefined;
+  }
+  return Object.keys(rv as Record<string, unknown>).sort().join(",");
+}
+
+/**
  * Stable signature for a proposed exec/raw action — used to detect when the
  * agent is re-issuing the same broken code. Matches the renderer's repeat
  * marker so what the user sees on screen and what the loop bails out on are
