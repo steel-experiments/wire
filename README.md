@@ -12,7 +12,7 @@ That's the core loop. Everything else — classification, skills, policy, benchm
 
 ```bash
 pnpm install
-pnpm test          # 828 tests across 37 files
+pnpm test          # 828 tests across 40 files
 
 # Set up API keys
 export STEEL_API_KEY=...     # browser infrastructure
@@ -101,7 +101,7 @@ LLM settings resolve in priority order:
 4. User config: `$WIRE_HOME/config.json` (default: `~/.wire/config.json`)
 5. Default: `gpt-5.4-mini` for OpenAI, `claude-sonnet-4-6` for Anthropic
 
-If both API keys are present, you must specify which provider to use. Wire rejects mismatched pairs.
+If both API keys are present and no provider or inferable model is configured, Wire defaults to OpenAI. Use `--provider`, `WIRE_PROVIDER`, or `llm.provider` to choose Anthropic. Wire rejects mismatched provider/model pairs.
 
 ### Environment variables
 

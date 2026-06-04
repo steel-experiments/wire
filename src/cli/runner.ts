@@ -1,11 +1,7 @@
-import type { ActionId, Artifact, ComparisonDimension, ExperimentBundle, PolicyDecision, Run, RunClassification, RunId, Task, TaskId, TraceEvent } from "../shared/types.js";
+import type { ComparisonDimension, ExperimentBundle, Run, RunClassification, RunId, Task, TaskId } from "../shared/types.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
 import { saveTask, loadTask } from "../storage/tasks.js";
 import { saveExperimentBundle, saveHypothesis, saveRun } from "../storage/runs.js";
-import { saveSession } from "../storage/sessions.js";
-import { saveTraceEvents } from "../storage/events.js";
-import { saveArtifact } from "../storage/artifacts.js";
-import { saveTraceBlobValue } from "../storage/blobs.js";
 import {
   loadApprovalRequest,
   listApprovalRequests,
@@ -19,22 +15,31 @@ import {
 import { isExpired, resolveApproval } from "../policy/approvals.js";
 import { stopBrowserSession } from "../browser/session.js";
 import type { BrowserProvider } from "../browser/bridge.js";
-import { createPolicyEngine, type PolicyEngine } from "../policy/engine.js";
-import type { PolicyAction } from "../policy/rules.js";
-import { createSteelProvider, createSteelActionHandlers } from "../providers/browser/steel.js";
-import type { LLMProvider } from "../providers/llm/openai.js";
-import { createOpenAIProvider } from "../providers/llm/openai.js";
-import { createAnthropicProvider } from "../providers/llm/anthropic.js";
-import { executeTask, resumeTask, type RuntimeConfig } from "../agent/runtime.js";
+import { executeTask, resumeTask } from "../agent/runtime.js";
 import { shouldBranch } from "../agent/branching.js";
 import { createHypothesis } from "../experiments/hypotheses.js";
 import { buildExperimentSummary, formatExperimentSummary } from "../experiments/summaries.js";
-import type { LlmProvider } from "./config.js";
-import type { SessionConfig } from "../shared/types.js";
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
-import { createConsoleTraceSink } from "../ui/stream.js";
-import { defaultSkillDir, defaultStorageRoot } from "../shared/paths.js";
+import { defaultStorageRoot } from "../shared/paths.js";
+import {
+  artifactSummaries,
+  persistExecutionArtifacts,
+  printArtifacts,
+  type ArtifactSummary,
+} from "./artifacts.js";
+import {
+  createRuntimeConfig,
+  resolveCriticalPointReview,
+  resolveProviderSelection,
+  resolveSkillDir,
+  type RunOptions,
+} from "./runtime-config.js";
+
+export {
+  resolveCriticalPointReview,
+  resolveProviderSelection,
+  resolveSkillDir,
+  type RunOptions,
+} from "./runtime-config.js";
 
 // Result types
 
@@ -53,14 +58,6 @@ export interface RunResult {
   experimentId?: string | undefined;
 }
 
-export interface ArtifactSummary {
-  id: string;
-  filename?: string;
-  kind: string;
-  mimeType?: string;
-  path: string;
-}
-
 export interface ApproveResult {
   approved: boolean;
   approvalId: string;
@@ -70,249 +67,8 @@ export interface ApproveResult {
   artifacts?: ArtifactSummary[] | undefined;
 }
 
-// Run options
-
-export interface RunOptions {
-  objective: string;
-  mode?: "task" | "investigate" | "experiment";
-  profileId?: string;
-  provider?: LlmProvider;
-  model?: string;
-  maxSteps?: number;
-  skillDir?: string;
-  sessionConfig?: SessionConfig;
-  json?: boolean;
-  yes?: boolean;
-  verbose?: boolean;
-  quiet?: boolean;
-  color?: boolean;
-  keepSessionOpen?: boolean;
-  traceLlmMessages?: boolean;
-  criticalPointReview?: boolean;
-}
-
-// Auto-approving policy decorator (--yes mode)
-
-function autoApprovingEngine(inner: PolicyEngine): PolicyEngine {
-  return {
-    check(actionId: ActionId, action: PolicyAction): PolicyDecision {
-      const d = inner.check(actionId, action);
-      return d.result === "require-approval" ? { ...d, result: "allow" as const } : d;
-    },
-  };
-}
-
-// Helpers
-
-/**
- * Resolve the skills directory in priority order:
- *   1. explicit --skill-dir option
- *   2. $WIRE_SKILLS env var (use this when wire is spawned from an arbitrary cwd)
- *   3. ~/.wire/skills by default
- *
- * Exported so we can test the precedence and so external embedders can call
- * it before constructing a RuntimeConfig.
- */
-export function resolveSkillDir(
-  explicit?: string,
-  env: { WIRE_SKILLS?: string } = process.env as { WIRE_SKILLS?: string },
-): string {
-  if (explicit !== undefined && explicit.length > 0) return explicit;
-  if (env.WIRE_SKILLS !== undefined && env.WIRE_SKILLS.length > 0) return env.WIRE_SKILLS;
-  return defaultSkillDir();
-}
-
-function inferProviderFromModel(model?: string): LlmProvider | undefined {
-  if (!model) {
-    return undefined;
-  }
-
-  if (/^(gpt-|o[1-9]|o\d|chatgpt-)/u.test(model)) {
-    return "openai";
-  }
-
-  if (/^claude-/u.test(model)) {
-    return "anthropic";
-  }
-
-  return undefined;
-}
-
-export function resolveProviderSelection(provider?: LlmProvider, model?: string): LlmProvider | undefined {
-  const inferred = inferProviderFromModel(model);
-  if (provider && inferred && provider !== inferred) {
-    throw new Error(`Model "${model}" does not match provider "${provider}".`);
-  }
-
-  if (provider) {
-    return provider;
-  }
-
-  if (inferred) {
-    return inferred;
-  }
-
-  const hasOpenAi = Boolean(process.env.OPENAI_API_KEY);
-  const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY);
-
-  // Deterministic default precedence when only an API key is present:
-  // prefer openai, then anthropic. Override with `llm.provider`,
-  // `WIRE_PROVIDER`, or `--provider`.
-  if (hasOpenAi) {
-    return "openai";
-  }
-
-  if (hasAnthropic) {
-    return "anthropic";
-  }
-
-  return undefined;
-}
-
-function createLlmProvider(provider?: LlmProvider, model?: string): LLMProvider | undefined {
-  const selectedProvider = resolveProviderSelection(provider, model);
-  if (selectedProvider === "openai") {
-    return createOpenAIProvider(model ? { model } : undefined);
-  }
-
-  if (selectedProvider === "anthropic") {
-    return createAnthropicProvider(model ? { model } : undefined);
-  }
-
-  return undefined;
-}
-
-function defaultMaxSteps(mode: "task" | "investigate" | "experiment"): number {
-  switch (mode) {
-    case "investigate": return 20;
-    case "experiment": return 25;
-    default: return 30;
-  }
-}
-
-/** Resolve whether critical-point review runs. An explicit choice (CLI flag)
- *  always wins; otherwise it is on by default in every mode. `mode` is kept in
- *  the signature so callers can opt a mode out later without a signature churn. */
-export function resolveCriticalPointReview(
-  _mode: "task" | "investigate" | "experiment" | undefined,
-  explicit: boolean | undefined,
-): boolean {
-  if (explicit !== undefined) return explicit;
-  return true;
-}
-
-function createRuntimeConfig(
-  options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "sessionConfig" | "provider" | "model" | "yes" | "json" | "mode" | "verbose" | "quiet" | "color" | "keepSessionOpen" | "traceLlmMessages" | "criticalPointReview">,
-): RuntimeConfig {
-  let policyEngine: PolicyEngine = createPolicyEngine();
-  if (options.yes) {
-    policyEngine = autoApprovingEngine(policyEngine);
-  }
-
-  const isJson = options.json === true;
-  const maxSteps = options.maxSteps ?? defaultMaxSteps(options.mode ?? "task");
-
-  const config: RuntimeConfig = {
-    provider: createSteelProvider(),
-    actionHandlers: createSteelActionHandlers(),
-    policyEngine,
-    maxSteps,
-    async onSessionCreated(session) {
-      const url = session.debugUrl ?? session.liveUrl;
-      if (!isJson && url) {
-        console.log(`Debug URL:    ${url}`);
-        console.log("");
-      }
-      await saveSession(defaultStorageRoot(), session);
-    },
-    async onSessionReconfigured({ oldSessionId, newSession, summary }) {
-      const url = newSession.debugUrl ?? newSession.liveUrl;
-      if (!isJson) {
-        console.log(`Session reconfigured: ${summary}`);
-        console.log(`Old session: ${oldSessionId}`);
-        console.log(`New session: ${newSession.id}`);
-        if (url) {
-          console.log(`Debug URL:    ${url}`);
-        }
-        console.log("");
-      }
-      await saveSession(defaultStorageRoot(), newSession);
-    },
-  };
-  if (options.keepSessionOpen) config.keepSessionOpen = true;
-  // Critical-point review is the strongest anti-laziness check (judge each
-  // objective sub-point separately). On by default in every mode; opt out with
-  // --no-critical-points.
-  if (resolveCriticalPointReview(options.mode, options.criticalPointReview)) {
-    config.criticalPointReview = true;
-  }
-  if (options.traceLlmMessages === true || process.env.WIRE_TRACE_LLM_MESSAGES === "1") {
-    config.traceLlmMessages = true;
-    config.saveTraceBlob = async (runId, kind, value, contentType) => {
-      const blob = await saveTraceBlobValue(defaultStorageRoot(), runId, kind, value, contentType);
-      return { hash: blob.hash, size: blob.size, kind: blob.kind };
-    };
-  }
-
-  if (!isJson && options.quiet !== true) {
-    const sinkOpts: Parameters<typeof createConsoleTraceSink>[0] = { maxSteps };
-    if (options.verbose !== undefined) sinkOpts.verbose = options.verbose;
-    if (options.color !== undefined) sinkOpts.color = options.color;
-    const consoleSink = createConsoleTraceSink(sinkOpts);
-    config.traceSink = { onEvent: (event) => consoleSink.onEvent(event) };
-  }
-
-  const llmProvider = createLlmProvider(options.provider, options.model);
-  if (llmProvider) {
-    config.llmProvider = llmProvider;
-  }
-  config.skillDir = resolveSkillDir(options.skillDir);
-  config.sessionInput = { timeoutMinutes: Math.max(15, Math.ceil(maxSteps * 30 / 60)) };
-  if (options.profileId || options.sessionConfig) {
-    if (options.profileId) config.sessionInput.profileId = options.profileId as never;
-    if (options.sessionConfig) config.sessionInput.sessionConfig = options.sessionConfig;
-  }
-
-  return config;
-}
-
 function fallbackClassification(): RunClassification {
   return { kind: "ambiguous", confidence: 0.3, notes: ["No classification returned"] };
-}
-
-function artifactSummaries(artifacts: Artifact[]): ArtifactSummary[] | undefined {
-  if (artifacts.length === 0) {
-    return undefined;
-  }
-
-  return artifacts.map((artifact) => {
-    const summary: ArtifactSummary = {
-      id: artifact.id,
-      kind: artifact.kind,
-      path: artifact.path,
-    };
-    if (typeof artifact.metadata?.filename === "string") {
-      summary.filename = artifact.metadata.filename;
-    }
-    if (artifact.mimeType !== undefined) {
-      summary.mimeType = artifact.mimeType;
-    }
-    return summary;
-  });
-}
-
-function printArtifacts(artifacts: Artifact[]): void {
-  const summaries = artifactSummaries(artifacts);
-  if (!summaries) {
-    return;
-  }
-
-  console.log("Artifacts:");
-  for (const artifact of summaries) {
-    const filename = artifact.filename ? `${artifact.filename}: ` : "";
-    const mime = artifact.mimeType ? ` (${artifact.mimeType})` : "";
-    console.log(`  - ${filename}${artifact.path}${mime}`);
-  }
 }
 
 export function createExperimentBundleFromRuns(
@@ -344,100 +100,6 @@ export function createExperimentBundleFromRuns(
   bundle.summary = buildExperimentSummary(bundle, runs);
 
   return bundle;
-}
-
-// Artifact persistence
-
-async function persistExecutionArtifacts(
-  root: string,
-  task: Task,
-  result: Awaited<ReturnType<typeof executeTask>>,
-): Promise<Artifact[]> {
-  const artifacts = await persistTraceArtifacts(root, result.events);
-  await saveTask(root, task);
-  await saveRun(root, result.run);
-  await saveTraceEvents(root, result.events);
-
-  if (result.pendingApproval && result.pendingAction) {
-    await saveApprovalRequest(root, result.pendingApproval);
-    await saveRunCheckpoint(root, {
-      runId: result.run.id,
-      task,
-      run: result.run,
-      sessionId: result.sessionId,
-      events: result.events,
-      stepCount: result.stepCount,
-      startedAt: result.startedAt,
-      helperSource: result.helperSource,
-      helperVersion: result.helperVersion,
-      reviewFailureCount: result.reviewFailureCount,
-      pendingAction: result.pendingAction,
-      approvalRequestId: result.pendingApproval.id,
-      savedAt: nowIsoUtc(),
-    });
-  } else {
-    await deleteRunCheckpoint(root, result.run.id);
-  }
-
-  return artifacts;
-}
-
-async function persistTraceArtifacts(root: string, events: TraceEvent[]): Promise<Artifact[]> {
-  const artifacts: Artifact[] = [];
-
-  for (const event of events) {
-    if (event.kind !== "artifact") {
-      continue;
-    }
-
-    const artifactId = typeof event.payload.artifactId === "string" ? event.payload.artifactId : undefined;
-    const kind = typeof event.payload.kind === "string" ? event.payload.kind : undefined;
-    const path = typeof event.payload.path === "string" ? event.payload.path : undefined;
-    const createdAt = typeof event.payload.createdAt === "string" ? event.payload.createdAt : event.ts;
-    const mimeType = typeof event.payload.mimeType === "string" ? event.payload.mimeType : undefined;
-
-    if (!artifactId || !kind || !path) {
-      continue;
-    }
-
-    const absolutePath = resolve(root, path);
-    const content = typeof event.payload.content === "string" ? event.payload.content : undefined;
-    if (content !== undefined) {
-      await mkdir(dirname(absolutePath), { recursive: true });
-      await writeFile(absolutePath, content, "utf-8");
-    }
-
-    const artifact: Artifact = {
-      id: artifactId as Artifact["id"],
-      runId: event.runId,
-      kind: kind as Artifact["kind"],
-      path: absolutePath,
-      createdAt,
-    };
-
-    if (mimeType !== undefined) {
-      artifact.mimeType = mimeType;
-    }
-
-    artifact.metadata = {
-      source: "trace-artifact",
-    };
-    if (typeof event.payload.filename === "string") {
-      artifact.metadata.filename = event.payload.filename;
-    }
-
-    if (content !== undefined) {
-      const blob = await saveTraceBlobValue(root, event.runId, "artifact-content", content, mimeType);
-      artifact.metadata.contentHash = blob.hash;
-      artifact.metadata.contentSize = Buffer.byteLength(content, "utf8");
-      artifact.metadata.contentPreview = content.length > 500 ? `${content.slice(0, 500)}...` : content;
-    }
-
-    await saveArtifact(root, artifact);
-    artifacts.push(artifact);
-  }
-
-  return artifacts;
 }
 
 // Release Steel sessions abandoned at an approval gate past their expiresAt.

@@ -11,9 +11,9 @@ Provider and model values are first resolved from CLI, environment, and config f
 3. `wire.json` → `llm.provider`
 4. `~/.wire/config.json` → `llm.provider`
 5. Model name inference when no provider was set (e.g., `gpt-*` → OpenAI, `claude-*` → Anthropic)
-6. Available API key when no provider or inferable model was set (only one present → use that provider)
+6. Available API key when no provider or inferable model was set (OpenAI wins when both keys are present)
 
-If both OpenAI and Anthropic keys are present and no provider or inferable model is configured, Wire throws an error.
+If both OpenAI and Anthropic keys are present and no provider or inferable model is configured, Wire defaults to OpenAI. Configure `--provider`, `WIRE_PROVIDER`, or `llm.provider` when you want Anthropic.
 
 ### Provider validation
 

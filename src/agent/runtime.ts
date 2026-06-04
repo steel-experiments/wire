@@ -4,7 +4,6 @@ import type {
   CreateSessionInput,
   JsonObject,
   JsonValue,
-  LoadedSkill,
   ProfileId,
   ProposedAction,
   RunCheckpoint,
@@ -28,7 +27,6 @@ import type { LLMProvider } from "../providers/llm/openai.js";
 
 import {
   createLoopState,
-  deriveRunResult,
   executeStep,
   finalizeRun,
   computeFinalClassification,
@@ -42,22 +40,13 @@ import { detectAuthWall } from "../profiles/auth.js";
 import { llmProposeSkill, generateSkillProposal, manageSkillPromotion } from "../skills/promote.js";
 import { registerActionKind } from "./llm-parse.js";
 import {
-  latestObservation,
-  reconfigureJustified,
   latestError,
   latestCodeResult,
   hasRecordedTaskArtifact,
-  hasExtractedTaskResult,
-  hasAttemptedExtraction,
-  hasMeaningfulProgress,
-  hasObjectiveCardinalityEvidence,
   buildFailureSummary,
   isRecoverableStepError,
-  hasPostNavigationExtraction,
   appendExtractedResultArtifact,
   appendTaskNoteArtifact,
-  buildVerificationAction,
-  latestExtractionIsVerificationProbe,
   execActionSignature,
   codeResultDigest,
   codeResultShape,
@@ -67,24 +56,18 @@ import { ActionRegistry, type ActionHandler } from "./actions.js";
 import { updateSkillStatsFromRun } from "../skills/stats.js";
 import {
   contractCreatedPayload,
-  contractValidationPayload,
   createTaskContract,
-  validateTaskContract,
 } from "./contract.js";
 import { tracingProvider, type LlmTraceOptions } from "./llm-trace.js";
 import { syncMatchedSkills } from "./skill-context.js";
 import { defaultAgentTurn } from "./turn.js";
 import {
-  artifactReviewPayload,
   artifactReviewPrompt,
   dedupeArtifactEvents,
-  hasUnfixedArtifactReviewFailure,
-  hasUnrecordedLatestTaskResult,
-  reviewArtifacts,
   reviewWithCriticalPoints,
-  shouldReviewArtifacts,
-  taskArtifactEvents,
 } from "./artifact-review.js";
+import { tryAntiBotRecovery } from "./recovery.js";
+import { handleFinishAction } from "./finish-flow.js";
 
 export { skillGuidance } from "./skill-context.js";
 export { latestExtractionsPerUrl } from "./evidence.js";
@@ -433,100 +416,6 @@ async function initializeState(
 
 // runMainLoop — the while(true) agent loop
 
-function pathEvidenceFromUrl(rawUrl: unknown): string[] {
-  if (typeof rawUrl !== "string" || rawUrl.length === 0) return [];
-  try {
-    const url = new URL(rawUrl);
-    const parts = url.pathname
-      .split("/")
-      .filter((part) => part.length >= 4)
-      .map((part) => `/${part.toLowerCase()}`);
-    return [url.hostname.toLowerCase(), url.pathname.toLowerCase(), ...parts];
-  } catch {
-    return [rawUrl.toLowerCase()];
-  }
-}
-
-function skillDescribesRecoverableBarrier(skill: LoadedSkill, evidence: string[]): boolean {
-  const text = [
-    skill.sections["Known Traps"],
-    skill.sections["Traps"],
-    skill.sections["Workflow"],
-    skill.sections["Facts"],
-  ].filter((value): value is string => typeof value === "string").join("\n").toLowerCase();
-  if (text.length === 0) return false;
-
-  const mentionsBarrier = /captcha|anti-bot|bot detection|verification|verify|interstitial|challenge/u.test(text);
-  if (!mentionsBarrier) return false;
-  return evidence.some((item) => item.length > 0 && text.includes(item));
-}
-
-function latestObservationMatchesRecoverableSkillBarrier(state: LoopState): boolean {
-  const observation = latestObservation(state);
-  if (!observation) return false;
-  const evidence = pathEvidenceFromUrl(observation.payload.url);
-  if (evidence.length === 0) return false;
-  return state.loadedSkills.some((skill) => skillDescribesRecoverableBarrier(skill, evidence));
-}
-
-async function tryAntiBotRecovery(
-  state: LoopState,
-  config: RuntimeConfig,
-  signals: LoopSignals,
-  actionRegistry?: ActionRegistry,
-): Promise<boolean> {
-  if (signals.policyDenied || isCancelled(config)) return false;
-  if (signals.antiBotRecoveryAttempted) return false;
-  if (!latestObservationMatchesRecoverableSkillBarrier(state)) return false;
-  // Gate: only recover when the current page is actually blocked. A pre-nav
-  // about:blank or an already-loaded content page is not a block — proxying it
-  // is wasteful (easy sites) or outright destructive (it broke SEC EDGAR).
-  if (!reconfigureJustified(latestObservation(state))) return false;
-  if (!actionRegistry?.get("reconfigure")) return false;
-
-  signals.antiBotRecoveryAttempted = true;
-  const action: ProposedAction = {
-    kind: "reconfigure",
-    summary: "Recover from anti-bot challenge with proxy and captcha support",
-    payload: { useProxy: true, solveCaptcha: true },
-  };
-  const stepOpts: {
-    actionRegistry: ActionRegistry;
-    actionContext?: { onSessionReconfigured: NonNullable<RuntimeConfig["onSessionReconfigured"]> };
-  } = { actionRegistry };
-  if (config.onSessionReconfigured) {
-    stepOpts.actionContext = { onSessionReconfigured: config.onSessionReconfigured };
-  }
-
-  try {
-    const stepResult = await executeStep(state, action, config.provider, config.policyEngine, stepOpts);
-    Object.assign(state, stepResult.state);
-    signals.policyDenied = stepResult.policyDenied;
-    signals.authWallHit = stepResult.authWallHit;
-    if (stepResult.pendingApproval) {
-      signals.awaitingApproval = true;
-      signals.pendingApproval = stepResult.pendingApproval;
-      signals.pendingAction = stepResult.pendingAction;
-    }
-    await syncMatchedSkills(state, config.skillDir);
-    await flushTraceSink(state, config, signals);
-    return true;
-  } catch (err) {
-    state.events.push({
-      id: createId("event"),
-      runId: state.run.id,
-      ts: nowIsoUtc(),
-      kind: "error",
-      payload: {
-        message: err instanceof Error ? err.message : String(err),
-        code: "ERECONFIGURE",
-      },
-    });
-    await flushTraceSink(state, config, signals);
-    return false;
-  }
-}
-
 async function runMainLoop(
   state: LoopState,
   config: RuntimeConfig,
@@ -611,7 +500,14 @@ async function runMainLoop(
       await flushTraceSink(state, config, signals);
     }
 
-    const recoveredFromAntiBot = await tryAntiBotRecovery(state, config, signals, actionRegistry);
+    const recoveredFromAntiBot = await tryAntiBotRecovery(
+      state,
+      config,
+      signals,
+      actionRegistry,
+      flushTraceSink,
+      isCancelled,
+    );
     if (recoveredFromAntiBot || signals.awaitingApproval) {
       if (signals.awaitingApproval) break;
       continue;
@@ -660,169 +556,15 @@ async function runMainLoop(
       break;
     }
 
-    // If the agent wants to finish, record and break
     if (action.kind === "finish") {
-      // Capture a keep-session-open request before any verification rewrite can
-      // drop the payload. The agent sets this when it reads the objective as
-      // wanting the browser left running after the task ends.
-      if (action.payload?.["keepSessionOpen"] === true) {
-        signals.keepSessionOpenRequested = true;
+      const finish = await handleFinishAction(state, action, config, signals, flushTraceSink);
+      if (finish.kind === "continue") {
+        continue;
       }
-      // Prevent finish when step count is too low for real progress
-      if (
-        state.task.mode === "task" &&
-        !hasObjectiveCardinalityEvidence(state) &&
-        state.stepCount < config.maxSteps
-      ) {
-        action = buildVerificationAction();
-      } else if (
-        state.stepCount < 3 &&
-        state.task.mode === "task" &&
-        !hasRecordedTaskArtifact(state) &&
-        !hasExtractedTaskResult(state) &&
-        state.stepCount < config.maxSteps
-      ) {
-        action = buildVerificationAction();
-      } else if (
-        state.task.mode === "task" &&
-        !hasExtractedTaskResult(state) &&
-        !hasRecordedTaskArtifact(state) &&
-        !hasAttemptedExtraction(state) &&
-        state.stepCount < config.maxSteps
-      ) {
-        action = buildVerificationAction();
-      } else if (
-        state.task.mode === "task" &&
-        hasExtractedTaskResult(state) &&
-        !hasPostNavigationExtraction(state) &&
-        !hasRecordedTaskArtifact(state) &&
-        state.stepCount < config.maxSteps
-      ) {
-        // Agent extracted a navigation-only result but no real content — force extraction
-        action = buildVerificationAction();
-      } else if (state.task.mode === "task") {
-        // The agent is finishing on Wire's injected generic page-state capture
-        // (buildVerificationAction), not a task-specific extraction. Letting
-        // that raw dump become the deliverable makes the reviewer reject it.
-        // Nudge the agent once to extract the requested values as clean fields,
-        // then let it finish. Bounded so it can never loop.
-        if (
-          latestExtractionIsVerificationProbe(state) &&
-          state.extractionRepromptCount < 1 &&
-          state.stepCount < config.maxSteps
-        ) {
-          state.extractionRepromptCount++;
-          state.events.push({
-            id: createId("event"),
-            runId: state.run.id,
-            ts: nowIsoUtc(),
-            kind: "thought-summary",
-            payload: {
-              reason: "A generic page snapshot was captured for verification. Now return the specific values the objective asks for as clean output fields (not the raw page text), then finish.",
-            },
-          });
-          state.stepCount++;
-          await flushTraceSink(state, config, signals);
-          continue;
-        }
-        if (
-          hasExtractedTaskResult(state) &&
-          (!hasRecordedTaskArtifact(state) || hasUnrecordedLatestTaskResult(state))
-        ) {
-          appendExtractedResultArtifact(state);
-        } else if (!hasRecordedTaskArtifact(state)) {
-          appendTaskNoteArtifact(state, action.summary);
-        }
-        const validation = validateTaskContract(
-          state.contract,
-          state.events,
-          deriveRunResult(state.events, state.task.mode),
-        );
-        state.events.push({
-          id: createId("event"),
-          runId: state.run.id,
-          ts: nowIsoUtc(),
-          kind: "contract-check",
-          payload: contractValidationPayload(validation),
-        });
-        if (!validation.passed && state.stepCount < config.maxSteps) {
-          state.stepCount++;
-          await flushTraceSink(state, config, signals);
-          continue;
-        }
-        if (hasUnfixedArtifactReviewFailure(state)) {
-          if (state.stepCount < config.maxSteps) {
-            state.stepCount++;
-            await flushTraceSink(state, config, signals);
-            continue;
-          } else {
-            state.events.push({
-              id: createId("event"),
-              runId: state.run.id,
-              ts: nowIsoUtc(),
-              kind: "thought-summary",
-              payload: { reason: "Artifact review failed and no corrected artifact was produced" },
-            });
-            await flushTraceSink(state, config, signals);
-            break;
-          }
-        }
-        if (shouldReviewArtifacts(state, config)) {
-          const artifactCount = taskArtifactEvents(state).length;
-          const review = await reviewArtifacts(state, config);
-          const payload = artifactReviewPayload(review, artifactCount);
-          state.events.push({
-            id: createId("event"),
-            runId: state.run.id,
-            ts: nowIsoUtc(),
-            kind: "artifact-review",
-            payload,
-          });
-          // Bound reviewer retries. The reviewer is an LLM judge in a tight
-          // loop — without a cap, a flaky verdict can consume the whole step
-          // budget. After one retry, accept and let classification carry the
-          // notes as partial-success evidence.
-          if (payload.passed === false) {
-            state.reviewFailureCount++;
-            if (state.reviewFailureCount <= 1 && state.stepCount < config.maxSteps) {
-              state.stepCount++;
-              await flushTraceSink(state, config, signals);
-              continue;
-            }
-            state.events.push({
-              id: createId("event"),
-              runId: state.run.id,
-              ts: nowIsoUtc(),
-              kind: "thought-summary",
-              payload: {
-                reason: "Artifact review failed after retry budget",
-                problems: Array.isArray(payload.problems) ? payload.problems : [],
-              },
-            });
-            await flushTraceSink(state, config, signals);
-            break;
-          }
-        }
-        state.events.push({
-          id: createId("event"),
-          runId: state.run.id,
-          ts: new Date().toISOString(),
-          kind: "thought-summary",
-          payload: { summary: action.summary, kind: "finish" },
-        });
-        await flushTraceSink(state, config, signals);
-        break;
-      } else {
-        state.events.push({
-          id: createId("event"),
-          runId: state.run.id,
-          ts: new Date().toISOString(),
-          kind: "thought-summary",
-          payload: { summary: action.summary, kind: "finish" },
-        });
-        await flushTraceSink(state, config, signals);
+      if (finish.kind === "break") {
         break;
       }
+      action = finish.action;
     }
 
     // Execute the step

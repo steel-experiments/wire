@@ -21,7 +21,7 @@ export STEEL_API_KEY=sk_steel_...      # required — browser sessions
 export OPENAI_API_KEY=sk-...           # or ANTHROPIC_API_KEY
 ```
 
-If both LLM keys are present, you must specify which provider to use:
+If both LLM keys are present and no provider or inferable model is configured, Wire defaults to OpenAI. Specify a provider when you want Anthropic or want the choice recorded explicitly:
 
 ```bash
 export WIRE_PROVIDER=openai            # or anthropic

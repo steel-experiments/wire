@@ -29,7 +29,6 @@ import {
   prependHelpers,
   validateHelperSource,
 } from "../browser/helpers.js";
-import { execRaw } from "../browser/raw.js";
 import { classifyRun } from "./classify.js";
 import { detectAuthWall } from "../profiles/auth.js";
 import { redactJsonObject } from "../shared/redact.js";
@@ -38,57 +37,18 @@ import type { ActionExecutionContext } from "./actions.js";
 import { createTaskContract, type TaskContract } from "./contract.js";
 import type { CriticalPoint } from "./critical-points.js";
 import type { RunScore } from "../eval/scoring.js";
+import {
+  collectCdpMethods,
+  commandsIncludeInput,
+  commandsIncludeNavigation,
+  executeRawActionCommands,
+  executeWireActionsEnvelope,
+  isLikelyInteractionCode,
+  wireActionsSignal,
+} from "./action-dispatch.js";
 
-const MAX_CDP_BATCH_COMMANDS = 80;
 const DEFAULT_EXEC_TIMEOUT_MS = 12_000;
 const APPROVAL_CODE_EXCERPT_MAX = 2000;
-const NAVIGATION_CDP_METHODS = new Set(["Page.navigate", "Page.reload", "Page.navigateToHistoryEntry"]);
-const INPUT_CDP_METHODS = new Set([
-  "Input.dispatchMouseEvent",
-  "Input.dispatchKeyEvent",
-  "Input.dispatchTouchEvent",
-  "Input.dispatchDragEvent",
-  "Input.insertText",
-]);
-
-function commandsIncludeNavigation(
-  commands: ReadonlyArray<{ method?: unknown }>,
-): boolean {
-  return commands.some((c) => typeof c?.method === "string" && NAVIGATION_CDP_METHODS.has(c.method));
-}
-
-function commandsIncludeInput(commands: ReadonlyArray<{ method?: unknown }>): boolean {
-  return commands.some((c) => typeof c?.method === "string" && INPUT_CDP_METHODS.has(c.method));
-}
-
-function isLikelyInteractionCode(code: string): boolean {
-  return /\b(clickVisibleText|fillByLabel|dispatchEvent|MouseEvent|KeyboardEvent|PointerEvent|window\.open)\b|\.click\s*\(|\.submit\s*\(/u.test(code);
-}
-
-function summarizeRawCommand(cmd: { method: string; params?: JsonObject }): string {
-  const p = cmd.params ?? {};
-  if (cmd.method === "Input.dispatchMouseEvent") {
-    const type = typeof p.type === "string" ? p.type : "mouse";
-    const x = typeof p.x === "number" ? p.x : "?";
-    const y = typeof p.y === "number" ? p.y : "?";
-    const button = typeof p.button === "string" && p.button !== "none" ? ` ${p.button}` : "";
-    return `${cmd.method} ${type}${button} @ ${x},${y}`;
-  }
-  if (cmd.method === "Input.dispatchKeyEvent") {
-    const key = typeof p.key === "string" ? p.key : typeof p.code === "string" ? p.code : "key";
-    const type = typeof p.type === "string" ? p.type : "dispatch";
-    return `${cmd.method} ${type} ${key}`;
-  }
-  if (cmd.method === "Page.navigate") {
-    const url = typeof p.url === "string" ? redactJsonObject({ url: p.url }).url : undefined;
-    return url ? `${cmd.method} ${url}` : cmd.method;
-  }
-  return cmd.method;
-}
-
-function summarizeRawCommands(commands: Array<{ method: string; params?: JsonObject }>): string[] {
-  return commands.slice(0, 6).map(summarizeRawCommand);
-}
 
 type TabSnapshot = { id: string; url: string; title: string };
 
@@ -207,20 +167,6 @@ function buildProposedActionDetail(
   const methods = collectCdpMethods(action.payload as Record<string, unknown> | undefined);
   if (methods.length > 0) detail.cdpMethods = methods;
   return detail;
-}
-
-function collectCdpMethods(payload: Record<string, unknown> | undefined): string[] {
-  const methods: string[] = [];
-  const single = payload?.method;
-  if (typeof single === "string") methods.push(single);
-  const batch = payload?.commands;
-  if (Array.isArray(batch)) {
-    for (const cmd of batch) {
-      const m = (cmd as { method?: unknown })?.method;
-      if (typeof m === "string") methods.push(m);
-    }
-  }
-  return methods;
 }
 
 /** Static input: task identity and browser session. */
@@ -580,80 +526,12 @@ export async function executeStep(
         });
 
         if (result.ok && result.returnValue !== undefined) {
-          try {
-            const parsed = typeof result.returnValue === "string"
-              ? JSON.parse(result.returnValue)
-              : result.returnValue;
-            if (parsed && Array.isArray(parsed.wireActions)) {
-              const commands = parsed.wireActions.filter(
-                (a: unknown) => typeof (a as Record<string, unknown>)?.method === "string" &&
-                  (a as Record<string, unknown>).method !== "Runtime.evaluate",
-              ).slice(0, MAX_CDP_BATCH_COMMANDS);
-              if (commands.length > 0) {
-                const commandsRequested = parsed.wireActions.length;
-                const steelProvider = provider as unknown as {
-                  rawBatch?(sessionId: SessionId, commands: Array<{ method: string; params?: Record<string, unknown> }>): Promise<unknown>;
-                };
-                let cdpOk = true;
-                let cdpResult: unknown;
-                const cdpStart = Date.now();
-                if (steelProvider.rawBatch) {
-                  try {
-                    cdpResult = await steelProvider.rawBatch(state.sessionId, commands);
-                  } catch (err) {
-                    cdpOk = false;
-                    cdpResult = err instanceof Error ? err.message : String(err);
-                  }
-                } else {
-                  for (const cmd of commands) {
-                    try {
-                      const execRawOpts: { provider: BrowserProvider; sessionId: SessionId; method: string; params?: JsonObject } = {
-                        provider,
-                        sessionId: state.sessionId,
-                        method: (cmd as { method: string }).method,
-                      };
-                      const cmdParams = (cmd as { params?: JsonObject }).params;
-                      if (cmdParams) execRawOpts.params = cmdParams;
-                      cdpResult = await execRaw(execRawOpts);
-                    } catch (err) {
-                      cdpOk = false;
-                      cdpResult = err instanceof Error ? err.message : String(err);
-                      break;
-                    }
-                  }
-                }
-                state.events.push({
-                  id: createId("event"),
-                  runId: state.run.id,
-                  ts: nowIsoUtc(),
-                  kind: "code-result",
-                  payload: {
-                    ok: cdpOk,
-                    durationMs: Date.now() - cdpStart,
-                    source: "wireActions",
-                    commandsExecuted: commands.length,
-                    commandsRequested,
-                    truncated: commandsRequested > commands.length,
-                    returnValue: cdpResult as import("../shared/types.js").JsonValue,
-                  },
-                });
-              }
-            }
-          } catch { /* returnValue wasn't valid JSON — ignore */ }
+          await executeWireActionsEnvelope(state, provider, result.returnValue);
         }
 
-        const wireActionsSignal = (() => {
-          if (!result.ok || result.returnValue === undefined) return false;
-          try {
-            const parsed = typeof result.returnValue === "string"
-              ? JSON.parse(result.returnValue)
-              : result.returnValue;
-            return Array.isArray(parsed?.wireActions) &&
-              (commandsIncludeNavigation(parsed.wireActions) || commandsIncludeInput(parsed.wireActions));
-          } catch { return false; }
-        })();
+        const hasWireActionsSignal = result.ok && wireActionsSignal(result.returnValue);
         const wireBindingSignal = result.ok && result.wireEvents?.some((event) => event.action === "click");
-        if (isLikelyNavigationCode(code) || wireActionsSignal || wireBindingSignal || (result.ok && isLikelyInteractionCode(code))) {
+        if (isLikelyNavigationCode(code) || hasWireActionsSignal || wireBindingSignal || (result.ok && isLikelyInteractionCode(code))) {
           const obs = await observeAndRecord(state, provider);
           if (obs.authWallHit) authWallHit = true;
         }
@@ -724,66 +602,7 @@ export async function executeStep(
       }
 
       if (commands.length > 0) {
-        const commandsRequested = commands.length;
-        const commandsToRun = commands.slice(0, MAX_CDP_BATCH_COMMANDS);
-        state.events.push({
-          id: createId("event"),
-          runId: state.run.id,
-          ts: nowIsoUtc(),
-          kind: "code-exec",
-          payload: redactJsonObject({
-            rawCommands: commandsToRun.length,
-            methods: commandsToRun.map((c) => c.method),
-            summaries: summarizeRawCommands(commandsToRun),
-          }),
-        });
-
-        let lastResult: unknown;
-        let ok = true;
-        const startedAt = Date.now();
-
-        const steelProvider = provider as unknown as { rawBatch?(sessionId: SessionId, commands: Array<{ method: string; params?: Record<string, unknown> }>): Promise<unknown> };
-        if (commandsToRun.length > 1 && steelProvider.rawBatch) {
-          try {
-            lastResult = await steelProvider.rawBatch(state.sessionId, commandsToRun);
-          } catch (err) {
-            ok = false;
-            lastResult = err instanceof Error ? err.message : String(err);
-          }
-        } else {
-          for (const cmd of commandsToRun) {
-            try {
-              const rawOpts: { provider: BrowserProvider; sessionId: SessionId; method: string; params?: JsonObject } = {
-                provider,
-                sessionId: state.sessionId,
-                method: cmd.method,
-              };
-              if (cmd.params) rawOpts.params = cmd.params;
-              lastResult = await execRaw(rawOpts);
-            } catch (err) {
-              ok = false;
-              lastResult = err instanceof Error ? err.message : String(err);
-              break;
-            }
-          }
-        }
-
-        state.events.push({
-          id: createId("event"),
-          runId: state.run.id,
-          ts: nowIsoUtc(),
-          kind: "code-result",
-          payload: {
-            ok,
-            durationMs: Date.now() - startedAt,
-            source: "raw",
-            commandsRequested,
-            truncated: commandsRequested > commandsToRun.length,
-            ...(ok ? { commandsExecuted: commandsToRun.length } : {}),
-            returnValue: lastResult as unknown as import("../shared/types.js").JsonValue,
-          },
-        });
-
+        const { ok, commandsToRun } = await executeRawActionCommands(state, provider, commands);
         if (ok && (commandsIncludeNavigation(commandsToRun) || commandsIncludeInput(commandsToRun))) {
           const obs = await observeAndRecord(state, provider);
           if (obs.authWallHit) authWallHit = true;
