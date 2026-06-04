@@ -74,7 +74,7 @@ export function isNavigationOnlyResult(event: TraceEvent): boolean {
   if (typeof rv !== "object") return false;
   const keys = Object.keys(rv as Record<string, unknown>);
   if (keys.length === 0) return false;
-  const navKeys = new Set(["navigated", "navigatedTo", "url", "redirected", "loaded"]);
+  const navKeys = new Set(["navigated", "navigatedTo", "url", "redirected", "loaded", "clicked"]);
   return keys.every((k) => navKeys.has(k));
 }
 

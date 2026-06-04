@@ -292,7 +292,7 @@ function evidenceHead(text: string): string {
 // signals — {navigated:true}, {navigated:true,finalUrl:"…"}, {ok:true,…}.
 // These shouldn't shadow a real extraction recorded for the same URL.
 const NAV_ACK_KEYS = new Set([
-  "navigated", "ok", "saved", "finalUrl", "url", "redirected", "status",
+  "navigated", "clicked", "ok", "saved", "finalUrl", "url", "redirected", "status",
 ]);
 function isNavigationAck(returnValue: unknown): boolean {
   if (!returnValue || typeof returnValue !== "object" || Array.isArray(returnValue)) return false;
