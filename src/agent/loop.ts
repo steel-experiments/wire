@@ -869,15 +869,18 @@ function looksLikeWireCommand(returnValue: unknown): boolean {
   return Array.isArray((returnValue as Record<string, unknown>)["wireActions"]);
 }
 
-// The navigation-only marker the prompt prescribes: `return {navigated:true}`.
-// A nav ack records that navigation happened, never the agent's answer, so it
-// must not be surfaced as the result — even as a last-resort fallback. Leaving
-// it eligible produced a misleading non-answer when extraction came back empty.
-function looksLikeNavigationMarker(returnValue: unknown): boolean {
+// Interaction acks the prompt prescribes: `return {navigated:true}` after a
+// navigation, `return {clicked:true}` after a click. An ack records that an
+// action happened, never the agent's answer, so it must not be surfaced as the
+// result — even as a last-resort fallback. Leaving it eligible produced a
+// misleading non-answer (e.g. `{"clicked":true}` on a SEC extraction task) when
+// extraction came back empty.
+function looksLikeActionAck(returnValue: unknown): boolean {
   if (!returnValue || typeof returnValue !== "object" || Array.isArray(returnValue)) {
     return false;
   }
-  return (returnValue as Record<string, unknown>)["navigated"] === true;
+  const obj = returnValue as Record<string, unknown>;
+  return obj["navigated"] === true || obj["clicked"] === true;
 }
 
 export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | undefined {
@@ -902,7 +905,7 @@ export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | 
   const answerCandidates = candidates.filter(
     (event) =>
       !looksLikeWireCommand(event.payload.returnValue) &&
-      !looksLikeNavigationMarker(event.payload.returnValue),
+      !looksLikeActionAck(event.payload.returnValue),
   );
   const latestAnswerEvent =
     answerCandidates.find((event) =>

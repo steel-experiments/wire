@@ -27,6 +27,7 @@ import {
   executeStep,
   finalizeRun,
   shouldStop,
+  deriveRunResult,
 } from "./loop.js";
 import type { LoopState, StopConditions } from "./loop.js";
 import { ActionRegistry } from "./actions.js";
@@ -2944,10 +2945,30 @@ test("isNavigationOnlyResult identifies navigation-only return values", () => {
   assert.equal(isNavigationOnlyResult(makeEvent({ navigatedTo: "https://weather.com" })), true);
   assert.equal(isNavigationOnlyResult(makeEvent({ navigated: true })), true);
   assert.equal(isNavigationOnlyResult(makeEvent({ url: "https://example.com", redirected: "https://other.com" })), true);
+  // A bare click acknowledgement is an interaction ack, not an extracted answer.
+  assert.equal(isNavigationOnlyResult(makeEvent({ clicked: true })), true);
   assert.equal(isNavigationOnlyResult(makeEvent({ temperature: "43°F" })), false);
   assert.equal(isNavigationOnlyResult(makeEvent({ navigatedTo: "https://weather.com", temperature: "43°F" })), false);
+  assert.equal(isNavigationOnlyResult(makeEvent({ clicked: true, temperature: "43°F" })), false);
   assert.equal(isNavigationOnlyResult(makeEvent("just a string")), false);
   assert.equal(isNavigationOnlyResult(makeEvent(null)), false);
+});
+
+test("deriveRunResult never surfaces a bare click ack as the result", () => {
+  const mk = (returnValue: JsonValue): TraceEvent => ({
+    id: createId("event"),
+    runId: "run_test" as never,
+    ts: new Date().toISOString(),
+    kind: "code-result" as const,
+    payload: { ok: true, durationMs: 5, returnValue },
+  });
+  // A click ack as the only "result" must not become the answer (task mode → undefined).
+  assert.equal(deriveRunResult([mk({ clicked: true })], "task"), undefined);
+  // A real extraction after a click ack is preferred over the ack.
+  const withExtraction = [mk({ clicked: true }), mk({ filingDate: "2025-10-31", formType: "10-K" })];
+  const result = deriveRunResult(withExtraction, "task");
+  assert.ok(result?.includes("10-K"), `expected the extraction, got: ${result}`);
+  assert.ok(!result?.includes("clicked"), "click ack must not be surfaced");
 });
 
 // ---------------------------------------------------------------------------
