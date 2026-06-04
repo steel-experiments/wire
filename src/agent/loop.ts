@@ -958,11 +958,19 @@ export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | 
   return undefined;
 }
 
-export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): LoopResult {
+/**
+ * The run's final classification — the verdict classifyRun returns, with the
+ * maxSteps-without-a-real-answer downgrade applied. Pulled out of finalizeRun
+ * so other finalization steps (e.g. the skill-proposal gate) can read the same
+ * verdict the run will report instead of recomputing or guessing.
+ */
+export function computeFinalClassification(
+  state: LoopState,
+  options: FinalizeOptions = {},
+): ReturnType<typeof classifyRun> {
   const errorCount = state.events.filter((e) => e.kind === "error").length;
-
   const derivedResult = deriveRunResult(state.events, state.task.mode);
-  let classification = classifyRun({
+  const classification = classifyRun({
     mode: state.task.mode,
     events: state.events,
     successCriteria: state.task.successCriteria,
@@ -984,20 +992,33 @@ export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): Lo
       classification.kind === "ambiguous"
     )
   ) {
-    classification = {
+    return {
       kind: "agent-error",
       confidence: 0.9,
       notes: ["Maximum steps reached before producing a meaningful answer"],
     };
   }
 
+  return classification;
+}
+
+export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): LoopResult {
+  const derivedResult = deriveRunResult(state.events, state.task.mode);
+  const classification = computeFinalClassification(state, options);
+
   const outcomeSummary = generateOutcomeSummary(classification, state.events);
 
+  // A run is "succeeded" only when fully complete and "failed" when it
+  // accomplished nothing usable. A partial-success did real, usable work
+  // short of full completion — report that honestly rather than flattening it
+  // to the same "failed" the user sees for a hard error.
   let status: Run["status"] = "failed";
   if (options.awaitingApproval) {
     status = "awaiting-approval";
   } else if (classification.kind === "task-complete") {
     status = "succeeded";
+  } else if (classification.kind === "partial-success") {
+    status = "partial";
   }
 
   const finishedRun: Run = {

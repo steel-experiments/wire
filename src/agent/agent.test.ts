@@ -858,7 +858,7 @@ test("finalizeRun keeps task-mode observation-only runs as partial-success", () 
 
   const result = finalizeRun(state);
 
-  assert.equal(result.run.status, "failed");
+  assert.equal(result.run.status, "partial");
   assert.equal(result.run.result, undefined);
   assert.equal(result.classification.kind, "partial-success");
   assert.ok(result.outcomeSummary.includes("partial-success"));
@@ -1237,6 +1237,127 @@ test("executeTask proposes domain skill updates from reusable trace evidence", a
   }
 });
 
+test("executeTask does not propose a skill from a failed run", async () => {
+  // A skill captures durable, working browser knowledge. A run that only
+  // failed must not mint one, even if the distiller would happily produce a
+  // proposal from the trace.
+  const task = makeTask({ objective: "Try something that never works" });
+  const skillDir = await mkdtemp(join(tmpdir(), "wire-agent-skills-"));
+  const sessionId = makeSessionId();
+  const provider = createMockProvider({
+    async createSession() {
+      return { id: sessionId, provider: "custom", createdAt: new Date().toISOString(), status: "ready" };
+    },
+    async exec(): Promise<BrowserExecResult> {
+      return { ok: false, durationMs: 5, stderr: "nope" };
+    },
+    async stopSession() {},
+  });
+
+  // Always willing to propose a skill — so the only thing that can suppress the
+  // proposal is the run-classification gate.
+  const eagerSkillProposer = {
+    model: "test-model",
+    async chat(messages: { role?: string; content: string | unknown }[]) {
+      const isDistill = messages.some(
+        (m) => typeof m.content === "string" && m.content.includes("skill-distillation agent"),
+      );
+      if (isDistill) {
+        return {
+          content: JSON.stringify({
+            hostname: "example.com",
+            facts: ["something"],
+            selectors: [],
+            routes: [],
+            waits: [],
+            traps: [],
+            confidence: 0.9,
+          }),
+          model: "test-model",
+        };
+      }
+      return { content: "NONE", model: "test-model" };
+    },
+  };
+
+  try {
+    const result = await executeTask(
+      task,
+      { provider, policyEngine: createMockPolicyEngine(), maxSteps: 8, skillDir, llmProvider: eagerSkillProposer },
+      async () => ({ kind: "exec", summary: "Probe that fails", payload: { code: "return doomedThing()" } }),
+    );
+
+    assert.ok(
+      ["site-error", "agent-error"].includes(result.run.classification?.kind ?? ""),
+      `expected a failure classification, got ${result.run.classification?.kind}`,
+    );
+    const proposal = result.events.find((event) => event.kind === "skill-proposal");
+    assert.equal(proposal, undefined, "a failed run must not propose a skill");
+  } finally {
+    await rm(skillDir, { recursive: true, force: true });
+  }
+});
+
+test("executeTask leaves the session open when the agent finishes with keepSessionOpen", async () => {
+  const task = makeTask({ objective: "Do the thing, then keep the session open" });
+  const sessionId = makeSessionId();
+  let stopCalled = false;
+  const provider = createMockProvider({
+    async createSession() {
+      return { id: sessionId, provider: "custom", createdAt: new Date().toISOString(), status: "ready" };
+    },
+    async exec(): Promise<BrowserExecResult> {
+      return { ok: true, durationMs: 5, returnValue: { answer: "done" } };
+    },
+    async stopSession() {
+      stopCalled = true;
+    },
+  });
+
+  await executeTask(
+    task,
+    { provider, policyEngine: createMockPolicyEngine(), maxSteps: 2 },
+    async (state) => {
+      if (state.stepCount === 0) {
+        return { kind: "exec", summary: "Produce answer", payload: { code: "return { answer: 'done' }" } };
+      }
+      return { kind: "finish", summary: "Done — leaving browser open", payload: { keepSessionOpen: true } };
+    },
+  );
+
+  assert.equal(stopCalled, false, "session should stay open when the agent requests keepSessionOpen");
+});
+
+test("executeTask stops the session when the agent finishes without keepSessionOpen", async () => {
+  const task = makeTask({ objective: "Do the thing and finish" });
+  const sessionId = makeSessionId();
+  let stopCalled = false;
+  const provider = createMockProvider({
+    async createSession() {
+      return { id: sessionId, provider: "custom", createdAt: new Date().toISOString(), status: "ready" };
+    },
+    async exec(): Promise<BrowserExecResult> {
+      return { ok: true, durationMs: 5, returnValue: { answer: "done" } };
+    },
+    async stopSession() {
+      stopCalled = true;
+    },
+  });
+
+  await executeTask(
+    task,
+    { provider, policyEngine: createMockPolicyEngine(), maxSteps: 2 },
+    async (state) => {
+      if (state.stepCount === 0) {
+        return { kind: "exec", summary: "Produce answer", payload: { code: "return { answer: 'done' }" } };
+      }
+      return { kind: "finish", summary: "Done" };
+    },
+  );
+
+  assert.equal(stopCalled, true, "session should close normally when keepSessionOpen is not requested");
+});
+
 test("executeTask loads matched skills into the live agent prompt", async () => {
   const task = makeTask({ objective: "Inspect example pricing" });
   const skillDir = await mkdtemp(join(tmpdir(), "wire-agent-skills-"));
@@ -1445,7 +1566,7 @@ test("executeTask persists a task note artifact when finishing without extracted
     },
   );
 
-  assert.equal(result.run.status, "failed");
+  assert.equal(result.run.status, "partial");
   assert.equal(result.classification.kind, "partial-success");
   const noteArtifact = result.events.find((event) =>
     event.kind === "artifact" &&
@@ -1747,7 +1868,7 @@ test("executeTask does not record finish when artifact review still fails after 
   );
 
   assert.equal(execCount, 2);
-  assert.equal(result.run.status, "failed");
+  assert.equal(result.run.status, "partial");
   assert.equal(result.classification.kind, "partial-success");
   assert.equal(result.events.some((event) =>
     event.kind === "thought-summary" && event.payload.kind === "finish"
@@ -3472,6 +3593,49 @@ test("executeTask does not bail when same code returns different results", async
   assert.ok(execCallCount >= 7, `expected the loop to keep going, got ${execCallCount} exec calls`);
 });
 
+test("executeTask does not bail on a progressing watch loop (stable shape, changing values)", async () => {
+  // The elgoog 2048 case: the agent re-runs the same monitoring probe to poll a
+  // live, climbing score. The result shape is stable but the values advance
+  // every turn — real progress, not spinning. The sig-only backstop must not
+  // kill it.
+  const task = makeTask({ objective: "Watch a live score climb" });
+  const sessionId = makeSessionId();
+  let execCallCount = 0;
+  const provider = createMockProvider({
+    async createSession() {
+      return { id: sessionId, provider: "custom", createdAt: new Date().toISOString(), status: "ready" };
+    },
+    async exec(): Promise<BrowserExecResult> {
+      execCallCount++;
+      return {
+        ok: true,
+        durationMs: 10,
+        returnValue: { score: execCallCount * 1000, best: 0, running: true },
+      };
+    },
+    async stopSession() {},
+  });
+
+  const result = await executeTask(
+    task,
+    { provider, policyEngine: createMockPolicyEngine(), maxSteps: 20 },
+    async () => ({
+      kind: "exec",
+      summary: "Poll the live score",
+      payload: { code: "return readScore()" },
+    }),
+  );
+
+  // Should run the full step budget, not bail at the sig-only threshold (8).
+  assert.ok(execCallCount >= 15, `expected the watch loop to keep going, got ${execCallCount} exec calls`);
+  const bailed = result.events.find((e) =>
+    e.kind === "thought-summary" &&
+    typeof e.payload["reason"] === "string" &&
+    /attempted .+ times in a row/iu.test(e.payload["reason"] as string),
+  );
+  assert.ok(!bailed, "sig-only backstop should not fire on a progressing watch loop");
+});
+
 test("finalizeRun skips wireActions envelopes when picking final result", () => {
   const task = makeTask();
   const state = createLoopState(task, makeSessionId());
@@ -3528,6 +3692,32 @@ test("finalizeRun returns no result when only wireActions envelope exists", () =
   const result = finalizeRun(state);
   // wireActions envelopes are never valid answers — even as a fallback.
   assert.equal(result.run.result, undefined, "wireActions envelope should not be used as result");
+});
+
+test("finalizeRun reports partial-success as status 'partial', not 'failed'", () => {
+  const task = makeTask({ objective: "Mixed success/failure run" });
+  const state = createLoopState(task, makeSessionId());
+
+  for (let i = 0; i < 3; i++) {
+    state.events.push({
+      id: createId("event"),
+      runId: state.run.id,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, durationMs: 5, returnValue: { step: i } },
+    });
+  }
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: new Date().toISOString(),
+    kind: "code-result",
+    payload: { ok: false, durationMs: 5, stderr: "boom" },
+  });
+
+  const result = finalizeRun(state);
+  assert.equal(result.run.classification?.kind, "partial-success");
+  assert.equal(result.run.status, "partial", "partial-success must not be flattened to 'failed'");
 });
 
 test("finalizeRun skips raw-action CDP results when picking final result", () => {

@@ -90,6 +90,7 @@ export const runStatusSchema = z.enum([
   "running",
   "awaiting-approval",
   "succeeded",
+  "partial",
   "failed",
   "aborted",
 ]);
