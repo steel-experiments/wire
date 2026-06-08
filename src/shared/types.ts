@@ -14,6 +14,7 @@ export type RunClassificationKind =
   | "task-complete"
   | "partial-success"
   | "blocked-auth"
+  | "blocked-policy"
   | "site-error"
   | "agent-error"
   | "infra-error"
@@ -167,6 +168,19 @@ export interface RunClassification {
   notes?: string[];
 }
 
+// Run-level provenance for the final result: where it came from and the
+// evidence that backs it. Lets a programmatic caller (e.g. a research agent
+// citing Wire's output) trace a returned value back to a page and artifacts
+// rather than trusting a bare string.
+export interface ResultProvenance {
+  // URL of the page in view when the result was produced.
+  url?: string;
+  // Evidence artifacts (screenshots, extracted JSON/HTML) recorded by the run.
+  artifactIds: ArtifactId[];
+  // Trace event that produced the result value (a code-result, typically).
+  sourceEventId?: TraceEventId;
+}
+
 export interface Run {
   id: RunId;
   taskId: TaskId;
@@ -183,6 +197,7 @@ export interface Run {
   reviewFailureCount?: number;
   result?: string;
   resultPayload?: JsonValue;
+  resultProvenance?: ResultProvenance;
   outcomeSummary?: string;
   classification?: RunClassification;
 }

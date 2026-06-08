@@ -1,7 +1,5 @@
-import type { ActionId, PolicyDecision } from "../shared/types.js";
 import type { SessionConfig } from "../shared/types.js";
-import { createPolicyEngine, type PolicyEngine } from "../policy/engine.js";
-import type { PolicyAction } from "../policy/rules.js";
+import { autoApprovingEngine, createPolicyEngine, type PolicyEngine } from "../policy/engine.js";
 import { createSteelActionHandlers, createSteelProvider } from "../providers/browser/steel.js";
 import type { LLMProvider } from "../providers/llm/openai.js";
 import { createOpenAIProvider } from "../providers/llm/openai.js";
@@ -30,15 +28,6 @@ export interface RunOptions {
   keepSessionOpen?: boolean;
   traceLlmMessages?: boolean;
   criticalPointReview?: boolean;
-}
-
-function autoApprovingEngine(inner: PolicyEngine): PolicyEngine {
-  return {
-    check(actionId: ActionId, action: PolicyAction): PolicyDecision {
-      const decision = inner.check(actionId, action);
-      return decision.result === "require-approval" ? { ...decision, result: "allow" as const } : decision;
-    },
-  };
 }
 
 export function resolveSkillDir(

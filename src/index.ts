@@ -5,7 +5,7 @@ export * from "./browser/bridge.js"; export * from "./browser/session.js"; expor
 export * from "./providers/browser/steel.js"; export * from "./providers/llm/openai.js"; export * from "./providers/llm/anthropic.js";
 export * from "./policy/rules.js"; export * from "./policy/engine.js"; export * from "./policy/approvals.js";
 export * from "./skills/parser.js"; export * from "./skills/matcher.js"; export * from "./skills/loader.js"; export * from "./skills/promote.js";
-export * from "./trace/replay.js"; export * from "./agent/context.js"; export * from "./agent/classify.js"; export * from "./agent/loop.js"; export * from "./agent/planning.js"; export * from "./agent/runtime.js"; export * from "./agent/branching.js";
+export * from "./trace/replay.js"; export * from "./agent/context.js"; export * from "./agent/classify.js"; export * from "./agent/loop.js"; export * from "./agent/planning.js"; export * from "./agent/runtime.js"; export * from "./agent/branching.js"; export * from "./agent/embedded.js";
 export * from "./experiments/hypotheses.js"; export * from "./experiments/summaries.js"; export * from "./profiles/auth.js";
 export * from "./cli/args.js"; export * from "./cli/runner.js"; export * from "./cli/main.js"; export * from "./cli/output.js"; export * from "./cli/errors.js";
 export * from "./ui/review.js"; export * from "./eval/metrics.js"; export * from "./eval/harness.js"; export * from "./eval/bench.js";

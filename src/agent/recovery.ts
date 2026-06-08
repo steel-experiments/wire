@@ -12,6 +12,7 @@ export interface RecoverySignals {
   antiBotRecoveryAttempted: boolean;
   maxStepsReached: boolean;
   awaitingApproval: boolean;
+  blockedByPolicy: boolean;
   userCancelled: boolean;
   pendingApproval: LoopResult["pendingApproval"];
   pendingAction: LoopResult["pendingAction"];

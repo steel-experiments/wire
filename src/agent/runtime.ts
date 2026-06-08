@@ -1,3 +1,4 @@
+import type { ZodTypeAny } from "zod";
 import type {
   ArtifactId,
   BrowserSession,
@@ -27,10 +28,7 @@ import type { LLMProvider } from "../providers/llm/openai.js";
 
 import {
   createLoopState,
-  deriveRunResult,
   executeStep,
-  finalizeRun,
-  computeFinalClassification,
   shouldStop,
   type LoopState,
   type LoopResult,
@@ -42,23 +40,17 @@ import { registerActionKind } from "./llm-parse.js";
 import {
   latestError,
   latestCodeResult,
-  hasRecordedTaskArtifact,
-  buildFailureSummary,
   isRecoverableStepError,
   appendExtractedResultArtifact,
-  appendTaskNoteArtifact,
   execActionSignature,
   codeResultDigest,
   codeResultShape,
   isNoProgressResult,
 } from "./state-helpers.js";
 import { ActionRegistry, type ActionHandler } from "./actions.js";
-import { updateSkillStatsFromRun } from "../skills/stats.js";
 import {
   contractCreatedPayload,
   createTaskContract,
-  contractValidationPayload,
-  validateTaskContract,
 } from "./contract.js";
 import { tracingProvider, type LlmTraceOptions } from "./llm-trace.js";
 import { syncMatchedSkills } from "./skill-context.js";
@@ -71,8 +63,9 @@ import {
 import { tryAntiBotRecovery } from "./recovery.js";
 import { handleFinishAction } from "./finish-flow.js";
 import { progressLedgerFromEvents } from "./progress-ledger.js";
-import { appendSkillProposalEvents } from "./skill-proposals.js";
 import { createStartupFailureResult } from "./startup-failure.js";
+import { withApprovalResolution, withWallClockTimeout } from "./run-limits.js";
+import { finalizeExecution } from "./finalize.js";
 
 export { skillGuidance } from "./skill-context.js";
 export { latestExtractionsPerUrl } from "./evidence.js";
@@ -126,6 +119,28 @@ export interface RuntimeConfig {
   actionHandlers?: ActionHandler[];
   keepSessionOpen?: boolean;
   cancelSignal?: AbortSignal;
+  // How to resolve an action the policy engine gates with `require-approval`
+  // when no human is present. "pause" (default) breaks the run with
+  // `awaiting-approval` for a caller to approve+resume — correct for the
+  // attended CLI. "deny" ends the run with a terminal `blocked-policy`
+  // classification instead of pausing — correct for unattended/embedded
+  // callers. "allow" auto-grants the gate (equivalent to CLI `--yes`).
+  onApprovalRequired?: "pause" | "deny" | "allow";
+  // Hard wall-clock deadline for the whole run, in milliseconds. When the
+  // deadline passes the run is aborted through the same path as
+  // `cancelSignal`; the outcome is classified as a partial-success (if a
+  // usable result exists) or infra-error. Independent of `maxSteps`.
+  maxWallClockMs?: number;
+  // Whether a successful run may write skill proposals/promotions to
+  // `skillDir`. "auto" (default) keeps the current behavior. "off" disables
+  // all skill writes while leaving skill *loading* intact — required for
+  // unattended/concurrent callers that must not mutate a shared skill store.
+  skillPromotion?: "auto" | "off";
+  // Optional schema the final result must satisfy. When set, a finish whose
+  // derived result doesn't validate is rejected and the agent is reprompted
+  // with the validation error (bounded); a run that never conforms is
+  // classified `ambiguous`. Validation is enforced for `task` mode.
+  outputSchema?: ZodTypeAny;
   pauseToken?: PauseToken;
   userMessageInbox?: UserMessageInbox;
   existingSession?: BrowserSession;
@@ -167,27 +182,33 @@ export async function executeTask(
   config: RuntimeConfig,
   agentTurn?: AgentTurnFn,
 ): Promise<LoopResult> {
-  config = withResolvedSkillDir(config);
-  const registry = buildActionRegistry(config);
-  const turn = agentTurn ?? defaultAgentTurn(config.llmProvider, config.maxSteps, registry, config);
+  config = withApprovalResolution(withResolvedSkillDir(config));
+  const timeout = withWallClockTimeout(config);
+  config = timeout.config;
+  try {
+    const registry = buildActionRegistry(config);
+    const turn = agentTurn ?? defaultAgentTurn(config.llmProvider, config.maxSteps, registry, config);
 
-  if (isCancelled(config)) {
-    return executeWithState(task, config, turn, undefined, createCancelledState(task, config), undefined, registry);
-  }
-
-  let session: BrowserSession;
-  if (config.existingSession) {
-    session = config.existingSession;
-  } else {
-    try {
-      session = await createBrowserSession(config.provider, config.sessionInput);
-      await config.onSessionCreated?.(session);
-    } catch (err) {
-      return createStartupFailureResult(task, config, err);
+    if (isCancelled(config)) {
+      return await executeWithState(task, config, turn, undefined, createCancelledState(task, config), undefined, registry);
     }
-  }
 
-  return executeWithState(task, config, turn, session, undefined, undefined, registry);
+    let session: BrowserSession;
+    if (config.existingSession) {
+      session = config.existingSession;
+    } else {
+      try {
+        session = await createBrowserSession(config.provider, config.sessionInput);
+        await config.onSessionCreated?.(session);
+      } catch (err) {
+        return await createStartupFailureResult(task, config, err);
+      }
+    }
+
+    return await executeWithState(task, config, turn, session, undefined, undefined, registry);
+  } finally {
+    timeout.cleanup();
+  }
 }
 
 export async function resumeTask(
@@ -195,7 +216,9 @@ export async function resumeTask(
   config: RuntimeConfig,
   agentTurn?: AgentTurnFn,
 ): Promise<LoopResult> {
-  config = withResolvedSkillDir(config);
+  config = withApprovalResolution(withResolvedSkillDir(config));
+  const timeout = withWallClockTimeout(config);
+  config = timeout.config;
   const registry = buildActionRegistry(config);
   const turn = agentTurn ?? defaultAgentTurn(config.llmProvider, config.maxSteps, registry, config);
   const state: LoopState = {
@@ -214,9 +237,14 @@ export async function resumeTask(
     reviewFailureCount: checkpoint.reviewFailureCount ?? 0,
     progressLedger: progressLedgerFromEvents(checkpoint.events),
     extractionRepromptCount: 0,
+    schemaRepromptCount: 0,
   };
 
-  return executeWithState(checkpoint.task, config, turn, undefined, state, checkpoint.pendingAction, registry);
+  try {
+    return await executeWithState(checkpoint.task, config, turn, undefined, state, checkpoint.pendingAction, registry);
+  } finally {
+    timeout.cleanup();
+  }
 }
 
 function buildActionRegistry(config: RuntimeConfig): ActionRegistry {
@@ -232,12 +260,13 @@ function buildActionRegistry(config: RuntimeConfig): ActionRegistry {
 
 // initializeState — setup, initial observation, skill sync, approval resume
 
-interface LoopSignals {
+export interface LoopSignals {
   policyDenied: boolean;
   authWallHit: boolean;
   antiBotRecoveryAttempted: boolean;
   maxStepsReached: boolean;
   awaitingApproval: boolean;
+  blockedByPolicy: boolean;
   userCancelled: boolean;
   stopReason?: string;
   pendingApproval: LoopResult["pendingApproval"];
@@ -252,6 +281,7 @@ function createLoopSignals(): LoopSignals {
     antiBotRecoveryAttempted: false,
     maxStepsReached: false,
     awaitingApproval: false,
+    blockedByPolicy: false,
     userCancelled: false,
     pendingApproval: undefined,
     pendingAction: undefined,
@@ -685,6 +715,14 @@ async function runMainLoop(
       await flushTraceSink(state, config, signals);
 
       if (stepResult.pendingApproval) {
+        // Unattended caller: don't pause for a human that isn't there. End the
+        // run with a precise blocked-policy outcome (the approval-request event
+        // is already in the trace as evidence of what was gated).
+        if (config.onApprovalRequired === "deny") {
+          signals.blockedByPolicy = true;
+          signals.stopReason = "Action required approval; denied in unattended mode";
+          break;
+        }
         signals.awaitingApproval = true;
         signals.pendingApproval = stepResult.pendingApproval;
         signals.pendingAction = stepResult.pendingAction;
@@ -765,132 +803,6 @@ async function runMainLoop(
   }
 }
 
-// finalizeExecution — artifact persistence, skill proposals, finalization
-
-function contractHasChecks(state: LoopState): boolean {
-  return state.contract.mustVisit.length > 0 ||
-    state.contract.mustMention.length > 0 ||
-    state.contract.mustProduce !== undefined ||
-    state.contract.mustNotContain.length > 0;
-}
-
-function latestEventIndex(state: LoopState, predicate: (event: TraceEvent) => boolean): number {
-  for (let i = state.events.length - 1; i >= 0; i--) {
-    if (predicate(state.events[i]!)) return i;
-  }
-  return -1;
-}
-
-function recordFinalContractCheckIfNeeded(state: LoopState): void {
-  if (state.task.mode !== "task" || !contractHasChecks(state)) return;
-
-  const latestValidation = latestEventIndex(
-    state,
-    (event) => event.kind === "contract-check" && event.payload.phase === "validated",
-  );
-  const latestEvidence = latestEventIndex(
-    state,
-    (event) => event.kind === "code-result" || event.kind === "artifact" || event.kind === "observation",
-  );
-  if (latestValidation >= latestEvidence && latestValidation !== -1) return;
-
-  const validation = validateTaskContract(
-    state.contract,
-    state.events,
-    deriveRunResult(state.events, state.task.mode),
-  );
-  state.events.push({
-    id: createId("event"),
-    runId: state.run.id,
-    ts: nowIsoUtc(),
-    kind: "contract-check",
-    payload: contractValidationPayload(validation),
-  });
-}
-
-async function finalizeExecution(
-  state: LoopState,
-  config: RuntimeConfig,
-  signals: LoopSignals,
-): Promise<LoopResult> {
-  const finalizeOptions: {
-    authWallHit: boolean;
-    policyDenied: boolean;
-    budgetExhausted: false;
-    maxStepsReached: boolean;
-    awaitingApproval: boolean;
-    userCancelled: boolean;
-    stopReason?: string;
-  } = {
-    authWallHit: signals.authWallHit,
-    policyDenied: signals.policyDenied,
-    budgetExhausted: false,
-    maxStepsReached: signals.maxStepsReached,
-    awaitingApproval: signals.awaitingApproval,
-    userCancelled: signals.userCancelled,
-  };
-  if (signals.stopReason !== undefined) {
-    finalizeOptions.stopReason = signals.stopReason;
-  }
-
-  if (signals.pendingApproval) {
-    const approvalOptions: {
-      authWallHit: boolean;
-      policyDenied: boolean;
-      budgetExhausted: false;
-      maxStepsReached: boolean;
-      awaitingApproval: boolean;
-      pendingApproval: NonNullable<typeof signals.pendingApproval>;
-      stopReason?: string;
-      pendingAction?: ProposedAction;
-    } = {
-      ...finalizeOptions,
-      pendingApproval: signals.pendingApproval,
-    };
-    if (signals.pendingAction) {
-      approvalOptions.pendingAction = signals.pendingAction;
-    }
-    return finalizeRun(state, approvalOptions);
-  }
-
-  if (
-    state.task.mode === "task" &&
-    !hasRecordedTaskArtifact(state)
-  ) {
-    const failureSummary = buildFailureSummary(state);
-    if (failureSummary) {
-      appendTaskNoteArtifact(state, failureSummary);
-    }
-  }
-
-  recordFinalContractCheckIfNeeded(state);
-
-  // Only mint a skill from a run that actually accomplished something. A skill
-  // captures durable, working browser knowledge; proposing one from a run
-  // classified as an error or dead-end (agent-error, site-error, blocked-auth,
-  // ambiguous, …) would bake a broken trajectory into a reusable skill.
-  const finalClassification = computeFinalClassification(state, finalizeOptions);
-  if (
-    finalClassification.kind === "task-complete" ||
-    finalClassification.kind === "partial-success"
-  ) {
-    await appendSkillProposalEvents(state, config.skillDir, config.llmProvider, {
-      completed: finalClassification.kind === "task-complete",
-    });
-  }
-  await flushTraceSink(state, config, signals);
-
-  const result = finalizeRun(state, finalizeOptions);
-
-  if (config.skillDir) {
-    try {
-      await updateSkillStatsFromRun(config.skillDir, result);
-    } catch { /* best-effort — stats loss must never affect run outcome */ }
-  }
-
-  return result;
-}
-
 // executeWithState — orchestrator
 
 async function executeWithState(
@@ -935,7 +847,7 @@ async function executeWithState(
     }
   }
 
-  return finalizeExecution(state, config, signals);
+  return finalizeExecution(state, config, signals, flushTraceSink);
 }
 
 // Re-export planning types for convenience

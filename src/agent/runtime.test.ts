@@ -2,6 +2,7 @@
 // ABOUTME: existingSession, and LLM usage aggregation.
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
+import { z } from "zod";
 import {
   executeTask,
   skillGuidance,
@@ -1474,4 +1475,208 @@ test("artifact reviewer retries exactly once before accepting (Change D)", async
   // Initial reviewer call + exactly one retry (cap reached). Not 1 (no
   // retry), not 3+ (cap broken).
   assert.equal(reviewerCalls, 2, `reviewer must fire initial + 1 retry; got ${reviewerCalls}`);
+});
+
+// ---------------------------------------------------------------------------
+// Embedded mode (Phase 1): unattended approval resolution, wall-clock timeout,
+// skill-write control. See docs/embedded-mode.md.
+// ---------------------------------------------------------------------------
+
+/** Policy engine that gates every exec action behind approval. */
+function approvalGatingPolicy(): PolicyEngine {
+  return {
+    check: (actionId, _action) => ({
+      id: createId("policy"),
+      actionId,
+      result: "require-approval" as const,
+    }),
+  };
+}
+
+/** LLM that proposes a single exec, then finishes. */
+function execThenFinishLlm(): LLMProvider {
+  let calls = 0;
+  return {
+    model: "test-model",
+    async chat(): Promise<ChatResponse> {
+      calls++;
+      const action = calls === 1
+        ? { kind: "exec", summary: "Read the page", payload: { code: "return document.title" } }
+        : { kind: "finish", summary: "Done" };
+      return { content: JSON.stringify(action), model: "test-model" };
+    },
+  };
+}
+
+test("onApprovalRequired 'deny' ends the run with blocked-policy instead of pausing", async () => {
+  const config = makeConfig({
+    policyEngine: approvalGatingPolicy(),
+    llmProvider: execThenFinishLlm(),
+    onApprovalRequired: "deny",
+    maxSteps: 5,
+  });
+
+  const result = await executeTask(makeTask(), config);
+
+  assert.equal(result.classification.kind, "blocked-policy", "should classify as blocked-policy");
+  assert.equal(result.run.status, "failed", "blocked-policy run is terminal, not awaiting-approval");
+  assert.equal(result.pendingApproval, undefined, "must not surface a pending approval");
+  assert.ok(
+    result.events.some((e) => e.kind === "approval-request"),
+    "the gated action should still be recorded as evidence",
+  );
+});
+
+test("onApprovalRequired 'allow' auto-grants the gate and proceeds", async () => {
+  const config = makeConfig({
+    policyEngine: approvalGatingPolicy(),
+    llmProvider: execThenFinishLlm(),
+    onApprovalRequired: "allow",
+    maxSteps: 5,
+  });
+
+  const result = await executeTask(makeTask(), config);
+
+  assert.notEqual(result.run.status, "awaiting-approval", "auto-allow must not pause the run");
+  assert.notEqual(result.classification.kind, "blocked-policy");
+  assert.ok(
+    result.events.some((e) => e.kind === "code-result"),
+    "the gated exec should have executed",
+  );
+});
+
+test("default approval handling still pauses with awaiting-approval", async () => {
+  const config = makeConfig({
+    policyEngine: approvalGatingPolicy(),
+    llmProvider: execThenFinishLlm(),
+    maxSteps: 5,
+  });
+
+  const result = await executeTask(makeTask(), config);
+
+  assert.equal(result.run.status, "awaiting-approval", "default behavior is unchanged");
+  assert.ok(result.pendingApproval, "should surface the pending approval for a human to resume");
+});
+
+test("maxWallClockMs aborts a slow run with a timeout classification", async () => {
+  const slowLlm: LLMProvider = {
+    model: "test-model",
+    async chat(): Promise<ChatResponse> {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      return { content: JSON.stringify({ kind: "exec", summary: "slow", payload: { code: "return 1" } }), model: "test-model" };
+    },
+  };
+
+  const config = makeConfig({ llmProvider: slowLlm, maxWallClockMs: 10, maxSteps: 50 });
+
+  const result = await executeTask(makeTask(), config);
+
+  // The deadline must terminate the run (no hang) and classify it as a
+  // timeout: partial-success if any evidence accumulated, infra-error if not.
+  assert.ok(
+    (result.classification.notes ?? []).some((n) => /wall-clock timeout/i.test(n)),
+    "classification should note the wall-clock timeout",
+  );
+  assert.ok(
+    result.classification.kind === "partial-success" || result.classification.kind === "infra-error",
+    `timeout should yield partial-success or infra-error, got ${result.classification.kind}`,
+  );
+  assert.notEqual(result.run.status, "awaiting-approval");
+  assert.notEqual(result.run.status, "running");
+});
+
+test("skillPromotion 'off' suppresses skill-proposal writes but leaves the run intact", async () => {
+  let calls = 0;
+  const mockLlm: LLMProvider = {
+    model: "test-model",
+    async chat(): Promise<ChatResponse> {
+      calls++;
+      const action = calls === 1
+        ? { kind: "exec", summary: "Extract", payload: { code: "wire:extract\nreturn {answer: 'forty-two'}" } }
+        : { kind: "finish", summary: "Done — the answer is forty-two" };
+      return { content: JSON.stringify(action), model: "test-model" };
+    },
+  };
+  const provider: BrowserProvider = {
+    createSession: async () => makeSession(),
+    getSession: async () => makeSession(),
+    stopSession: async () => {},
+    observe: async () => makeObservation(),
+    exec: async () => ({ ok: true, durationMs: 1, returnValue: { answer: "forty-two" } }),
+  };
+
+  const config = makeConfig({
+    provider,
+    llmProvider: mockLlm,
+    skillDir: "/tmp/wire-embedded-skill-test-does-not-exist",
+    skillPromotion: "off",
+    maxSteps: 6,
+  });
+
+  const result = await executeTask(makeTask(), config);
+
+  assert.ok(
+    !result.events.some((e) => e.kind === "skill-proposal"),
+    "skillPromotion 'off' must emit no skill-proposal events",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Embedded mode (Phase 2): output schema validation + result provenance.
+// ---------------------------------------------------------------------------
+
+/** Provider + LLM that extract a structured {answer} object, then finish. */
+function structuredExtractConfig(overrides: Partial<RuntimeConfig> = {}): RuntimeConfig {
+  let calls = 0;
+  const mockLlm: LLMProvider = {
+    model: "test-model",
+    async chat(): Promise<ChatResponse> {
+      calls++;
+      const action = calls === 1
+        ? { kind: "exec", summary: "Extract", payload: { code: "wire:extract\nreturn {answer: 'forty-two'}" } }
+        : { kind: "finish", summary: "Done — the answer is forty-two" };
+      return { content: JSON.stringify(action), model: "test-model" };
+    },
+  };
+  const provider: BrowserProvider = {
+    createSession: async () => makeSession(),
+    getSession: async () => makeSession(),
+    stopSession: async () => {},
+    observe: async () => makeObservation(),
+    exec: async () => ({ ok: true, durationMs: 1, returnValue: { answer: "forty-two" } }),
+  };
+  return makeConfig({ provider, llmProvider: mockLlm, maxSteps: 8, ...overrides });
+}
+
+test("outputSchema accepts a conforming result and records provenance", async () => {
+  const schema = z.object({ answer: z.string() });
+  const result = await executeTask(makeTask(), structuredExtractConfig({ outputSchema: schema }));
+
+  assert.ok(
+    !result.events.some((e) => e.kind === "thought-summary" && e.payload.kind === "output-schema-unmet"),
+    "a conforming result should not trigger a schema-unmet reprompt",
+  );
+  assert.equal(result.classification.kind === "ambiguous", false, "conforming result must not be schema-ambiguous");
+  assert.ok(schema.safeParse(result.run.resultPayload).success, "resultPayload should satisfy the schema");
+
+  const provenance = result.run.resultProvenance;
+  assert.ok(provenance, "a result should carry provenance");
+  assert.equal(provenance!.url, "https://example.com", "provenance should cite the page URL");
+  assert.ok(provenance!.artifactIds.length > 0, "provenance should list evidence artifacts");
+  assert.ok(provenance!.sourceEventId, "provenance should point at the producing event");
+});
+
+test("outputSchema rejects a non-conforming result, reprompts, then classifies ambiguous", async () => {
+  const schema = z.object({ price: z.number() });
+  const result = await executeTask(makeTask(), structuredExtractConfig({ outputSchema: schema, maxSteps: 12 }));
+
+  const schemaEvents = result.events.filter(
+    (e) => e.kind === "thought-summary" && e.payload.kind === "output-schema-unmet",
+  );
+  assert.ok(schemaEvents.length >= 1, "a non-conforming finish should be rejected with a schema-unmet reprompt");
+  assert.equal(result.classification.kind, "ambiguous", "a run that never conforms is ambiguous");
+  assert.ok(
+    (result.classification.notes ?? []).some((n) => /output schema/i.test(n)),
+    "classification should note the unmet output schema",
+  );
 });

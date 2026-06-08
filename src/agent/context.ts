@@ -316,5 +316,11 @@ export function buildActionGuidance(context: ContextBundle): string {
     lines.push("Your last actions did not change observable state. Try a materially different executable approach.");
   }
 
+  if (context.budget && context.budget.remaining <= 3 && context.budget.remaining > 0) {
+    lines.push(
+      `Budget almost exhausted (${context.budget.remaining} ${context.budget.unit} left). Do not navigate to new pages. If you have completed repeated units, use one final exec to return {progress:[...]} / {progressLedger:[...]} / {ledger:[...]} from already collected evidence, then finish.`,
+    );
+  }
+
   return lines.join("\n");
 }

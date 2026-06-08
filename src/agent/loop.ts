@@ -214,6 +214,18 @@ export interface LoopState extends TaskContext, RunTrace, StepCounter {
    */
   extractionRepromptCount: number;
   /**
+   * How many times the loop has rejected a finish for failing the configured
+   * `outputSchema` and reprompted the agent to fix its output. Bounded so the
+   * rejection can't loop. Ephemeral — re-initialized on resume.
+   */
+  schemaRepromptCount: number;
+  /**
+   * Set when the run produced a result that never satisfied the configured
+   * `outputSchema` after exhausting the reprompt budget. Drives the `ambiguous`
+   * classification. Ephemeral.
+   */
+  schemaUnmet?: boolean;
+  /**
    * LLM-authored critical-point checklist, proposed once and cached for the
    * run so retried reviews don't re-propose it. `undefined` = not yet
    * proposed; `[]` = proposed and the objective has no verifiable points.
@@ -280,6 +292,7 @@ export function createLoopState(
     reviewFailureCount: 0,
     progressLedger: [],
     extractionRepromptCount: 0,
+    schemaRepromptCount: 0,
   };
 
   if (sessionLiveUrl !== undefined) {

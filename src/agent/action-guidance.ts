@@ -50,7 +50,7 @@ export const ACTION_GUIDANCE_ITEMS: ActionGuidanceItem[] = [
   {
     id: "progress-ledger-envelope",
     home: "core",
-    text: 'For multi-source, list/table, or repeated-unit tasks, preserve task-specific evidence across turns by returning a progress ledger from exec: `{progress:[{key:"source-or-unit", fields:{...}, evidence:"what proves this row"}], data:{...}}`. Use your own schema from the objective; Wire stores it without interpreting site-specific fields.',
+    text: 'For multi-source, list/table, or repeated-unit tasks, preserve task-specific evidence across turns by returning a progress ledger from exec. Wire recognizes exactly these top-level envelope keys: `progress`, `progressLedger`, or `ledger`. Each value can be one entry or an array of entries. Example: `{progress:[{key:"vendor-a", fields:{name:"Vendor A", price:"$19", plan:"Starter"}, evidence:"Pricing table row under Starter plan"}], data:{extractedCount:1}}`. Use your own fields from the objective; Wire stores them without interpreting site-specific data. Do not invent alternate envelope keys: custom envelope names are invisible to the progress ledger system.',
   },
   {
     id: "exec-timeout",

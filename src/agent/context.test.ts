@@ -498,6 +498,44 @@ test("buildActionGuidance promotes a dedicated helpers section with examples", (
   assert.match(guidance, /fillByLabel\(["'`]/u);
 });
 
+test("buildActionGuidance teaches the recognized progress ledger envelope keys", () => {
+  const guidance = buildActionGuidance(makeContext());
+
+  assert.match(guidance, /progressLedger/u);
+  assert.match(guidance, /progress/u);
+  assert.match(guidance, /ledger/u);
+  assert.match(guidance, /key/u);
+  assert.match(guidance, /fields/u);
+  assert.match(guidance, /evidence/u);
+  assert.match(guidance, /custom envelope names are invisible/u);
+});
+
+test("buildActionGuidance warns near step budget exhaustion", () => {
+  for (const remaining of [1, 2, 3]) {
+    const guidance = buildActionGuidance(makeContext({
+      budget: { remaining, max: 10, unit: "steps" },
+    }));
+
+    assert.match(guidance, new RegExp(`Budget almost exhausted \\(${remaining} steps left\\)`, "u"));
+    assert.match(guidance, /Do not navigate to new pages/u);
+    assert.match(guidance, /one final exec/u);
+    assert.match(guidance, /\{progress:\[\.\.\.\]\}/u);
+  }
+});
+
+test("buildActionGuidance omits low-budget warning outside final action slots", () => {
+  assert.doesNotMatch(buildActionGuidance(makeContext()), /Budget almost exhausted/u);
+
+  for (const budget of [
+    { remaining: 0, max: 10, unit: "steps" },
+    { remaining: 4, max: 10, unit: "steps" },
+  ]) {
+    const guidance = buildActionGuidance(makeContext({ budget }));
+
+    assert.doesNotMatch(guidance, /Budget almost exhausted/u);
+  }
+});
+
 test("base action guidance has stable governance metadata", () => {
   const ids = new Set<string>();
   for (const item of ACTION_GUIDANCE_ITEMS) {

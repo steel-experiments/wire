@@ -17,6 +17,7 @@
   "exports": {
     ".": "./dist/index.js",
     "./runtime": "./dist/agent/runtime.js",
+    "./embedded": "./dist/agent/embedded.js",
     "./types": "./dist/shared/types.js",
     "./browser": "./dist/browser/bridge.js",
     "./providers/steel": "./dist/providers/browser/steel.js",
