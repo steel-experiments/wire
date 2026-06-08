@@ -42,6 +42,7 @@ const CLASSIFICATION_SCORE: Record<RunClassificationKind, number> = {
   "task-complete": 1,
   "partial-success": 0.65,
   "blocked-auth": 0.55,
+  "blocked-policy": 0.55,
   "counterexample": 0.75,
   "site-error": 0.35,
   "agent-error": 0.2,

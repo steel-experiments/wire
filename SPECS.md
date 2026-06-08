@@ -211,6 +211,14 @@ Output:
 - counterexamples,
 - revised hypothesis.
 
+### 5.4 Embedded invocation
+
+Not a fourth mode — a way to *call* the runtime. Any of the modes above can run
+unattended as a tool inside another program (e.g. a research agent escalating a
+hard URL): no human to approve gates, a hard wall-clock deadline, a typed
+output schema, and provenance-backed results. See
+[`docs/embedded-mode.md`](docs/embedded-mode.md).
+
 ---
 
 ## 6) Scope

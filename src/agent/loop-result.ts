@@ -1,7 +1,9 @@
 import type {
   ApprovalRequest,
+  ArtifactId,
   JsonValue,
   ProposedAction,
+  ResultProvenance,
   Run,
   TaskMode,
   TraceEvent,
@@ -20,6 +22,16 @@ export interface FinalizeOptions {
   maxStepsReached?: boolean;
   awaitingApproval?: boolean;
   userCancelled?: boolean;
+  // Set when an unattended (embedded) run hit an action requiring approval and
+  // `onApprovalRequired: "deny"` resolved it to a terminal stop instead of a
+  // pause. Produces the `blocked-policy` classification.
+  blockedByPolicy?: boolean;
+  // Set when the run was aborted by its wall-clock deadline (`maxWallClockMs`)
+  // rather than by a caller-provided cancelSignal.
+  timedOut?: boolean;
+  // Set when the result never satisfied the configured output schema after the
+  // reprompt budget was exhausted. Produces an `ambiguous` classification.
+  schemaUnmet?: boolean;
   stopReason?: string;
   pendingApproval?: ApprovalRequest;
   pendingAction?: ProposedAction;
@@ -87,6 +99,17 @@ function looksLikeActionAck(returnValue: unknown): boolean {
 }
 
 export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | undefined {
+  // For task mode, prefer the progress ledger over raw code results. The
+  // ledger accumulates structured evidence across steps; a late-stage page
+  // dump should not overwrite it. Falls through to code-result path when
+  // the ledger is empty (behavior unchanged for non-ledger tasks).
+  if (mode === "task") {
+    const progressLedger = progressLedgerFromEvents(events);
+    if (progressLedger.length > 0) {
+      return progressLedgerText(progressLedger);
+    }
+  }
+
   const candidates = [...events].reverse().filter((event) =>
     event.kind === "code-result" &&
     event.payload.ok === true &&
@@ -159,12 +182,69 @@ export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | 
   return undefined;
 }
 
+// Run-level provenance for the derived result: the page it came from, the
+// trace event that produced it, and the evidence artifacts recorded along the
+// way. Approximate by design (run-level, not per-field) — enough for a caller
+// to cite and audit a returned value.
+function buildResultProvenance(events: TraceEvent[]): ResultProvenance | undefined {
+  const artifactIds: ArtifactId[] = [];
+  for (const event of events) {
+    if (event.kind === "artifact" && typeof event.payload.artifactId === "string") {
+      artifactIds.push(event.payload.artifactId as ArtifactId);
+    }
+  }
+  const lastObservation = [...events].reverse().find(
+    (event) => event.kind === "observation" && typeof event.payload.url === "string",
+  );
+  const lastCodeResult = [...events].reverse().find(
+    (event) => event.kind === "code-result" && event.payload.ok === true,
+  );
+
+  const provenance: ResultProvenance = { artifactIds };
+  if (lastObservation && typeof lastObservation.payload.url === "string") {
+    provenance.url = lastObservation.payload.url;
+  }
+  if (lastCodeResult) {
+    provenance.sourceEventId = lastCodeResult.id;
+  }
+
+  if (provenance.url === undefined && artifactIds.length === 0 && provenance.sourceEventId === undefined) {
+    return undefined;
+  }
+  return provenance;
+}
+
 export function computeFinalClassification(
   state: LoopState,
   options: FinalizeOptions = {},
 ): ReturnType<typeof classifyRun> {
   const errorCount = state.events.filter((e) => e.kind === "error").length;
   const derivedResult = deriveRunResult(state.events, state.task.mode);
+
+  // Unattended approval denial is a clean terminal outcome, not an error: the
+  // run did nothing wrong, it simply needed a human gate it couldn't get.
+  if (options.blockedByPolicy === true) {
+    return {
+      kind: "blocked-policy",
+      confidence: 0.9,
+      notes: [options.stopReason ?? "Action required approval; denied in unattended mode"],
+    };
+  }
+
+  // Wall-clock timeout: keep a partial result if the run produced something
+  // usable, otherwise treat the deadline as an infrastructure-level stop.
+  if (options.timedOut === true) {
+    return hasMeaningfulDerivedResult(derivedResult)
+      ? { kind: "partial-success", confidence: 0.6, notes: ["Wall-clock timeout reached with a partial result"] }
+      : { kind: "infra-error", confidence: 0.8, notes: ["Wall-clock timeout reached before producing a result"] };
+  }
+
+  // Output never matched the required schema: the run did work but can't be
+  // trusted to satisfy the caller's contract.
+  if (options.schemaUnmet === true) {
+    return { kind: "ambiguous", confidence: 0.7, notes: ["Result did not match the required output schema"] };
+  }
+
   const classification = classifyRun({
     mode: state.task.mode,
     events: state.events,
@@ -255,6 +335,10 @@ export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): Lo
       finishedRun.resultPayload = resultPayload;
     } catch {
       // Keep the compatibility string for non-JSON answers.
+    }
+    const provenance = buildResultProvenance(state.events);
+    if (provenance) {
+      finishedRun.resultProvenance = provenance;
     }
   }
 

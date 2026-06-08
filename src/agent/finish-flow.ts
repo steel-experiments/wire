@@ -1,3 +1,4 @@
+import type { ZodTypeAny } from "zod";
 import { createId, nowIsoUtc } from "../shared/ids.js";
 import type { ProposedAction } from "../shared/types.js";
 import {
@@ -31,6 +32,7 @@ export interface FinishFlowSignals {
   antiBotRecoveryAttempted: boolean;
   maxStepsReached: boolean;
   awaitingApproval: boolean;
+  blockedByPolicy: boolean;
   userCancelled: boolean;
   pendingApproval: LoopResult["pendingApproval"];
   pendingAction: LoopResult["pendingAction"];
@@ -47,6 +49,30 @@ export type FinishFlowResult =
   | { kind: "execute"; action: ProposedAction }
   | { kind: "continue" }
   | { kind: "break" };
+
+// How many times a finish may be rejected for failing the output schema before
+// the run is allowed to finish anyway (and classified ambiguous).
+const OUTPUT_SCHEMA_REPROMPT_LIMIT = 2;
+
+// Validates the run's derived result against the configured output schema.
+// The derived result is JSON-parsed when possible so object schemas match.
+function validateOutputSchema(state: LoopState, schema: ZodTypeAny): { ok: boolean; errors: string } {
+  const derived = deriveRunResult(state.events, state.task.mode);
+  let candidate: unknown = derived;
+  if (typeof derived === "string") {
+    try {
+      candidate = JSON.parse(derived);
+    } catch {
+      // Non-JSON result — validate the raw string against the schema as-is.
+    }
+  }
+  const parsed = schema.safeParse(candidate);
+  if (parsed.success) return { ok: true, errors: "" };
+  const errors = parsed.error.issues
+    .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+    .join("; ");
+  return { ok: false, errors };
+}
 
 function finishEvent(state: LoopState, action: ProposedAction): void {
   state.events.push({
@@ -206,6 +232,43 @@ export async function handleFinishAction(
       });
       await flushTraceSink(state, config, signals);
       return { kind: "break" };
+    }
+  }
+
+  // Output-schema gate: the result the caller will receive must satisfy the
+  // configured schema. Reject and reprompt with the validation error up to a
+  // bounded number of times; if it never conforms, finish anyway and let the
+  // classifier mark the run ambiguous.
+  if (config.outputSchema) {
+    const schemaCheck = validateOutputSchema(state, config.outputSchema);
+    if (!schemaCheck.ok) {
+      if (state.schemaRepromptCount < OUTPUT_SCHEMA_REPROMPT_LIMIT && state.stepCount < config.maxSteps) {
+        state.schemaRepromptCount++;
+        state.events.push({
+          id: createId("event"),
+          runId: state.run.id,
+          ts: nowIsoUtc(),
+          kind: "thought-summary",
+          payload: {
+            kind: "output-schema-unmet",
+            reason: `The result does not match the required output schema. Return output matching the schema, then finish. Validation errors: ${schemaCheck.errors}`,
+          },
+        });
+        state.stepCount++;
+        await flushTraceSink(state, config, signals);
+        return { kind: "continue" };
+      }
+      state.schemaUnmet = true;
+      state.events.push({
+        id: createId("event"),
+        runId: state.run.id,
+        ts: nowIsoUtc(),
+        kind: "thought-summary",
+        payload: {
+          kind: "output-schema-unmet",
+          reason: `Output did not match the required schema after ${state.schemaRepromptCount} retries: ${schemaCheck.errors}`,
+        },
+      });
     }
   }
 

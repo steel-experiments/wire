@@ -23,6 +23,7 @@ function entriesFromCandidate(value: unknown): ProgressLedgerEntry[] {
 
 export function progressEntriesFromValue(value: unknown): ProgressLedgerEntry[] {
   if (!isJsonObject(value)) return [];
+  // Try known envelope keys first (explicit progress ledger usage)
   const candidates = [
     value["progressLedger"],
     value["progress"],
@@ -31,6 +32,24 @@ export function progressEntriesFromValue(value: unknown): ProgressLedgerEntry[] 
   for (const candidate of candidates) {
     const entries = entriesFromCandidate(candidate);
     if (entries.length > 0) return entries;
+  }
+  // Generic fallback: find first array-of-objects property in the return
+  // value. Captures LLM natural output like {units:[{...},{...}]} without
+  // requiring specific envelope names. Excludes artifact-shaped arrays.
+  for (const v of Object.values(value)) {
+    if (
+      Array.isArray(v) &&
+      v.length > 0 &&
+      v.every((item): item is JsonObject =>
+        isJsonObject(item) && !("filename" in item)
+      )
+    ) {
+      return v.map((item, i) => {
+        const entry: ProgressLedgerEntry = { ...item };
+        if (!entry["key"] && !entry["id"]) entry["key"] = `entry-${i}`;
+        return entry;
+      });
+    }
   }
   return [];
 }

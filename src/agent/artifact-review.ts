@@ -56,17 +56,13 @@ export function hasUnfixedArtifactReviewFailure(state: LoopState): boolean {
     taskArtifactEvents(state).length <= Number(review.payload.artifactCount);
 }
 
-function hasReviewableContract(state: LoopState): boolean {
-  return state.contract.mustVisit.length > 0 ||
-    state.contract.mustMention.length > 0 ||
-    state.contract.mustProduce !== undefined ||
-    state.contract.mustNotContain.length > 0;
-}
-
 export function shouldReviewArtifacts(state: LoopState, config: ArtifactReviewConfig): boolean {
   if (!config.llmProvider) return false;
   if (state.task.mode !== "task") return false;
-  if (!hasReviewableContract(state)) return false;
+  // Review whenever a fresh task artifact exists. The reviewer judges against
+  // the objective (always present), not just the inferred contract — gating on
+  // contract presence skipped review for bare factoid/Q&A tasks, the exact case
+  // where the agent is most likely to pass off a junk page as the answer.
   return taskArtifactEvents(state).length > latestReviewedArtifactCount(state);
 }
 

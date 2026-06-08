@@ -7,6 +7,7 @@
 
 - **Systems**
   - [Agent Runtime](agent-runtime.md)
+  - [Embedded Mode](embedded-mode.md)
   - [Browser Bridge](browser-bridge.md)
   - [Policy Engine](policy-engine.md)
   - [Skills System](skills-system.md)

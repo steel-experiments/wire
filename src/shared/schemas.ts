@@ -98,6 +98,7 @@ export const runClassificationKindSchema = z.enum([
   "task-complete",
   "partial-success",
   "blocked-auth",
+  "blocked-policy",
   "site-error",
   "agent-error",
   "infra-error",

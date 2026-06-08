@@ -41,3 +41,18 @@ export function createPolicyEngine(rules?: PolicyRule[]): PolicyEngine {
     },
   };
 }
+
+// Wraps a policy engine so that `require-approval` decisions resolve to
+// `allow`. Used for unattended/autonomous operation (CLI `--yes`, embedded
+// callers running with `onApprovalRequired: "allow"`) where there is no human
+// to grant approval. Hard `deny` decisions are passed through unchanged.
+export function autoApprovingEngine(inner: PolicyEngine): PolicyEngine {
+  return {
+    check(actionId: ActionId, action: PolicyAction): PolicyDecision {
+      const decision = inner.check(actionId, action);
+      return decision.result === "require-approval"
+        ? { ...decision, result: "allow" as const }
+        : decision;
+    },
+  };
+}
