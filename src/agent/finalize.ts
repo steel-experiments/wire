@@ -154,7 +154,10 @@ export async function finalizeExecution(
 
   const result = finalizeRun(state, finalizeOptions);
 
-  if (config.skillDir) {
+  // Stats updates are skill-store WRITES (and can retire skills), so they are
+  // gated like promotion: skillPromotion "off" promises a read-only store —
+  // concurrent embedded runs must never race on shared stats files.
+  if (config.skillDir && config.skillPromotion !== "off") {
     try {
       await updateSkillStatsFromRun(config.skillDir, result);
     } catch { /* best-effort — stats loss must never affect run outcome */ }

@@ -92,6 +92,15 @@ test("runEmbedded denies approval-gated actions instead of hanging", async () =>
   assert.equal(result.run.status, "failed", "must terminate, not pause");
 });
 
+test("runEmbedded reports a schema mismatch explicitly instead of silently omitting data", async () => {
+  const schema = z.object({ totallyDifferentField: z.number() });
+  const result = await runEmbedded({ objective: "get the answer" }, baseConfig({ outputSchema: schema }));
+
+  assert.equal(result.data, undefined);
+  assert.ok(result.schemaError, "a failed parse must be reported, not swallowed");
+  assert.match(result.schemaError!, /totallyDifferentField/u);
+});
+
 test("concurrent runEmbedded calls with distinct skillDir do not interfere", async () => {
   const [a, b] = await Promise.all([
     runEmbedded({ objective: "first" }, baseConfig({ skillDir: "/tmp/wire-embedded-a" })),

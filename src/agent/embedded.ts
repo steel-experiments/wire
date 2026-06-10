@@ -64,6 +64,9 @@ export interface EmbeddedConfig<T = unknown> {
 export interface EmbeddedResult<T = unknown> {
   classification: RunClassification;
   data?: T;
+  // Set when an outputSchema was configured and the final result did not
+  // validate — `data` is absent for a reason, not silently missing.
+  schemaError?: string;
   provenance?: ResultProvenance;
   outcomeSummary: string;
   result?: string;
@@ -128,7 +131,13 @@ export async function runEmbedded<T = unknown>(
   if (config.outputSchema) {
     const candidate = run.resultPayload ?? run.result;
     const parsed = config.outputSchema.safeParse(candidate);
-    if (parsed.success) result.data = parsed.data;
+    if (parsed.success) {
+      result.data = parsed.data;
+    } else {
+      result.schemaError = parsed.error.issues
+        .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+        .join("; ");
+    }
   } else if (run.resultPayload !== undefined) {
     result.data = run.resultPayload as T;
   }
