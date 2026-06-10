@@ -1254,6 +1254,8 @@ We assume:
 ### 22.3 Auth wall rule
 If a site requires credentials the agent does not already have through profile/session state, the agent should stop and request user assistance rather than improvising credential entry from observation artifacts.
 
+An auth wall on one candidate source is not by itself proof the task requires credentials. On the first auth-wall observation the loop nudges the agent to route around the wall (go back, use a different source) without entering credentials; the run stops for user assistance only when the next observation is still an auth wall on the same host — i.e. the agent had a turn to leave and could not.
+
 ### 22.4 Quarantine (watch-item, not yet built)
 Today the same agent both reads untrusted page content and proposes privileged
 actions, with the policy engine as the only gate. A future hardening is a
