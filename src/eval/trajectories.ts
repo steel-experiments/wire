@@ -8,7 +8,7 @@ import type {
   TraceEvent,
 } from "../shared/types.js";
 import { redactJsonObject, redactSecrets } from "../shared/redact.js";
-import { scoreRun, type RunScore } from "./scoring.js";
+import { scoreRun, type RunScore } from "../agent/scoring.js";
 
 export type TrajectoryExportFormat = "trajectory" | "sft" | "rewards" | "preferences";
 

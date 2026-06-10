@@ -9,7 +9,7 @@ import {
   createTaskContract,
   validateTaskContract,
   type ContractValidation,
-} from "../agent/contract.js";
+} from "./contract.js";
 
 export interface RunScoreComponents {
   classification: number;

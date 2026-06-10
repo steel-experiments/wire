@@ -28,9 +28,6 @@ export function stableJsonStringify(value: JsonValue): string {
   return JSON.stringify(sortJsonValue(value));
 }
 
-export function cloneJson<T extends JsonValue>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
-}
 
 function sortJsonValue(value: JsonValue): JsonValue {
   if (Array.isArray(value)) {

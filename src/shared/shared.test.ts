@@ -2,7 +2,6 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
-  cloneJson,
   createId,
   isEntityId,
   isIsoUtcTimestamp,
@@ -61,15 +60,6 @@ test("stableJsonStringify sorts object keys recursively", () => {
     result,
     '{"alpha":{"aardvark":[3,{"x":1,"y":2}],"beta":true},"zebra":1}',
   );
-});
-
-test("cloneJson returns a deep clone", () => {
-  const source = { nested: { values: [1, 2, 3] } };
-  const cloned = cloneJson(source);
-
-  cloned.nested.values.push(4);
-
-  assert.deepEqual(source, { nested: { values: [1, 2, 3] } });
 });
 
 test("taskSchema accepts persisted task boundaries", () => {

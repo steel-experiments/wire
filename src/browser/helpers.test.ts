@@ -6,35 +6,35 @@ import { test } from "node:test";
 
 import {
   createHelperDiff,
-  HELPER_PREAMBLE,
+  DEFAULT_HELPER_SOURCE,
   helperSourceToPreamble,
   prependHelpers,
   validateHelperSource,
 } from "./helpers.js";
 
-test("HELPER_PREAMBLE defines clickVisibleText", () => {
-  assert.ok(HELPER_PREAMBLE.includes("function clickVisibleText("), "missing clickVisibleText");
+test("DEFAULT_HELPER_SOURCE defines clickVisibleText", () => {
+  assert.ok(DEFAULT_HELPER_SOURCE.includes("function clickVisibleText("), "missing clickVisibleText");
 });
 
-test("HELPER_PREAMBLE defines fillByLabel", () => {
-  assert.ok(HELPER_PREAMBLE.includes("function fillByLabel("), "missing fillByLabel");
+test("DEFAULT_HELPER_SOURCE defines fillByLabel", () => {
+  assert.ok(DEFAULT_HELPER_SOURCE.includes("function fillByLabel("), "missing fillByLabel");
 });
 
-test("HELPER_PREAMBLE defines extractTable", () => {
-  assert.ok(HELPER_PREAMBLE.includes("function extractTable("), "missing extractTable");
+test("DEFAULT_HELPER_SOURCE defines extractTable", () => {
+  assert.ok(DEFAULT_HELPER_SOURCE.includes("function extractTable("), "missing extractTable");
 });
 
-test("HELPER_PREAMBLE defines waitForSelector", () => {
-  assert.ok(HELPER_PREAMBLE.includes("function waitForSelector("), "missing waitForSelector");
+test("DEFAULT_HELPER_SOURCE defines waitForSelector", () => {
+  assert.ok(DEFAULT_HELPER_SOURCE.includes("function waitForSelector("), "missing waitForSelector");
 });
 
-test("HELPER_PREAMBLE contains no TypeScript syntax", () => {
+test("DEFAULT_HELPER_SOURCE contains no TypeScript syntax", () => {
   // No type annotations, generic params, or interface keywords
-  assert.ok(!/:\s*string\b/.test(HELPER_PREAMBLE), "has TS type annotation");
-  assert.ok(!/:\s*number\b/.test(HELPER_PREAMBLE), "has TS type annotation");
-  assert.ok(!/<[A-Z]/.test(HELPER_PREAMBLE), "has generic type param");
-  assert.ok(!/\binterface\b/.test(HELPER_PREAMBLE), "has interface keyword");
-  assert.ok(!/\btype\s+\w/.test(HELPER_PREAMBLE), "has type keyword");
+  assert.ok(!/:\s*string\b/.test(DEFAULT_HELPER_SOURCE), "has TS type annotation");
+  assert.ok(!/:\s*number\b/.test(DEFAULT_HELPER_SOURCE), "has TS type annotation");
+  assert.ok(!/<[A-Z]/.test(DEFAULT_HELPER_SOURCE), "has generic type param");
+  assert.ok(!/\binterface\b/.test(DEFAULT_HELPER_SOURCE), "has interface keyword");
+  assert.ok(!/\btype\s+\w/.test(DEFAULT_HELPER_SOURCE), "has type keyword");
 });
 
 test("prependHelpers places preamble before user code", () => {
@@ -114,29 +114,29 @@ test("createHelperDiff records removed and added helper lines", () => {
 test("clickVisibleText throws on no match — error message includes text arg", () => {
   // We can syntactically check the preamble encodes the right error pattern
   assert.ok(
-    HELPER_PREAMBLE.includes("no visible element") || HELPER_PREAMBLE.includes("clickVisibleText"),
+    DEFAULT_HELPER_SOURCE.includes("no visible element") || DEFAULT_HELPER_SOURCE.includes("clickVisibleText"),
     "error message pattern missing",
   );
 });
 
 test("extractTable throws on missing selector — error message includes selector", () => {
   assert.ok(
-    HELPER_PREAMBLE.includes("no element for") || HELPER_PREAMBLE.includes("extractTable"),
+    DEFAULT_HELPER_SOURCE.includes("no element for") || DEFAULT_HELPER_SOURCE.includes("extractTable"),
     "error message pattern missing",
   );
 });
 
 test("waitForSelector includes a configurable timeout parameter", () => {
   // The function signature should accept a second argument for timeoutMs
-  const match = HELPER_PREAMBLE.match(/function waitForSelector\(([^)]+)\)/u);
+  const match = DEFAULT_HELPER_SOURCE.match(/function waitForSelector\(([^)]+)\)/u);
   assert.ok(match, "waitForSelector signature not found");
   assert.ok(match![1]!.includes(","), "waitForSelector should have at least 2 params (selector, timeoutMs)");
 });
 
-test("HELPER_PREAMBLE does not reference Node.js globals", () => {
+test("DEFAULT_HELPER_SOURCE does not reference Node.js globals", () => {
   // Helpers run in the browser page context — no Node APIs allowed
-  assert.ok(!HELPER_PREAMBLE.includes("require("), "uses require()");
-  assert.ok(!HELPER_PREAMBLE.includes("process."), "uses process");
-  assert.ok(!HELPER_PREAMBLE.includes("Buffer."), "uses Buffer");
-  assert.ok(!HELPER_PREAMBLE.includes("__dirname"), "uses __dirname");
+  assert.ok(!DEFAULT_HELPER_SOURCE.includes("require("), "uses require()");
+  assert.ok(!DEFAULT_HELPER_SOURCE.includes("process."), "uses process");
+  assert.ok(!DEFAULT_HELPER_SOURCE.includes("Buffer."), "uses Buffer");
+  assert.ok(!DEFAULT_HELPER_SOURCE.includes("__dirname"), "uses __dirname");
 });

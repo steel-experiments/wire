@@ -306,7 +306,6 @@ test("classifyRun downgrades completion when contract check failed", () => {
     errorCount: 0,
     authWallHit: false,
     policyDenied: false,
-    budgetExhausted: false,
   });
 
   assert.equal(classification.kind, "partial-success");

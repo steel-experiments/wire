@@ -1,5 +1,5 @@
 import type { Artifact, Run, Task, TraceEvent } from "../shared/types.js";
-import { scoreRun, type RunScore } from "../eval/scoring.js";
+import { scoreRun, type RunScore } from "../agent/scoring.js";
 
 export interface ReviewData {
   run: Run;

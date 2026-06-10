@@ -162,7 +162,6 @@ test("shouldStop returns false when no conditions are met", () => {
   const state = createLoopState(task, makeSessionId());
   const conditions: StopConditions = {
     maxSteps: 10,
-    budgetExhausted: false,
     policyDenied: false,
     authWallHit: false,
     userCancelled: false,
@@ -178,7 +177,6 @@ test("shouldStop returns true when user cancelled", () => {
   const state = createLoopState(task, makeSessionId());
   const conditions: StopConditions = {
     maxSteps: 10,
-    budgetExhausted: false,
     policyDenied: false,
     authWallHit: false,
     userCancelled: true,
@@ -194,7 +192,6 @@ test("shouldStop returns true when policy denied", () => {
   const state = createLoopState(task, makeSessionId());
   const conditions: StopConditions = {
     maxSteps: 10,
-    budgetExhausted: false,
     policyDenied: true,
     authWallHit: false,
     userCancelled: false,
@@ -210,7 +207,6 @@ test("shouldStop returns true when auth wall hit", () => {
   const state = createLoopState(task, makeSessionId());
   const conditions: StopConditions = {
     maxSteps: 10,
-    budgetExhausted: false,
     policyDenied: false,
     authWallHit: true,
     userCancelled: false,
@@ -221,29 +217,12 @@ test("shouldStop returns true when auth wall hit", () => {
   assert.equal(result.reason, "Auth wall requires user assistance");
 });
 
-test("shouldStop returns true when budget exhausted", () => {
-  const task = makeTask();
-  const state = createLoopState(task, makeSessionId());
-  const conditions: StopConditions = {
-    maxSteps: 10,
-    budgetExhausted: true,
-    policyDenied: false,
-    authWallHit: false,
-    userCancelled: false,
-  };
-
-  const result = shouldStop(state, conditions);
-  assert.equal(result.stop, true);
-  assert.equal(result.reason, "Budget exhausted");
-});
-
 test("shouldStop returns true when max steps reached", () => {
   const task = makeTask();
   const state = createLoopState(task, makeSessionId());
   state.stepCount = 10;
   const conditions: StopConditions = {
     maxSteps: 10,
-    budgetExhausted: false,
     policyDenied: false,
     authWallHit: false,
     userCancelled: false,
@@ -259,7 +238,6 @@ test("shouldStop prioritizes user cancellation over other conditions", () => {
   const state = createLoopState(task, makeSessionId());
   const conditions: StopConditions = {
     maxSteps: 0,
-    budgetExhausted: true,
     policyDenied: true,
     authWallHit: true,
     userCancelled: true,

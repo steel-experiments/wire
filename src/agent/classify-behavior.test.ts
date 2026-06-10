@@ -149,7 +149,6 @@ test("classifyRun returns task-complete for all-successful code execs with obser
     errorCount: 0,
     authWallHit: false,
     policyDenied: false,
-    budgetExhausted: false,
   });
 
   assert.equal(result.kind, "task-complete");
@@ -206,7 +205,6 @@ test("classifyRun ignores trailing bookkeeping events when checking terminal evi
     errorCount: 0,
     authWallHit: false,
     policyDenied: false,
-    budgetExhausted: false,
   };
   const without = classifyRun({ ...input, events: baseEvents });
   const withBookkeeping = classifyRun({ ...input, events: [...baseEvents, ...bookkeeping] });
@@ -258,7 +256,6 @@ test("classifyRun does not flag blocked-auth when an early captcha page was reco
     errorCount: 0,
     authWallHit: false,
     policyDenied: false,
-    budgetExhausted: false,
   });
 
   assert.notEqual(result.kind, "blocked-auth");
@@ -289,7 +286,6 @@ test("classifyRun does not return task-complete when the latest evidence is miss
     errorCount: 0,
     authWallHit: false,
     policyDenied: false,
-    budgetExhausted: false,
   });
 
   assert.equal(result.kind, "partial-success");
@@ -328,7 +324,6 @@ test("classifyRun returns task-complete when the final exec extracts an answer",
     errorCount: 0,
     authWallHit: false,
     policyDenied: false,
-    budgetExhausted: false,
   });
 
   assert.equal(result.kind, "task-complete");
@@ -352,7 +347,6 @@ test("classifyRun returns partial-success for code success with no evidence", ()
     errorCount: 0,
     authWallHit: false,
     policyDenied: false,
-    budgetExhausted: false,
   });
 
   assert.equal(result.kind, "partial-success");
@@ -367,7 +361,6 @@ test("classifyRun returns ambiguous when awaiting approval", () => {
     errorCount: 0,
     authWallHit: false,
     policyDenied: false,
-    budgetExhausted: false,
     awaitingApproval: true,
   });
 
@@ -400,7 +393,6 @@ test("classifyRun returns partial-success for mixed results", () => {
     errorCount: 0,
     authWallHit: false,
     policyDenied: false,
-    budgetExhausted: false,
   });
 
   assert.equal(result.kind, "partial-success");
@@ -416,7 +408,6 @@ test("classifyRun returns blocked-auth when auth wall hit", () => {
     errorCount: 0,
     authWallHit: true,
     policyDenied: false,
-    budgetExhausted: false,
   });
 
   assert.equal(result.kind, "blocked-auth");
@@ -431,24 +422,9 @@ test("classifyRun returns agent-error when policy denied", () => {
     errorCount: 0,
     authWallHit: false,
     policyDenied: true,
-    budgetExhausted: false,
   });
 
   assert.equal(result.kind, "agent-error");
-});
-
-test("classifyRun returns ambiguous when budget exhausted", () => {
-  const result = classifyRun({
-    mode: "task",
-    events: [],
-    successCriteria: [],
-    errorCount: 0,
-    authWallHit: false,
-    policyDenied: false,
-    budgetExhausted: true,
-  });
-
-  assert.equal(result.kind, "ambiguous");
 });
 
 test("classifyRun returns infra-error for network failures", () => {
@@ -469,7 +445,6 @@ test("classifyRun returns infra-error for network failures", () => {
     errorCount: 1,
     authWallHit: false,
     policyDenied: false,
-    budgetExhausted: false,
   });
 
   assert.equal(result.kind, "infra-error");
@@ -493,7 +468,6 @@ test("classifyRun returns site-error for all-failed code execs", () => {
     errorCount: 0,
     authWallHit: false,
     policyDenied: false,
-    budgetExhausted: false,
   });
 
   assert.equal(result.kind, "site-error");
@@ -507,7 +481,6 @@ test("classifyRun returns ambiguous for empty events", () => {
     errorCount: 0,
     authWallHit: false,
     policyDenied: false,
-    budgetExhausted: false,
   });
 
   assert.equal(result.kind, "ambiguous");
@@ -522,7 +495,6 @@ test("classifyRun returns agent-error for high error count", () => {
     errorCount: 10,
     authWallHit: false,
     policyDenied: false,
-    budgetExhausted: false,
   });
 
   assert.equal(result.kind, "agent-error");
@@ -609,7 +581,6 @@ test("classifyRun returns infra-error when session crash is detected", () => {
     errorCount: 1,
     authWallHit: false,
     policyDenied: false,
-    budgetExhausted: false,
   });
 
   assert.equal(result.kind, "infra-error");
@@ -634,7 +605,6 @@ test("classifyRun returns blocked-auth when captcha indicators are present", () 
     errorCount: 0,
     authWallHit: false,
     policyDenied: false,
-    budgetExhausted: false,
   });
 
   assert.equal(result.kind, "blocked-auth");
@@ -659,7 +629,6 @@ test("classifyRun returns site-error when 429 error is detected", () => {
     errorCount: 1,
     authWallHit: false,
     policyDenied: false,
-    budgetExhausted: false,
   });
 
   assert.equal(result.kind, "site-error");
@@ -684,7 +653,6 @@ test("classifyRun returns infra-error when ETIMEDOUT is detected", () => {
     errorCount: 1,
     authWallHit: false,
     policyDenied: false,
-    budgetExhausted: false,
   });
 
   assert.equal(result.kind, "infra-error");

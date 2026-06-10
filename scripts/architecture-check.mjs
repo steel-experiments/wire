@@ -53,14 +53,9 @@ const importRules = [
   },
 ];
 
-// Known violations awaiting refactor. Burn this list down to zero — additions
+// Known violations awaiting refactor. Empty as of 2026-06-10 — additions
 // require a documented decision.
-const importAllowlist = new Set([
-  "src/agent/loop-result.ts -> src/eval/scoring.ts", // agent<->eval cycle; resolves with the verdict extraction (plan C3)
-  "src/agent/loop.ts -> src/eval/scoring.ts", // type-only RunScore import; same resolution
-  "src/eval/bench.ts -> src/cli/config.ts", // bench reuses CLI config/runner; resolves by extracting the run entrypoint
-  "src/eval/bench.ts -> src/cli/runner.ts",
-]);
+const importAllowlist = new Set([]);
 
 function resolveImport(fromFile, spec) {
   if (!spec.startsWith(".")) return undefined;

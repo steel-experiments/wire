@@ -154,7 +154,6 @@ export interface ClassificationInput {
   errorCount: number;
   authWallHit: boolean;
   policyDenied: boolean;
-  budgetExhausted: boolean;
   awaitingApproval?: boolean;
   consecutiveUnchanged?: number;
 }
@@ -166,7 +165,6 @@ export function classifyRun(input: ClassificationInput): RunClassification {
     errorCount,
     authWallHit,
     policyDenied,
-    budgetExhausted,
     awaitingApproval,
     consecutiveUnchanged,
   } = input;
@@ -238,10 +236,6 @@ export function classifyRun(input: ClassificationInput): RunClassification {
 
   if (authWallHit) {
     return { kind: "blocked-auth", confidence: 0.9, notes: ["Auth wall requires user assistance"] };
-  }
-
-  if (budgetExhausted) {
-    return { kind: "ambiguous", confidence: 0.6, notes: ["Budget exhausted before completion"] };
   }
 
   // High error count → site or agent error

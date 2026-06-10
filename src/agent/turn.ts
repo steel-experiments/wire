@@ -92,11 +92,9 @@ function planForState(state: LoopState): TaskPlan {
 function metacognitionTraces(events: TraceEvent[]): Array<{ kind: string; summary: string }> {
   const traces: Array<{ kind: string; summary: string }> = [];
   const execs = events.filter((e) => e.kind === "code-exec" && typeof e.payload.code === "string");
-  const lastCode = execs.at(-1)?.payload.code;
-  if (lastCode) {
-    let count = 0;
-    for (let i = execs.length - 1; i >= 0 && execs[i]?.payload.code === lastCode; i--) count++;
-    if (count >= 2) traces.push({ kind: "thought-summary", summary: `WARNING: identical exec code was tried ${count} times; change strategy before retrying.` });
+  const { sameSig } = computeRepeatStreak(events);
+  if (sameSig >= 2) {
+    traces.push({ kind: "thought-summary", summary: `WARNING: identical exec code was tried ${sameSig} times; change strategy before retrying.` });
   }
   const recentExecs = execs.slice(-5);
   const recentResults = events
@@ -411,9 +409,7 @@ export function defaultAgentTurn(
       return normalizeProposedAction(action);
     }
 
-    const hasRecentObservation = state.events.some(
-      (e) => e.kind === "observation" && state.events.indexOf(e) === state.events.length - 1,
-    );
+    const hasRecentObservation = state.events.at(-1)?.kind === "observation";
 
     if (!hasRecentObservation) {
       return {

@@ -13,7 +13,7 @@ import {
   contractValidationPayload,
   validateTaskContract,
 } from "./contract.js";
-import { deriveRunResult, type LoopResult, type LoopState } from "./loop.js";
+import { deriveRunResult, type LoopState } from "./loop.js";
 import {
   appendExtractedResultArtifact,
   appendTaskNoteArtifact,
@@ -24,22 +24,11 @@ import {
   hasRecordedTaskArtifact,
   latestExtractionIsVerificationProbe,
 } from "./state-helpers.js";
-import type { RuntimeConfig } from "./runtime.js";
+import type { LoopSignals, RuntimeConfig } from "./runtime.js";
 
-export interface FinishFlowSignals {
-  policyDenied: boolean;
-  authWallHit: boolean;
-  authWallStreak: number;
-  authWallHost: string | undefined;
-  antiBotRecoveryAttempted: boolean;
-  maxStepsReached: boolean;
-  awaitingApproval: boolean;
-  blockedByPolicy: boolean;
-  userCancelled: boolean;
-  pendingApproval: LoopResult["pendingApproval"];
-  pendingAction: LoopResult["pendingAction"];
-  flushedEvents: number;
-}
+// One shared shape: the loop, finish flow, and recovery all mutate the same
+// run-level signal record (canonical definition: LoopSignals in runtime.ts).
+export type FinishFlowSignals = LoopSignals;
 
 type FlushTraceSink = (
   state: LoopState,

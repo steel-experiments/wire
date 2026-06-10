@@ -76,7 +76,6 @@ function waitForSelector(selector, timeoutMs = 5000) {
 }
 `.trimStart();
 
-export const HELPER_PREAMBLE = DEFAULT_HELPER_SOURCE;
 
 const FORBIDDEN_HELPER_PATTERNS = [
   /\brequire\s*\(/u,

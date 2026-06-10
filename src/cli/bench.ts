@@ -1,14 +1,14 @@
 import type { Run, RunId, TaskId, TraceEvent, SessionConfig } from "../shared/types.js";
 import type { LLMProvider } from "../providers/llm/types.js";
-import type { LlmProvider } from "../cli/config.js";
+import type { LlmProvider } from "./config.js";
 
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { runTask, resolveProviderSelection, type RunOptions } from "../cli/runner.js";
+import { runTask, resolveProviderSelection, type RunOptions } from "./runner.js";
 import { loadRun } from "../storage/runs.js";
 import { listTraceEvents } from "../storage/events.js";
 import { listArtifacts } from "../storage/artifacts.js";
-import { computeTaskMetrics, type TaskMetrics } from "./metrics.js";
+import { computeTaskMetrics, type TaskMetrics } from "../eval/metrics.js";
 import { createOpenAIProvider } from "../providers/llm/openai.js";
 import { createAnthropicProvider, createZaiProvider } from "../providers/llm/anthropic.js";
 import { nowIsoUtc } from "../shared/ids.js";

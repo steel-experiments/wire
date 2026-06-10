@@ -6,6 +6,7 @@ import { createOpenAIProvider } from "../providers/llm/openai.js";
 import { createAnthropicProvider, createZaiProvider } from "../providers/llm/anthropic.js";
 import type { RuntimeConfig } from "../agent/runtime.js";
 import { loadSession, saveSession } from "../storage/sessions.js";
+import { displaySafeUrl } from "../browser/session.js";
 import { saveTraceBlobValue } from "../storage/blobs.js";
 import { defaultSkillDir, defaultStorageRoot } from "../shared/paths.js";
 import { createConsoleTraceSink } from "../ui/stream.js";
@@ -117,7 +118,7 @@ export function createRuntimeConfig(
     policyEngine,
     maxSteps,
     async onSessionCreated(session) {
-      const url = session.debugUrl ?? session.liveUrl;
+      const url = displaySafeUrl(session.debugUrl ?? session.liveUrl);
       if (!isJson && url) {
         console.log(`Debug URL:    ${url}`);
         console.log("");
@@ -125,7 +126,7 @@ export function createRuntimeConfig(
       await saveSession(defaultStorageRoot(), session);
     },
     async onSessionReconfigured({ oldSessionId, newSession, summary }) {
-      const url = newSession.debugUrl ?? newSession.liveUrl;
+      const url = displaySafeUrl(newSession.debugUrl ?? newSession.liveUrl);
       if (!isJson) {
         console.log(`Session reconfigured: ${summary}`);
         console.log(`Old session: ${oldSessionId}`);

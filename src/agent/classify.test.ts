@@ -27,7 +27,6 @@ function makeInput(overrides: Partial<ClassificationInput> = {}): Classification
     errorCount: 0,
     authWallHit: false,
     policyDenied: false,
-    budgetExhausted: false,
     ...overrides,
   };
 }
@@ -98,12 +97,6 @@ describe("classifyRun", () => {
     const result = classifyRun(makeInput({ authWallHit: true }));
     assert.equal(result.kind, "blocked-auth");
     assert.equal(result.confidence, 0.9);
-  });
-
-  it("classifies budgetExhausted as ambiguous", () => {
-    const result = classifyRun(makeInput({ budgetExhausted: true }));
-    assert.equal(result.kind, "ambiguous");
-    assert.equal(result.confidence, 0.6);
   });
 
   it("classifies high errors with code success as site-error", () => {

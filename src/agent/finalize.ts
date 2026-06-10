@@ -76,7 +76,6 @@ export async function finalizeExecution(
   const finalizeOptions: {
     authWallHit: boolean;
     policyDenied: boolean;
-    budgetExhausted: false;
     maxStepsReached: boolean;
     awaitingApproval: boolean;
     blockedByPolicy: boolean;
@@ -87,7 +86,6 @@ export async function finalizeExecution(
   } = {
     authWallHit: signals.authWallHit,
     policyDenied: signals.policyDenied,
-    budgetExhausted: false,
     maxStepsReached: signals.maxStepsReached,
     awaitingApproval: signals.awaitingApproval,
     blockedByPolicy: signals.blockedByPolicy,
@@ -107,8 +105,7 @@ export async function finalizeExecution(
     const approvalOptions: {
       authWallHit: boolean;
       policyDenied: boolean;
-      budgetExhausted: false;
-      maxStepsReached: boolean;
+        maxStepsReached: boolean;
       awaitingApproval: boolean;
       pendingApproval: NonNullable<typeof signals.pendingApproval>;
       stopReason?: string;

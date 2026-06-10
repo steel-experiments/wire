@@ -519,7 +519,6 @@ async function runMainLoop(
     // Check stopping conditions
     const stopResult = shouldStop(state, {
       maxSteps: config.maxSteps,
-      budgetExhausted: false,
       policyDenied: signals.policyDenied,
       authWallHit: signals.authWallHit,
       userCancelled: isCancelled(config),

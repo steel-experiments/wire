@@ -9,7 +9,7 @@ import type {
   TraceEvent,
 } from "../shared/types.js";
 import { nowIsoUtc, stableJsonStringify } from "../shared/ids.js";
-import { scoreRun } from "../eval/scoring.js";
+import { scoreRun } from "./scoring.js";
 import { classifyRun, generateOutcomeSummary } from "./classify.js";
 import { countConsecutiveUnchanged } from "./state-helpers.js";
 import type { LoopResult, LoopState } from "./loop.js";
@@ -18,7 +18,6 @@ import { progressLedgerFromEvents, progressLedgerText } from "./progress-ledger.
 export interface FinalizeOptions {
   authWallHit?: boolean;
   policyDenied?: boolean;
-  budgetExhausted?: boolean;
   maxStepsReached?: boolean;
   awaitingApproval?: boolean;
   userCancelled?: boolean;
@@ -260,7 +259,6 @@ export function computeFinalClassification(
     errorCount,
     authWallHit: options.authWallHit ?? false,
     policyDenied: options.policyDenied ?? false,
-    budgetExhausted: options.budgetExhausted ?? false,
     awaitingApproval: options.awaitingApproval ?? false,
     consecutiveUnchanged: countConsecutiveUnchanged(state.events),
   });

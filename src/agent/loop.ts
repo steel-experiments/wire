@@ -35,7 +35,7 @@ import { latestObservation, reconfigureJustified } from "./state-helpers.js";
 import type { ActionExecutionContext } from "./actions.js";
 import { createTaskContract, type TaskContract } from "./contract.js";
 import type { CriticalPoint } from "./critical-points.js";
-import type { RunScore } from "../eval/scoring.js";
+import type { RunScore } from "./scoring.js";
 import {
   collectCdpMethods,
   commandsIncludeInput,
@@ -218,7 +218,6 @@ export function createLoopState(
 
 export interface StopConditions {
   maxSteps: number;
-  budgetExhausted: boolean;
   policyDenied: boolean;
   authWallHit: boolean;
   userCancelled: boolean;
@@ -238,10 +237,6 @@ export function shouldStop(
 
   if (conditions.authWallHit) {
     return { stop: true, reason: "Auth wall requires user assistance" };
-  }
-
-  if (conditions.budgetExhausted) {
-    return { stop: true, reason: "Budget exhausted" };
   }
 
   if (state.stepCount >= conditions.maxSteps) {

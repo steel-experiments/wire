@@ -9,13 +9,13 @@ import { listArtifacts } from "../storage/artifacts.js";
 import { loadTask, listTasks } from "../storage/tasks.js";
 import { listTraceEvents } from "../storage/events.js";
 import { deriveRunResult } from "../agent/loop.js";
-import { bench as runBench, formatBenchReport } from "../eval/bench.js";
+import { bench as runBench, formatBenchReport } from "./bench.js";
 import {
   exportRows,
   toTraceTrajectory,
   type TrajectoryExportFormat,
 } from "../eval/trajectories.js";
-import { scoreRun } from "../eval/scoring.js";
+import { scoreRun } from "../agent/scoring.js";
 import { classifyError } from "./errors.js";
 import { success, failure } from "./output.js";
 import { buildTimeline, summarizeTimeline } from "../trace/replay.js";

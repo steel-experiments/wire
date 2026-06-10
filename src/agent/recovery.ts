@@ -1,25 +1,13 @@
 import type { ActionRegistry } from "./actions.js";
-import { applyAuthWallSignal, executeStep, type LoopResult, type LoopState } from "./loop.js";
+import { applyAuthWallSignal, executeStep, type LoopState } from "./loop.js";
 import { latestObservation, reconfigureJustified } from "./state-helpers.js";
 import { syncMatchedSkills } from "./skill-context.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
 import type { LoadedSkill, ProposedAction } from "../shared/types.js";
-import type { RuntimeConfig } from "./runtime.js";
+import type { LoopSignals, RuntimeConfig } from "./runtime.js";
 
-export interface RecoverySignals {
-  policyDenied: boolean;
-  authWallHit: boolean;
-  authWallStreak: number;
-  authWallHost: string | undefined;
-  antiBotRecoveryAttempted: boolean;
-  maxStepsReached: boolean;
-  awaitingApproval: boolean;
-  blockedByPolicy: boolean;
-  userCancelled: boolean;
-  pendingApproval: LoopResult["pendingApproval"];
-  pendingAction: LoopResult["pendingAction"];
-  flushedEvents: number;
-}
+// One shared shape: see LoopSignals in runtime.ts.
+export type RecoverySignals = LoopSignals;
 
 type FlushTraceSink = (
   state: LoopState,
