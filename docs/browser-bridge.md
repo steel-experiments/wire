@@ -103,11 +103,11 @@ The agent still uses ordinary JavaScript to find the target. `wire.click()` only
 
 The binding records structured `wireEvents` on the exec result with fields such as action, coordinates, button, tag, text, aria label, and selector hint. Those events are used for trace display and audit evidence.
 
-Policy boundary:
+Policy boundary (ergonomics, not security — decision recorded 2026-06-10):
 - The exec source is still checked before execution.
 - Runtime click metadata is checked again before CDP dispatch.
 - Destructive targets such as "Delete account" are blocked before any mouse event is sent.
-- Sensitive targets such as payment, checkout, account, billing, permission, or outbound-message actions are rejected as requiring approval before dispatch.
+- Sensitive targets such as payment, checkout, account, billing, permission, or outbound-message actions are rejected before dispatch. There is no approval routing inside the page bridge: a "require-approval" verdict from a custom `wireClickPolicy` behaves the same as a deny (the click promise rejects), and plain `el.click()` bypasses these checks entirely. The load-bearing boundary is the policy engine, which classifies the exec source and the action kind system-side — wire.click's checks are a fast local backstop on how a click is delivered, nothing more.
 
 Frame boundary:
 - Main-frame elements and same-origin iframe elements are supported.

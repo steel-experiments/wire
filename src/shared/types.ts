@@ -285,7 +285,6 @@ export interface BrowserExecRequest {
   code: string;
   timeoutMs?: number;
   target?: BrowserExecTarget;
-  attachments?: string[];
 }
 
 export interface BrowserExecResult {

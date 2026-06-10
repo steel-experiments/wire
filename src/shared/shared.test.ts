@@ -127,7 +127,6 @@ test("provider input and output schemas validate browser boundaries", () => {
       sessionId: createId("session"),
       code: "return document.title;",
       target: { tabId: "tab-1" },
-      attachments: ["helpers/forms.ts"],
       timeoutMs: 10_000,
     },
     "browser-exec-request",

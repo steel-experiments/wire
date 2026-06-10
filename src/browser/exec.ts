@@ -15,7 +15,6 @@ export interface ExecOptions {
   code: string;
   timeoutMs?: number;
   target?: BrowserExecTarget;
-  attachments?: string[];
   artifactDir?: string;
 }
 
@@ -40,10 +39,6 @@ export async function execCode(options: ExecOptions): Promise<BrowserExecResult>
 
   // Always set the resolved target so the provider knows which tab to use.
   input.target = resolvedTarget;
-
-  if (options.attachments && options.attachments.length > 0) {
-    input.attachments = options.attachments;
-  }
 
   return options.provider.exec(input);
 }

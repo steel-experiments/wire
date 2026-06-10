@@ -271,57 +271,6 @@ test("execCode passes tab-specific target to provider", async () => {
   assert.deepEqual(capturedInput.target, { tabId: "tab-99" });
 });
 
-test("execCode passes attachments when provided with items", async () => {
-  const sessionId = createId("session");
-  let capturedInput: BrowserExecRequest | undefined;
-
-  const provider = createMockProvider({
-    async exec(input: BrowserExecRequest): Promise<BrowserExecResult> {
-      capturedInput = input;
-      return { ok: true, durationMs: 5 };
-    },
-  });
-
-  await execCode({ provider, sessionId, code: "upload()", attachments: ["/tmp/file.csv"] });
-
-  assert.ok(capturedInput);
-  assert.deepEqual(capturedInput.attachments, ["/tmp/file.csv"]);
-});
-
-test("execCode does not set attachments when omitted", async () => {
-  const sessionId = createId("session");
-  let capturedInput: BrowserExecRequest | undefined;
-
-  const provider = createMockProvider({
-    async exec(input: BrowserExecRequest): Promise<BrowserExecResult> {
-      capturedInput = input;
-      return { ok: true, durationMs: 5 };
-    },
-  });
-
-  await execCode({ provider, sessionId, code: "1+1" });
-
-  assert.ok(capturedInput);
-  assert.ok(!("attachments" in capturedInput));
-});
-
-test("execCode does not set attachments when array is empty", async () => {
-  const sessionId = createId("session");
-  let capturedInput: BrowserExecRequest | undefined;
-
-  const provider = createMockProvider({
-    async exec(input: BrowserExecRequest): Promise<BrowserExecResult> {
-      capturedInput = input;
-      return { ok: true, durationMs: 5 };
-    },
-  });
-
-  await execCode({ provider, sessionId, code: "1+1", attachments: [] });
-
-  assert.ok(capturedInput);
-  assert.ok(!("attachments" in capturedInput));
-});
-
 test("execCode returns full result with stdout/stderr", async () => {
   const sessionId = createId("session");
 

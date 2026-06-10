@@ -319,7 +319,6 @@ export const browserExecRequestSchema = z
     code: z.string().min(1),
     timeoutMs: z.number().int().positive().optional(),
     target: browserExecTargetSchema.optional(),
-    attachments: z.array(z.string().min(1)).optional(),
   })
   .strict();
 
