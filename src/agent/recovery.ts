@@ -3,7 +3,7 @@ import { applyAuthWallSignal, executeStep, type LoopState } from "./loop.js";
 import { latestObservation, reconfigureJustified } from "./state-helpers.js";
 import { syncMatchedSkills } from "./skill-context.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
-import type { LoadedSkill, ProposedAction } from "../shared/types.js";
+import type { LoadedSkill, ProposedAction, ScreenshotCapturePolicy } from "../shared/types.js";
 import type { LoopSignals, RuntimeConfig } from "./runtime.js";
 
 // One shared shape: see LoopSignals in runtime.ts.
@@ -77,7 +77,11 @@ export async function tryAntiBotRecovery(
   const stepOpts: {
     actionRegistry: ActionRegistry;
     actionContext?: { onSessionReconfigured: NonNullable<RuntimeConfig["onSessionReconfigured"]> };
+    screenshotCapture?: ScreenshotCapturePolicy;
   } = { actionRegistry };
+  if (config.screenshotCapture !== undefined) {
+    stepOpts.screenshotCapture = config.screenshotCapture;
+  }
   if (config.onSessionReconfigured) {
     stepOpts.actionContext = { onSessionReconfigured: config.onSessionReconfigured };
   }

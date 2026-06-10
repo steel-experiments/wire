@@ -64,6 +64,7 @@ export type TraceBlobKind =
   | "llm-message"
   | "llm-response"
   | (string & {});
+export type ScreenshotCapturePolicy = "off" | "on-observe" | "every-step";
 export type ComparisonDimension = "latency" | "path" | "profile" | "artifacts" | "outcome";
 export type BrowserExecTarget = "active-tab" | "all-tabs" | { tabId: string };
 export type ActionKind =
@@ -285,6 +286,17 @@ export interface BrowserExecRequest {
   code: string;
   timeoutMs?: number;
   target?: BrowserExecTarget;
+}
+
+export interface BrowserScreenshotRequest {
+  sessionId: SessionId;
+  targetId?: string;
+}
+
+export interface BrowserScreenshotResult {
+  dataBase64: string;
+  mimeType: string;
+  targetId?: string;
 }
 
 export interface BrowserExecResult {

@@ -8,6 +8,7 @@ import type {
   ProfileId,
   ProposedAction,
   RunCheckpoint,
+  ScreenshotCapturePolicy,
   SessionConfig,
   SessionId,
   Task,
@@ -143,6 +144,10 @@ export interface RuntimeConfig {
   // with the validation error (bounded); a run that never conforms is
   // classified `ambiguous`. Validation is enforced for `task` mode.
   outputSchema?: ZodTypeAny;
+  // Runtime-owned screenshot evidence policy. The default captures after
+  // observe-producing steps only; use "every-step" for full audit trails or
+  // "off" for high-volume embedded runs.
+  screenshotCapture?: ScreenshotCapturePolicy;
   pauseToken?: PauseToken;
   userMessageInbox?: UserMessageInbox;
   existingSession?: BrowserSession;
@@ -356,7 +361,11 @@ async function initializeState(
       skipPolicyCheck: boolean;
       actionRegistry?: ActionRegistry;
       actionContext?: { onSessionReconfigured: NonNullable<RuntimeConfig["onSessionReconfigured"]> };
+      screenshotCapture?: ScreenshotCapturePolicy;
     } = { skipPolicyCheck: true };
+    if (config.screenshotCapture !== undefined) {
+      resumeOpts.screenshotCapture = config.screenshotCapture;
+    }
     if (actionRegistry) resumeOpts.actionRegistry = actionRegistry;
     if (config.onSessionReconfigured) {
       resumeOpts.actionContext = { onSessionReconfigured: config.onSessionReconfigured };
@@ -590,7 +599,11 @@ async function runMainLoop(
       const stepOpts: {
         actionRegistry?: ActionRegistry;
         actionContext?: { onSessionReconfigured: NonNullable<RuntimeConfig["onSessionReconfigured"]> };
+        screenshotCapture?: ScreenshotCapturePolicy;
       } = {};
+      if (config.screenshotCapture !== undefined) {
+        stepOpts.screenshotCapture = config.screenshotCapture;
+      }
       if (actionRegistry) stepOpts.actionRegistry = actionRegistry;
       if (config.onSessionReconfigured) {
         stepOpts.actionContext = { onSessionReconfigured: config.onSessionReconfigured };

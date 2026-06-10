@@ -399,6 +399,56 @@ test("executeStep captures one screenshot artifact after a step", async () => {
   assert.equal(result.state.latestScreenshotBase64, Buffer.from("png bytes").toString("base64"));
 });
 
+test("executeStep does not capture screenshots for non-observing steps by default", async () => {
+  const state = createLoopState(makeTask(), makeSessionId());
+  let screenshotCalls = 0;
+  const provider = createMockProvider({
+    async screenshot() {
+      screenshotCalls++;
+      return {
+        dataBase64: Buffer.from("png bytes").toString("base64"),
+        mimeType: "image/png",
+      };
+    },
+  });
+
+  const result = await executeStep(
+    state,
+    { kind: "exec", summary: "Extract", payload: { code: "return 1;" } },
+    provider,
+    createMockPolicyEngine(),
+  );
+
+  assert.equal(screenshotCalls, 0);
+  assert.equal(result.state.events.some((event) => event.kind === "artifact" && event.payload.kind === "screenshot"), false);
+});
+
+test("executeStep captures screenshots for every step when configured", async () => {
+  const state = createLoopState(makeTask(), makeSessionId());
+  let screenshotCalls = 0;
+  const provider = createMockProvider({
+    async screenshot() {
+      screenshotCalls++;
+      return {
+        dataBase64: Buffer.from("png bytes").toString("base64"),
+        mimeType: "image/png",
+      };
+    },
+  });
+
+  const result = await executeStep(
+    state,
+    { kind: "exec", summary: "Extract", payload: { code: "return 1;" } },
+    provider,
+    createMockPolicyEngine(),
+    { screenshotCapture: "every-step" },
+  );
+
+  assert.equal(screenshotCalls, 1);
+  assert.equal(result.state.events.at(-1)?.kind, "artifact");
+  assert.equal(result.state.events.at(-1)?.payload.kind, "screenshot");
+});
+
 // ---------------------------------------------------------------------------
 // executeStep — exec action
 // ---------------------------------------------------------------------------

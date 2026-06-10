@@ -313,6 +313,21 @@ export const browserExecTargetSchema: z.ZodType<BrowserExecTarget> = z.union([
   z.object({ tabId: z.string().min(1) }).strict(),
 ]);
 
+export const browserScreenshotRequestSchema = z
+  .object({
+    sessionId: sessionIdSchema,
+    targetId: z.string().min(1).optional(),
+  })
+  .strict();
+
+export const browserScreenshotResultSchema = z
+  .object({
+    dataBase64: z.string().min(1),
+    mimeType: z.string().min(1),
+    targetId: z.string().min(1).optional(),
+  })
+  .strict();
+
 export const browserExecRequestSchema = z
   .object({
     sessionId: sessionIdSchema,

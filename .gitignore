@@ -14,3 +14,4 @@ tmp/
 .DS_Store
 pnpm-debug.log*
 *.log
+.claude/

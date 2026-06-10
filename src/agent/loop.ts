@@ -9,6 +9,7 @@ import type {
   ProposedActionDetail,
   Run,
   RunId,
+  ScreenshotCapturePolicy,
   SessionId,
   SessionConfig,
   ProfileId,
@@ -51,6 +52,10 @@ import { captureStepScreenshotArtifact } from "./screenshots.js";
 
 const DEFAULT_EXEC_TIMEOUT_MS = 12_000;
 const APPROVAL_CODE_EXCERPT_MAX = 2000;
+
+function observationEventCount(state: LoopState): number {
+  return state.events.filter((event) => event.kind === "observation").length;
+}
 
 function buildProposedActionDetail(
   action: ProposedAction,
@@ -327,6 +332,7 @@ export async function executeStep(
     skipPolicyCheck?: boolean;
     actionRegistry?: import("./actions.js").ActionRegistry;
     actionContext?: ActionExecutionContext;
+    screenshotCapture?: ScreenshotCapturePolicy;
   } = {},
 ): Promise<{
   state: LoopState;
@@ -337,6 +343,7 @@ export async function executeStep(
 }> {
   let policyDenied = false;
   let authWallHit = false;
+  const observationCountBefore = observationEventCount(state);
 
   const actionId = createId("action");
 
@@ -455,7 +462,7 @@ export async function executeStep(
     // stuck-loop guard sees non-exec actions — without this a model that
     // keeps proposing reconfigure on an unblocked page loops forever.
     state.stepCount++;
-    await captureStepScreenshotArtifact(state, provider);
+    await captureStepScreenshotArtifact(state, provider, options.screenshotCapture, observationCountBefore);
     return { state, policyDenied, authWallHit };
   }
 
@@ -636,7 +643,7 @@ export async function executeStep(
   }
 
   state.stepCount++;
-  await captureStepScreenshotArtifact(state, provider);
+  await captureStepScreenshotArtifact(state, provider, options.screenshotCapture, observationCountBefore);
   return { state, policyDenied, authWallHit };
 }
 

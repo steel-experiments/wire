@@ -106,9 +106,13 @@ export async function persistTraceArtifacts(root: string, events: TraceEvent[]):
 
     const absolutePath = resolve(root, path);
     const content = typeof event.payload.content === "string" ? event.payload.content : undefined;
+    const contentBase64 = typeof event.payload.contentBase64 === "string" ? event.payload.contentBase64 : undefined;
     if (content !== undefined) {
       await mkdir(dirname(absolutePath), { recursive: true });
       await writeFile(absolutePath, content, "utf-8");
+    } else if (contentBase64 !== undefined) {
+      await mkdir(dirname(absolutePath), { recursive: true });
+      await writeFile(absolutePath, Buffer.from(contentBase64, "base64"));
     }
 
     const artifact: Artifact = {
@@ -127,11 +131,23 @@ export async function persistTraceArtifacts(root: string, events: TraceEvent[]):
     if (typeof event.payload.filename === "string") {
       artifact.metadata.filename = event.payload.filename;
     }
+    if (event.payload.metadata && typeof event.payload.metadata === "object" && !Array.isArray(event.payload.metadata)) {
+      artifact.metadata = {
+        ...artifact.metadata,
+        ...(event.payload.metadata as Artifact["metadata"]),
+      };
+    }
     if (content !== undefined) {
       const blob = await saveTraceBlobValue(root, event.runId, "artifact-content", content, mimeType);
       artifact.metadata.contentHash = blob.hash;
       artifact.metadata.contentSize = Buffer.byteLength(content, "utf8");
       artifact.metadata.contentPreview = content.length > 500 ? `${content.slice(0, 500)}...` : content;
+    } else if (contentBase64 !== undefined) {
+      const bytes = Buffer.from(contentBase64, "base64");
+      const blob = await saveTraceBlobValue(root, event.runId, "artifact-content", contentBase64, mimeType);
+      artifact.metadata.contentHash = blob.hash;
+      artifact.metadata.contentSize = bytes.byteLength;
+      artifact.metadata.contentEncoding = "base64";
     }
 
     await saveArtifact(root, artifact);
