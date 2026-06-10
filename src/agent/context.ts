@@ -83,7 +83,7 @@ export interface ContextBundle {
 import { redactSecrets } from "../shared/redact.js";
 import {
   ACTIVE_BROWSER_SYSTEM_GUIDANCE,
-  BASE_ACTION_GUIDANCE,
+  actionGuidanceTexts,
   LOADED_SKILLS_GUIDANCE,
   NO_CONTEXT_PROMPT,
   STATE_UNCHANGED_WARNING,
@@ -96,6 +96,7 @@ import {
 // Prompt-hygiene filters live in shared/sanitize.ts so skills/ can sanitize
 // without importing agent code; re-exported here for agent-side importers.
 export { sanitizeSkillContent, stripInjectionPatterns } from "../shared/sanitize.js";
+import { stripInjectionPatterns } from "../shared/sanitize.js";
 
 /**
  * Build a compact system prompt from the context bundle.
@@ -188,9 +189,11 @@ export function assembleUserPrompt(context: ContextBundle): string {
 
   if (context.observations.length > 0) {
     const obs = context.observations[context.observations.length - 1]!;
+    // Titles and headings are page-authored text — run them through the same
+    // injection filter as extracted evidence before they enter the prompt.
     const obsParts = [`Current page: ${obs.url}`];
     if (obs.title) {
-      obsParts.push(`Title: ${obs.title}`);
+      obsParts.push(`Title: ${stripInjectionPatterns(obs.title)}`);
     }
     if (obs.targetId) {
       obsParts.push(`Selected tab: ${obs.targetId}`);
@@ -207,7 +210,12 @@ export function assembleUserPrompt(context: ContextBundle): string {
     }
     obsParts.push(`Elements: ${obs.forms} forms, ${obs.buttons} buttons, ${obs.dialogs} dialogs`);
     if (obs.headings && obs.headings.length > 0) {
-      obsParts.push(`Headings: ${obs.headings.join(" | ")}`);
+      const headings = obs.headings
+        .map((heading) => stripInjectionPatterns(heading))
+        .filter((heading) => heading.trim().length > 0);
+      if (headings.length > 0) {
+        obsParts.push(`Headings: ${headings.join(" | ")}`);
+      }
     }
     sections.push(obsParts.join("\n"));
   }
@@ -287,7 +295,7 @@ export function buildActionGuidance(context: ContextBundle): string {
 
   const lines = [
     `Use this shape: {"kind":"${allKinds}","summary":"short text","payload":{...}}.`,
-    ...BASE_ACTION_GUIDANCE,
+    ...actionGuidanceTexts({ skillsLoaded: context.skills.length > 0 }),
   ];
 
   // Add provider action descriptions

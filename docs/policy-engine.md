@@ -165,3 +165,13 @@ const customRules: PolicyRule[] = [
 
 const engine = createPolicyEngine([...BASELINE_RULES, ...customRules]);
 ```
+
+## Scope: action kinds, not destinations
+
+The baseline policy is deliberately about *what the agent does* (action kinds
+and code-derived risk), not *where it goes*: there is no built-in per-domain
+allowlist or denylist. Wire is a general browser agent — site scoping belongs
+to the task objective and the operator, not a baked-in core list. Callers that
+need a navigation boundary can express one as a custom rule (like the
+social-media example above) without any core change. Decision recorded
+2026-06-10 so future audits don't re-flag the absence as a gap.

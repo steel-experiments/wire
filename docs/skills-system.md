@@ -152,3 +152,16 @@ This helps future matching prioritize skills that have contributed to successful
 The repository does not ship a root `skills/` directory. Use the frontmatter example above as the canonical shape, or point Wire at your own directory with `--skill-dir` or `$WIRE_SKILLS`.
 
 Generated proposals are written under `.proposals/` inside the configured skill directory. Promoted active skills are written directly into that directory.
+
+## Trust boundary: skill text is data, not instructions
+
+Skill guidance is distilled from observed page content, so a hostile page can
+plant imperative text that later re-enters prompts as a Fact or Trap. The
+prompt-side filters (`shared/sanitize.ts` — injection-line stripping, system-tag
+removal, length caps) are hygiene, not a security boundary: any denylist over
+free text is bypassable. The load-bearing defense is the policy engine — the
+action kind the policy evaluates is system-derived and cannot be relabeled by
+model output, and privileged kinds gate on approval regardless of what any
+skill says. Treat skill bodies accordingly when reviewing proposals: a skill
+can mislead the planner into wasted steps, but it cannot grant itself a
+privileged action.

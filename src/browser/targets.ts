@@ -5,6 +5,11 @@ import type { BrowserExecTarget } from "../shared/types.js";
 /**
  * Resolve a target specification to a concrete value.
  * Defaults to `"active-tab"` when no target is provided.
+ *
+ * Known limitation: providers approximate "active-tab" as the first CDP page
+ * target — `Target.getTargets` ordering does not track focus, so with
+ * multiple tabs this may not be the focused one. Pass an explicit `{tabId}`
+ * (from the observation's tab list) when tab identity matters.
  */
 export function resolveTarget(target: BrowserExecTarget | undefined): BrowserExecTarget {
   return target ?? "active-tab";

@@ -199,6 +199,9 @@ export function pickTarget(targets: TargetInfo[], targetId?: string): TargetInfo
     return exact;
   }
 
+  // "active-tab" approximation: Target.getTargets ordering does not track
+  // focus, so this is the first page target, not necessarily the focused
+  // tab. Callers that care pass an explicit targetId.
   return targets[0]!;
 }
 

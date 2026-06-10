@@ -938,14 +938,12 @@ Every run must capture at least:
 - created artifacts.
 
 ### 15.6 Compare views
-The data model must support comparing runs by:
-- end state,
-- step count,
-- latency,
-- artifacts,
-- profile used,
-- helper version,
-- hypothesis association.
+Run records and trace events carry the fields needed to compare runs by end
+state, step count, latency, artifacts, profile used, helper version, and
+hypothesis association. A dedicated compare module was built and later removed
+unused (2026-06-10) — comparisons today are performed over the persisted run
+records directly (`wire export`, eval metrics); a first-class compare view
+remains roadmap, not code.
 
 ---
 
@@ -980,29 +978,56 @@ Do **not** turn the whole system into a validation maze.
 
 ---
 
-## 17) Proposed code layout
+## 17) Code layout (as built)
+
+The tree below is the actual `src/` layout (updated 2026-06-10). It differs
+from the original proposal in three ways worth knowing: trace events and
+artifacts persist under `storage/` (the `trace/` module holds only replay and
+crystallize), the planned `experiments/ablations.ts` was never built (roadmap),
+and the compare module was built and later deleted unused (see §15.6).
 
 ```text
 src/
-  agent/
+  agent/        # loop, runtime, turn, finish flow, classification, verdicts
     runtime.ts
     loop.ts
+    loop-result.ts
+    turn.ts
     context.ts
+    prompts.ts
+    action-guidance.ts
+    action-dispatch.ts
+    actions.ts
+    observation.ts
+    screenshots.ts
     planning.ts
     branching.ts
     classify.ts
-  browser/
+    contract.ts
+    critical-points.ts
+    evidence.ts
+    progress-ledger.ts
+    finish-flow.ts
+    finalize.ts
+    artifact-review.ts
+    recovery.ts
+    startup-failure.ts
+    run-limits.ts
+    state-helpers.ts
+    llm-parse.ts
+    llm-trace.ts
+    skill-context.ts
+    skill-proposals.ts
+    embedded.ts
+  browser/      # provider-facing bridge: observe/exec/raw + thin helpers
     bridge.ts
+    actions.ts
     observe.ts
     exec.ts
     raw.ts
     session.ts
     targets.ts
-    helpers/
-      forms.ts
-      clicks.ts
-      uploads.ts
-      tables.ts
+    helpers.ts
   policy/
     engine.ts
     rules.ts
@@ -1012,41 +1037,74 @@ src/
     parser.ts
     matcher.ts
     promote.ts
+    stats.ts
   trace/
-    events.ts
-    artifacts.ts
-    compare.ts
+    crystallize.ts
     replay.ts
   experiments/
     hypotheses.ts
-    ablations.ts
     summaries.ts
-  storage/
+  eval/
+    bench.ts
+    scoring.ts
+    metrics.ts
+    trajectories.ts
+  storage/      # file-based persistence: tasks, runs, events, artifacts, blobs
+    atomic.ts
     tasks.ts
     runs.ts
+    events.ts
     artifacts.ts
+    artifact-registry.ts
+    blobs.ts
     sessions.ts
+    approvals.ts
+    checkpoints.ts
   providers/
     llm/
+      types.ts   # provider-agnostic contract
+      transport.ts
       openai.ts
-      anthropic.ts
+      anthropic.ts  # also hosts the zai (GLM) provider
     browser/
       steel.ts
-      custom.ts
+      steel/
+        provider.ts
+        api.ts
+        cdp.ts
+        wire-click.ts
+        reconfigure.ts
+        code-validation.ts
+        types.ts
+  profiles/
+    auth.ts
+  cli/
+    main.ts
+    args.ts
+    runner.ts
+    runtime-config.ts
+    config.ts
+    artifacts.ts
+    storage-hints.ts
+    output.ts
+    errors.ts
+  ui/
+    stream.ts
+    review.ts
+    colors.ts
   shared/
     types.ts
-    ids.ts
-    logging.ts
     schemas.ts
-skills/
-  domain/
-  workflow/
-  interaction/
-AGENT.md
-SYSTEM.md
+    ids.ts
+    paths.ts
+    redact.ts
+    sanitize.ts
+    secrets.ts
+  index.ts
 ```
 
 ---
+
 
 ## 18) Suggested browser provider interface
 

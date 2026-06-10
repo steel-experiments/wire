@@ -190,3 +190,13 @@ export const ACTION_GUIDANCE_ITEMS: ActionGuidanceItem[] = [
 ];
 
 export const BASE_ACTION_GUIDANCE = ACTION_GUIDANCE_ITEMS.map((item) => item.text);
+
+// The `home` tag is load-bearing: core items always ship; helper items ship
+// because the helper preamble is unconditionally available in exec; skill
+// items ship only when skills are actually loaded — guidance about skills a
+// run doesn't have is prompt soup.
+export function actionGuidanceTexts(options: { skillsLoaded: boolean }): string[] {
+  return ACTION_GUIDANCE_ITEMS
+    .filter((item) => item.home !== "skill" || options.skillsLoaded)
+    .map((item) => item.text);
+}

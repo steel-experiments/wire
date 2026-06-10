@@ -31,6 +31,7 @@ export function repeatingPrompt(sameSig: number): string {
 export {
   ACTION_GUIDANCE_ITEMS,
   BASE_ACTION_GUIDANCE,
+  actionGuidanceTexts,
   type ActionGuidanceHome,
   type ActionGuidanceItem,
 } from "./action-guidance.js";
