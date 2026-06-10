@@ -20,60 +20,7 @@ import type { LLMProvider } from "../providers/llm/types.js";
 
 import { defaultAgentTurn, executeTask } from "./runtime.js";
 import { createLoopState, executeStep } from "./loop.js";
-
-function makeTask(overrides: Partial<Task> = {}): Task {
-  return {
-    id: createId("task"),
-    title: "Test task",
-    mode: "task",
-    objective: "Complete a test task",
-    constraints: [],
-    successCriteria: ["Page loads successfully"],
-    createdAt: new Date().toISOString(),
-    ...overrides,
-  };
-}
-
-function makeSessionId(): SessionId {
-  return createId("session");
-}
-
-function createMockPolicyEngine(overrides: Partial<PolicyEngine> = {}): PolicyEngine {
-  return {
-    check(_actionId, _action) {
-      return { id: createId("policy"), actionId: _actionId, result: "allow" };
-    },
-    ...overrides,
-  };
-}
-
-function createMockProvider(overrides: Partial<BrowserProvider> = {}): BrowserProvider {
-  return {
-    async createSession() {
-      throw new Error("not implemented");
-    },
-    async getSession() {
-      throw new Error("not implemented");
-    },
-    async stopSession() {
-      throw new Error("not implemented");
-    },
-    async observe(input: BrowserObserveInput): Promise<BrowserObservation> {
-      return {
-        sessionId: input.sessionId,
-        url: "https://example.com",
-        title: "Example",
-        tabs: [
-          { id: "tab-1", title: "Example", url: "https://example.com", active: true },
-        ],
-      };
-    },
-    async exec(_input: BrowserExecRequest): Promise<BrowserExecResult> {
-      return { ok: true, stdout: "ok", durationMs: 10 };
-    },
-    ...overrides,
-  };
-}
+import { createMockPolicyEngine, createMockProvider, makeSessionId, makeTask } from "./fixtures.test.js";
 
 test("initial observation is redacted before it reaches the trace", async () => {
   const task = makeTask();

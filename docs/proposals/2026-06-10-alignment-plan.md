@@ -114,3 +114,41 @@ The repo audits itself repeatedly (four prior self-audit docs in root) but findi
 - SPECS/docs describe the system as built; root holds only durable docs; the one actively-misleading doc (12.5k LOC budget) is gone.
 - Eval/experiments outputs safe to gate skills and training data on.
 - Production LOC down ~1.3k net from 17,929.
+
+---
+
+## Execution log (2026-06-10)
+
+Implemented same-day on `main`, one conventional commit per item/batch; every
+commit passed `pnpm check` (architecture + typecheck + tests). Deviations and
+judgment calls made during execution:
+
+- **A10 harness:** deleted rather than repaired (the plan's stated default) —
+  `eval/harness.ts` had no consumers and no test file; docs now point at
+  `bench.ts`, the real runner.
+- **A8 hasVisitedDomain:** the first-label match turned out to be deliberate
+  redirect tolerance (railway.app → railway.com lives in the test fixtures),
+  so only the dot-boundary bug was fixed and the label rule was documented.
+- **A8 task-summary notes:** excluded from `deriveRunResult` as planned, but
+  non-succeeded runs still surface the latest note as a *diagnostic* result —
+  it remains invisible to `hasMeaningfulDerivedResult`, so it cannot ride a
+  burned step budget to partial-success. One test that had encoded the old
+  note-to-partial behavior was updated to expect `agent-error`.
+- **B6 guidance filter:** helper-tagged items ship unconditionally because the
+  helper preamble is unconditionally available in exec — the honest filter is
+  skill-tagged items only when skills are loaded.
+- **C3 ack detectors:** NOT merged. The three detectors have genuinely
+  different semantics (key-set ack vs boolean-flag ack vs event-level
+  nav-only) and each is regression-locked; merging risked behavior change for
+  ~20 LOC. Recorded here instead of silently skipped.
+- **C3 verdict extraction:** deferred. The motivating defect (agent↔eval
+  cycle) was resolved by moving `scoring.ts` into `agent/` and `bench.ts`
+  into `cli/` (it is the `wire bench` command); the import-graph allowlist is
+  empty. A separate `verdict/` module remains an option if `agent/` keeps
+  growing, but is no longer needed for boundary hygiene.
+- **C4 attachments:** `BrowserExecRequest.attachments` deletion deferred —
+  `shared/schemas.ts` was concurrently being modified by parallel work
+  (screenshot capture); remove it in a follow-up touch of that file.
+- **C5 fixtures:** `src/agent/fixtures.test.ts` created and adopted by the
+  suites added in this plan (runtime-guards, finalize, recovery); remaining
+  suites adopt incrementally as they are touched, per plan.

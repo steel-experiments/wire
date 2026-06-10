@@ -11,45 +11,9 @@ import type { PolicyEngine } from "../policy/engine.js";
 
 import { ActionRegistry } from "./actions.js";
 import { createLoopState } from "./loop.js";
-import { tryAntiBotRecovery, type RecoverySignals } from "./recovery.js";
+import { tryAntiBotRecovery } from "./recovery.js";
+import { createMockPolicyEngine, makeLoopSignals, makeTask } from "./fixtures.test.js";
 import type { RuntimeConfig } from "./runtime.js";
-
-function makeTask(): Task {
-  return {
-    id: createId("task"),
-    title: "Recovery test",
-    mode: "task",
-    objective: "Extract listings from example.com",
-    constraints: [],
-    successCriteria: ["Listings extracted"],
-    createdAt: nowIsoUtc(),
-  };
-}
-
-function makeSignals(): RecoverySignals {
-  return {
-    policyDenied: false,
-    authWallHit: false,
-    authWallStreak: 0,
-    authWallHost: undefined,
-    antiBotRecoveryAttempted: false,
-    maxStepsReached: false,
-    awaitingApproval: false,
-    blockedByPolicy: false,
-    userCancelled: false,
-    pendingApproval: undefined,
-    pendingAction: undefined,
-    flushedEvents: 0,
-  };
-}
-
-function makePolicy(): PolicyEngine {
-  return {
-    check(actionId) {
-      return { id: createId("policy"), actionId, result: "allow" };
-    },
-  };
-}
 
 function barrierSkill(): LoadedSkill {
   return {
@@ -107,7 +71,7 @@ function makeConfig(): RuntimeConfig {
       async observe() { throw new Error("not implemented"); },
       async exec() { throw new Error("not implemented"); },
     } satisfies BrowserProvider,
-    policyEngine: makePolicy(),
+    policyEngine: createMockPolicyEngine(),
     maxSteps: 5,
     skillDir: "",
   };
@@ -115,7 +79,7 @@ function makeConfig(): RuntimeConfig {
 
 test("tryAntiBotRecovery reconfigures once when a skill names the barrier", async () => {
   const state = blockedState();
-  const signals = makeSignals();
+  const signals = makeLoopSignals();
   let reconfigures = 0;
   const registry = recoveryRegistry(async () => { reconfigures += 1; });
 
@@ -136,7 +100,7 @@ test("tryAntiBotRecovery reconfigures once when a skill names the barrier", asyn
 });
 
 test("tryAntiBotRecovery does not fire without skill evidence or on healthy pages", async () => {
-  const signals = makeSignals();
+  const signals = makeLoopSignals();
   let reconfigures = 0;
   const registry = recoveryRegistry(async () => { reconfigures += 1; });
 
@@ -163,16 +127,16 @@ test("tryAntiBotRecovery does not fire without skill evidence or on healthy page
     },
   });
   assert.equal(
-    await tryAntiBotRecovery(healthy, makeConfig(), makeSignals(), registry, async () => {}, () => false),
+    await tryAntiBotRecovery(healthy, makeConfig(), makeLoopSignals(), registry, async () => {}, () => false),
     false,
   );
 
   // Cancelled or policy-denied runs never recover.
   assert.equal(
-    await tryAntiBotRecovery(blockedState(), makeConfig(), makeSignals(), registry, async () => {}, () => true),
+    await tryAntiBotRecovery(blockedState(), makeConfig(), makeLoopSignals(), registry, async () => {}, () => true),
     false,
   );
-  const denied = makeSignals();
+  const denied = makeLoopSignals();
   denied.policyDenied = true;
   assert.equal(
     await tryAntiBotRecovery(blockedState(), makeConfig(), denied, registry, async () => {}, () => false),
@@ -184,7 +148,7 @@ test("tryAntiBotRecovery does not fire without skill evidence or on healthy page
 
 test("tryAntiBotRecovery records a traced error and returns false when the swap fails", async () => {
   const state = blockedState();
-  const signals = makeSignals();
+  const signals = makeLoopSignals();
   const registry = recoveryRegistry(async () => {
     throw new Error("session create failed");
   });
