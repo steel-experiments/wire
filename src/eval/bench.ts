@@ -10,7 +10,7 @@ import { listTraceEvents } from "../storage/events.js";
 import { listArtifacts } from "../storage/artifacts.js";
 import { computeTaskMetrics, type TaskMetrics } from "./metrics.js";
 import { createOpenAIProvider } from "../providers/llm/openai.js";
-import { createAnthropicProvider } from "../providers/llm/anthropic.js";
+import { createAnthropicProvider, createZaiProvider } from "../providers/llm/anthropic.js";
 import { nowIsoUtc } from "../shared/ids.js";
 import { atomicWriteJson, ensureDir, entityDir, entityPath, listJsonFiles, readJsonFile } from "../storage/atomic.js";
 import { defaultStorageRoot } from "../shared/paths.js";
@@ -316,6 +316,7 @@ function createJudgeProvider(
   const selected = resolveProviderSelection(provider, model);
   if (selected === "openai") return createOpenAIProvider(model ? { model } : undefined);
   if (selected === "anthropic") return createAnthropicProvider(model ? { model } : undefined);
+  if (selected === "zai") return createZaiProvider(model ? { model } : undefined);
   return undefined;
 }
 

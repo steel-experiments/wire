@@ -8,7 +8,7 @@ import {
   LLMNetworkError,
 } from "./openai.js";
 import type { ChatMessage, ChatOptions } from "./openai.js";
-import { AnthropicProvider, createAnthropicProvider } from "./anthropic.js";
+import { AnthropicProvider, createAnthropicProvider, createZaiProvider } from "./anthropic.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -831,5 +831,110 @@ test("createAnthropicProvider ignores invalid ANTHROPIC_REASONING_EFFORT", async
     globalThis.fetch = originalFetch;
     if (originalEnv === undefined) delete process.env.ANTHROPIC_REASONING_EFFORT;
     else process.env.ANTHROPIC_REASONING_EFFORT = originalEnv;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Z.ai — createZaiProvider
+// ---------------------------------------------------------------------------
+
+test("createZaiProvider throws when no apiKey or env var", () => {
+  const original = process.env.ZAI_API_KEY;
+  delete process.env.ZAI_API_KEY;
+
+  try {
+    assert.throws(() => createZaiProvider(), /ZAI_API_KEY is required/);
+  } finally {
+    if (original) process.env.ZAI_API_KEY = original;
+  }
+});
+
+test("createZaiProvider uses env ZAI_API_KEY and defaults to glm model", () => {
+  const original = process.env.ZAI_API_KEY;
+  process.env.ZAI_API_KEY = "env-test-key";
+
+  try {
+    const provider = createZaiProvider();
+    assert.ok(provider instanceof AnthropicProvider);
+    assert.equal(provider.model, "glm-4.7");
+  } finally {
+    if (original) {
+      process.env.ZAI_API_KEY = original;
+    } else {
+      delete process.env.ZAI_API_KEY;
+    }
+  }
+});
+
+test("createZaiProvider targets the Z.ai Anthropic-protocol endpoint", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedUrl = "";
+  let capturedHeaders: Record<string, string> = {};
+
+  globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => {
+    capturedUrl = input.toString();
+    capturedHeaders = init?.headers as Record<string, string>;
+    return makeAnthropicResponse();
+  };
+
+  try {
+    const provider = createZaiProvider({ apiKey: "test-key" });
+    await provider.chat(makeMessages());
+    assert.equal(capturedUrl, "https://api.z.ai/api/anthropic/v1/messages");
+    assert.equal(capturedHeaders["x-api-key"], "test-key");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("createZaiProvider honors baseUrl and model overrides", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedUrl = "";
+  let capturedBody: Record<string, unknown> = {};
+
+  globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => {
+    capturedUrl = input.toString();
+    capturedBody = JSON.parse(init?.body as string) as Record<string, unknown>;
+    return makeAnthropicResponse();
+  };
+
+  try {
+    const provider = createZaiProvider({
+      apiKey: "test-key",
+      baseUrl: "https://proxy.example.com/anthropic/v1",
+      model: "glm-4.5-air",
+    });
+    await provider.chat(makeMessages());
+    assert.ok(capturedUrl.startsWith("https://proxy.example.com/anthropic/v1/"));
+    assert.equal(capturedBody.model, "glm-4.5-air");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("AnthropicProvider.chat throws LLMApiError on 200 body without content array", async () => {
+  const originalFetch = globalThis.fetch;
+
+  // Some Anthropic-compatible gateways (e.g. Z.ai on a wrong path) return
+  // HTTP 200 with an error body instead of a proper error status.
+  globalThis.fetch = async () => {
+    return new Response(JSON.stringify({ code: 500, msg: "404 NOT_FOUND", success: false }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  try {
+    const provider = new AnthropicProvider({ apiKey: "test-key" });
+    await assert.rejects(
+      () => provider.chat(makeMessages()),
+      (err: unknown) => {
+        assert.ok(err instanceof LLMApiError);
+        assert.match((err as Error).message, /404 NOT_FOUND/);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });

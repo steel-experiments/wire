@@ -2,7 +2,7 @@ import { parseArgs, formatHelp, type CliArgs } from "./args.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { approveRun, runTask, type RunOptions } from "./runner.js";
-import { loadConfig, resolveLlmConfig } from "./config.js";
+import { loadConfig, normalizeProvider, resolveLlmConfig } from "./config.js";
 import { formatReview } from "../ui/review.js";
 import { loadRun, listRuns } from "../storage/runs.js";
 import { listArtifacts } from "../storage/artifacts.js";
@@ -203,11 +203,11 @@ async function handleRun(
     const llm = resolveLlmConfig(
       args.provider,
       args.model,
-      process.env.WIRE_PROVIDER === "openai" || process.env.WIRE_PROVIDER === "anthropic"
-        ? process.env.WIRE_PROVIDER
-        : undefined,
+      normalizeProvider(process.env.WIRE_PROVIDER),
       process.env.WIRE_MODEL,
       config,
+      args.baseUrl,
+      process.env.WIRE_BASE_URL,
     );
 
     const opts: RunOptions = { objective };
@@ -216,6 +216,7 @@ async function handleRun(
     if (args.profileId) opts.profileId = args.profileId;
     if (llm.provider) opts.provider = llm.provider;
     if (llm.model) opts.model = llm.model;
+    if (llm.baseUrl) opts.baseUrl = llm.baseUrl;
     if (args.maxSteps) opts.maxSteps = args.maxSteps;
     if (args.skillDir) opts.skillDir = args.skillDir;
     if (args.useProxy !== undefined) opts.sessionConfig = { ...(opts.sessionConfig ?? {}), useProxy: args.useProxy };

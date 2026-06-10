@@ -665,3 +665,17 @@ test("main rejects unknown run-id subcommand instead of running it as a task", a
 
   assert.ok(errors.some((line) => /Unknown command after --run-id/u.test(line)));
 });
+
+// ---------------------------------------------------------------------------
+// parseArgs — provider and base URL
+// ---------------------------------------------------------------------------
+
+test("parseArgs accepts zai as a provider", () => {
+  const args = parseArgs(["node", "wire", "get title", "--provider", "zai"]);
+  assert.equal(args.provider, "zai");
+});
+
+test("parseArgs parses --base-url", () => {
+  const args = parseArgs(["node", "wire", "get title", "--base-url", "https://api.z.ai/api/anthropic/v1"]);
+  assert.equal(args.baseUrl, "https://api.z.ai/api/anthropic/v1");
+});

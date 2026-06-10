@@ -172,3 +172,40 @@ test("createExperimentBundleFromRuns creates comparisons and summary", () => {
   assert.equal(bundle.comparisons[0]!.rhsRunId, runs[1]!.id);
   assert.ok(bundle.summary);
 });
+
+// ---------------------------------------------------------------------------
+// resolveProviderSelection — Z.ai
+// ---------------------------------------------------------------------------
+
+test("resolveProviderSelection infers zai from glm model", () => {
+  assert.equal(resolveProviderSelection(undefined, "glm-4.7"), "zai");
+  assert.equal(resolveProviderSelection(undefined, "GLM-4.5-Air"), "zai");
+});
+
+test("resolveProviderSelection rejects mismatched provider and glm model", () => {
+  assert.throws(
+    () => resolveProviderSelection("openai", "glm-4.7"),
+    /does not match provider/,
+  );
+});
+
+test("resolveProviderSelection falls back to zai when only ZAI_API_KEY exists", () => {
+  const originalOpenAi = process.env.OPENAI_API_KEY;
+  const originalAnthropic = process.env.ANTHROPIC_API_KEY;
+  const originalZai = process.env.ZAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+  process.env.ZAI_API_KEY = "zai-test-key";
+
+  try {
+    assert.equal(resolveProviderSelection(undefined, undefined), "zai");
+  } finally {
+    if (originalOpenAi !== undefined) process.env.OPENAI_API_KEY = originalOpenAi;
+    if (originalAnthropic !== undefined) process.env.ANTHROPIC_API_KEY = originalAnthropic;
+    if (originalZai === undefined) {
+      delete process.env.ZAI_API_KEY;
+    } else {
+      process.env.ZAI_API_KEY = originalZai;
+    }
+  }
+});

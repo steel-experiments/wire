@@ -3,7 +3,7 @@ import { autoApprovingEngine, createPolicyEngine, type PolicyEngine } from "../p
 import { createSteelActionHandlers, createSteelProvider } from "../providers/browser/steel.js";
 import type { LLMProvider } from "../providers/llm/openai.js";
 import { createOpenAIProvider } from "../providers/llm/openai.js";
-import { createAnthropicProvider } from "../providers/llm/anthropic.js";
+import { createAnthropicProvider, createZaiProvider } from "../providers/llm/anthropic.js";
 import type { RuntimeConfig } from "../agent/runtime.js";
 import { loadSession, saveSession } from "../storage/sessions.js";
 import { saveTraceBlobValue } from "../storage/blobs.js";
@@ -17,6 +17,7 @@ export interface RunOptions {
   profileId?: string;
   provider?: LlmProvider;
   model?: string;
+  baseUrl?: string;
   maxSteps?: number;
   skillDir?: string;
   sessionConfig?: SessionConfig;
@@ -43,6 +44,7 @@ function inferProviderFromModel(model?: string): LlmProvider | undefined {
   if (!model) return undefined;
   if (/^(gpt-|o[1-9]|o\d|chatgpt-)/u.test(model)) return "openai";
   if (/^claude-/u.test(model)) return "anthropic";
+  if (/^glm-/iu.test(model)) return "zai";
   return undefined;
 }
 
@@ -54,22 +56,33 @@ export function resolveProviderSelection(provider?: LlmProvider, model?: string)
   if (provider) return provider;
   if (inferred) return inferred;
 
+  // Key detection reads process.env, which includes .env (loaded at startup).
+  // When several keys are present the first match wins; set WIRE_PROVIDER to
+  // pick a default explicitly.
   const hasOpenAi = Boolean(process.env.OPENAI_API_KEY);
   const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY);
+  const hasZai = Boolean(process.env.ZAI_API_KEY);
   if (hasOpenAi) return "openai";
   if (hasAnthropic) return "anthropic";
+  if (hasZai) return "zai";
   return undefined;
 }
 
-function createLlmProvider(provider?: LlmProvider, model?: string): LLMProvider | undefined {
+function createLlmProvider(provider?: LlmProvider, model?: string, baseUrl?: string): LLMProvider | undefined {
   const selectedProvider = resolveProviderSelection(provider, model);
+  if (!selectedProvider) return undefined;
+
+  const factoryConfig: { model?: string; baseUrl?: string } = {};
+  if (model) factoryConfig.model = model;
+  if (baseUrl) factoryConfig.baseUrl = baseUrl;
+
   if (selectedProvider === "openai") {
-    return createOpenAIProvider(model ? { model } : undefined);
+    return createOpenAIProvider(factoryConfig);
   }
   if (selectedProvider === "anthropic") {
-    return createAnthropicProvider(model ? { model } : undefined);
+    return createAnthropicProvider(factoryConfig);
   }
-  return undefined;
+  return createZaiProvider(factoryConfig);
 }
 
 function defaultMaxSteps(mode: "task" | "investigate" | "experiment"): number {
@@ -89,7 +102,7 @@ export function resolveCriticalPointReview(
 }
 
 export function createRuntimeConfig(
-  options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "sessionConfig" | "provider" | "model" | "yes" | "json" | "mode" | "verbose" | "quiet" | "color" | "keepSessionOpen" | "traceLlmMessages" | "criticalPointReview">,
+  options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "sessionConfig" | "provider" | "model" | "baseUrl" | "yes" | "json" | "mode" | "verbose" | "quiet" | "color" | "keepSessionOpen" | "traceLlmMessages" | "criticalPointReview">,
 ): RuntimeConfig {
   let policyEngine: PolicyEngine = createPolicyEngine();
   if (options.yes) {
@@ -152,7 +165,7 @@ export function createRuntimeConfig(
     config.traceSink = { onEvent: (event) => consoleSink.onEvent(event) };
   }
 
-  const llmProvider = createLlmProvider(options.provider, options.model);
+  const llmProvider = createLlmProvider(options.provider, options.model, options.baseUrl);
   if (llmProvider) {
     config.llmProvider = llmProvider;
   }

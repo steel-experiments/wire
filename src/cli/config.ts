@@ -5,11 +5,12 @@ import { wireHome } from "../shared/paths.js";
 
 // Config types
 
-export type LlmProvider = "openai" | "anthropic";
+export type LlmProvider = "openai" | "anthropic" | "zai";
 
 export interface LlmConfig {
   provider?: LlmProvider;
   model?: string;
+  baseUrl?: string;
 }
 
 export interface WireConfig {
@@ -25,8 +26,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function normalizeProvider(value: unknown): LlmProvider | undefined {
-  return value === "openai" || value === "anthropic" ? value : undefined;
+export function normalizeProvider(value: unknown): LlmProvider | undefined {
+  return value === "openai" || value === "anthropic" || value === "zai" ? value : undefined;
 }
 
 function normalizeSessionConfig(raw: unknown): SessionConfig | undefined {
@@ -82,7 +83,10 @@ function normalizeConfig(raw: unknown): WireConfig {
     if (typeof raw["llm"]["model"] === "string") {
       llm.model = raw["llm"]["model"];
     }
-    if (llm.provider || llm.model) {
+    if (typeof raw["llm"]["baseUrl"] === "string") {
+      llm.baseUrl = raw["llm"]["baseUrl"];
+    }
+    if (llm.provider || llm.model || llm.baseUrl) {
       config.llm = llm;
     }
   }
@@ -139,7 +143,7 @@ export async function loadConfig(dir?: string, userDir?: string, strict?: boolea
     ...(project.llm ?? {}),
   };
 
-  if (llm.provider || llm.model) {
+  if (llm.provider || llm.model || llm.baseUrl) {
     merged.llm = llm;
   }
 
@@ -162,9 +166,12 @@ export function resolveLlmConfig(
   envProvider?: LlmProvider,
   env?: string,
   config?: WireConfig,
+  cliBaseUrl?: string,
+  envBaseUrl?: string,
 ): LlmConfig {
   const provider = cliProvider ?? envProvider ?? config?.llm?.provider ?? config?.provider;
   const model = cli ?? env ?? config?.llm?.model ?? config?.model;
+  const baseUrl = cliBaseUrl ?? envBaseUrl ?? config?.llm?.baseUrl;
 
   const resolved: LlmConfig = {};
   if (provider) {
@@ -172,6 +179,9 @@ export function resolveLlmConfig(
   }
   if (model) {
     resolved.model = model;
+  }
+  if (baseUrl) {
+    resolved.baseUrl = baseUrl;
   }
   return resolved;
 }

@@ -227,3 +227,58 @@ test("loadConfig preserves legacy root model fields", async () => {
     await rm(dir, { recursive: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Z.ai provider and baseUrl
+// ---------------------------------------------------------------------------
+
+test("resolveLlmConfig accepts zai provider and resolves baseUrl precedence", () => {
+  const config = resolveLlmConfig(
+    "zai",
+    undefined,
+    undefined,
+    undefined,
+    { llm: { provider: "openai", baseUrl: "https://config.example.com/v1" } },
+    "https://cli.example.com/v1",
+    "https://env.example.com/v1",
+  );
+  assert.equal(config.provider, "zai");
+  assert.equal(config.baseUrl, "https://cli.example.com/v1");
+});
+
+test("resolveLlmConfig falls back to env baseUrl then config baseUrl", () => {
+  const fromEnv = resolveLlmConfig(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { llm: { baseUrl: "https://config.example.com/v1" } },
+    undefined,
+    "https://env.example.com/v1",
+  );
+  assert.equal(fromEnv.baseUrl, "https://env.example.com/v1");
+
+  const fromConfig = resolveLlmConfig(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { llm: { baseUrl: "https://config.example.com/v1" } },
+  );
+  assert.equal(fromConfig.baseUrl, "https://config.example.com/v1");
+});
+
+test("loadConfig reads zai provider and llm.baseUrl from wire.json", async () => {
+  const dir = await makeIsolatedDir();
+  try {
+    await writeFile(join(dir, "wire.json"), JSON.stringify({
+      llm: { provider: "zai", model: "glm-4.7", baseUrl: "https://api.z.ai/api/anthropic/v1" },
+    }));
+    const config = await loadConfig(dir, dir);
+    assert.equal(config.llm?.provider, "zai");
+    assert.equal(config.llm?.model, "glm-4.7");
+    assert.equal(config.llm?.baseUrl, "https://api.z.ai/api/anthropic/v1");
+  } finally {
+    await rm(dir, { recursive: true });
+  }
+});

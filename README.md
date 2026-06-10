@@ -16,7 +16,7 @@ pnpm test          # 828 tests across 40 files
 
 # Set up API keys
 export STEEL_API_KEY=...     # browser infrastructure
-export OPENAI_API_KEY=...    # or ANTHROPIC_API_KEY
+export OPENAI_API_KEY=...    # or ANTHROPIC_API_KEY / ZAI_API_KEY
 
 # Run a task
 npx tsx src/index.ts run --objective "Navigate to example.com and verify the title"
@@ -95,13 +95,15 @@ Every run gets one of:
 
 LLM settings resolve in priority order:
 
-1. CLI flags: `--provider openai --model gpt-5.4-mini`
-2. Environment: `WIRE_PROVIDER`, `WIRE_MODEL`
-3. Project config: `wire.json` → `{"llm":{"provider":"openai","model":"gpt-5.4-mini"}}`
+1. CLI flags: `--provider openai --model gpt-5.4-mini --base-url https://proxy.example.com/v1`
+2. Environment: `WIRE_PROVIDER`, `WIRE_MODEL`, `WIRE_BASE_URL`
+3. Project config: `wire.json` → `{"llm":{"provider":"openai","model":"gpt-5.4-mini","baseUrl":"..."}}`
 4. User config: `$WIRE_HOME/config.json` (default: `~/.wire/config.json`)
-5. Default: `gpt-5.4-mini` for OpenAI, `claude-sonnet-4-6` for Anthropic
+5. Default: `gpt-5.4-mini` for OpenAI, `claude-sonnet-4-6` for Anthropic, `glm-4.7` for Z.ai
 
-If both API keys are present and no provider or inferable model is configured, Wire defaults to OpenAI. Use `--provider`, `WIRE_PROVIDER`, or `llm.provider` to choose Anthropic. Wire rejects mismatched provider/model pairs.
+Wire loads `.env` from the working directory at startup, so API keys and `WIRE_*` overrides can live there. If multiple API keys are present and no provider or inferable model is configured, Wire picks the first of OpenAI, Anthropic, Z.ai. Set `WIRE_PROVIDER` (e.g. in `.env`) to choose the default explicitly. Wire rejects mismatched provider/model pairs.
+
+The `zai` provider runs GLM models (GLM Coding Plan) through Z.ai's Anthropic-protocol coding endpoint; `glm-*` models infer it automatically. `--base-url` / `WIRE_BASE_URL` / `llm.baseUrl` point any provider at a compatible alternate endpoint. Note that the OpenAI provider speaks the Responses API, so OpenAI-compatible Chat Completions endpoints will not work with it.
 
 ### Environment variables
 
@@ -110,8 +112,10 @@ If both API keys are present and no provider or inferable model is configured, W
 | `STEEL_API_KEY` | Steel browser API key (required) |
 | `OPENAI_API_KEY` | OpenAI API key |
 | `ANTHROPIC_API_KEY` | Anthropic API key |
-| `WIRE_PROVIDER` | Override LLM provider (`openai` or `anthropic`) |
+| `ZAI_API_KEY` | Z.ai API key (GLM models) |
+| `WIRE_PROVIDER` | Override LLM provider (`openai`, `anthropic`, or `zai`) |
 | `WIRE_MODEL` | Override LLM model |
+| `WIRE_BASE_URL` | Override LLM API base URL |
 | `WIRE_LLM_TIMEOUT_MS` | LLM request timeout (default: `60000`) |
 | `WIRE_LLM_MAX_RETRIES` | LLM transient network retry count (default: `2`) |
 | `WIRE_HOME` | User-level Wire home (default: `~/.wire`) |

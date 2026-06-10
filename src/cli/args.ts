@@ -1,5 +1,6 @@
 import type { TaskMode } from "../shared/types.js";
 import type { LlmProvider } from "./config.js";
+import { normalizeProvider } from "./config.js";
 import type { TrajectoryExportFormat } from "../eval/trajectories.js";
 
 export interface CliArgs {
@@ -12,6 +13,7 @@ export interface CliArgs {
   profileId?: string;
   provider?: LlmProvider;
   model?: string;
+  baseUrl?: string;
   maxSteps?: number;
   skillDir?: string;
   useProxy?: boolean;
@@ -124,9 +126,9 @@ export function parseArgs(argv: string[]): CliArgs {
 
     if (arg === "--provider") {
       i++;
-      const val = args[i];
-      if (val === "openai" || val === "anthropic") {
-        result.provider = val;
+      const provider = normalizeProvider(args[i]);
+      if (provider) {
+        result.provider = provider;
       }
       i++;
       continue;
@@ -137,6 +139,16 @@ export function parseArgs(argv: string[]): CliArgs {
       const val = args[i];
       if (val !== undefined) {
         result.model = val;
+      }
+      i++;
+      continue;
+    }
+
+    if (arg === "--base-url") {
+      i++;
+      const val = args[i];
+      if (val !== undefined) {
+        result.baseUrl = val;
       }
       i++;
       continue;
@@ -371,8 +383,9 @@ export function formatHelp(): string {
     "  --task-file <path>       Load task from a JSON file",
     "  --mode <mode>            Task mode: task | investigate | experiment",
     "  --profile <profile-id>   Browser profile to use",
-    "  --provider <provider>    LLM provider: openai | anthropic",
-    "  --model <model-id>       LLM model to use (e.g. gpt-5.4-mini, claude-sonnet-4-6)",
+    "  --provider <provider>    LLM provider: openai | anthropic | zai",
+    "  --model <model-id>       LLM model to use (e.g. gpt-5.4-mini, claude-sonnet-4-6, glm-4.7)",
+    "  --base-url <url>         LLM API base URL override (e.g. an Anthropic-compatible proxy)",
     "  --max-steps <n>          Maximum agent steps",
     "  --skill-dir <path>       Directory of skill definitions",
     "  --use-proxy              Start browser with provider proxy enabled",

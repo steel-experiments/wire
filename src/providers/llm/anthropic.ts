@@ -27,6 +27,11 @@ export interface AnthropicProviderConfig {
 const DEFAULT_BASE_URL = "https://api.anthropic.com/v1";
 const DEFAULT_MODEL = "claude-sonnet-4-6";
 
+// Z.ai serves GLM models over the Anthropic Messages protocol, so the zai
+// provider is the AnthropicProvider pointed at Z.ai's coding endpoint.
+const ZAI_BASE_URL = "https://api.z.ai/api/anthropic/v1";
+const ZAI_DEFAULT_MODEL = "glm-4.7";
+
 // Anthropic API response types
 
 interface AnthropicContentBlock {
@@ -158,6 +163,12 @@ export class AnthropicProvider implements LLMProvider {
 
     const data = (await response.json()) as AnthropicMessageResponse;
 
+    // Some Anthropic-compatible gateways return HTTP 200 with an error body
+    // (e.g. Z.ai answers a wrong path with {"code":500,"msg":"404 NOT_FOUND"}).
+    if (!Array.isArray(data.content)) {
+      throw new LLMApiError("anthropic", response.status, JSON.stringify(data).slice(0, 200));
+    }
+
     // Concatenate text blocks into a single content string
     const content = data.content
       .filter((block) => block.type === "text" && block.text !== undefined)
@@ -200,6 +211,30 @@ export function createAnthropicProvider(
   }
 
   const reasoningEffort = config?.reasoningEffort ?? parseAnthropicReasoningEffort(process.env.ANTHROPIC_REASONING_EFFORT);
+  if (reasoningEffort) {
+    providerConfig.reasoningEffort = reasoningEffort;
+  }
+
+  return new AnthropicProvider(providerConfig);
+}
+
+export function createZaiProvider(
+  config?: Partial<AnthropicProviderConfig>,
+): AnthropicProvider {
+  const apiKey = config?.apiKey ?? process.env.ZAI_API_KEY ?? "";
+  if (!apiKey) {
+    throw new Error(
+      "ZAI_API_KEY is required. Set the environment variable or pass apiKey in config.",
+    );
+  }
+
+  const providerConfig: AnthropicProviderConfig = {
+    apiKey,
+    baseUrl: config?.baseUrl ?? ZAI_BASE_URL,
+    model: config?.model ?? ZAI_DEFAULT_MODEL,
+  };
+
+  const reasoningEffort = config?.reasoningEffort ?? parseAnthropicReasoningEffort(process.env.ZAI_REASONING_EFFORT);
   if (reasoningEffort) {
     providerConfig.reasoningEffort = reasoningEffort;
   }
