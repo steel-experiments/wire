@@ -1,5 +1,5 @@
 import type { BrowserProvider } from "../browser/bridge.js";
-import type { LLMProvider, ChatMessage, ContentPart } from "../providers/llm/openai.js";
+import type { LLMProvider, ChatMessage, ContentPart } from "../providers/llm/types.js";
 import type { JsonObject, ProposedAction, TraceEvent } from "../shared/types.js";
 import { assembleSystemPrompt, assembleUserPrompt, buildActionGuidance, type ContextBundle } from "./context.js";
 import { contractToPrompt } from "./contract.js";

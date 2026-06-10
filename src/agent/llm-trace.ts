@@ -1,6 +1,6 @@
 import type { JsonObject, JsonValue, TraceBlobKind, TraceBlobRef, TraceEvent } from "../shared/types.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
-import type { ChatMessage, ChatOptions, ChatResponse, LLMProvider } from "../providers/llm/openai.js";
+import type { ChatMessage, ChatOptions, ChatResponse, LLMProvider } from "../providers/llm/types.js";
 import type { LoopState } from "./loop.js";
 
 export interface LlmTraceOptions {

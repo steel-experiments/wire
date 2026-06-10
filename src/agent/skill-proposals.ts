@@ -1,5 +1,5 @@
 import type { JsonObject } from "../shared/types.js";
-import type { LLMProvider } from "../providers/llm/openai.js";
+import type { LLMProvider } from "../providers/llm/types.js";
 import {
   DEFAULT_SKILL_PROMOTION_POLICY,
   generateSkillProposal,

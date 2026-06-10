@@ -1,5 +1,5 @@
-import type { ChatMessage, ChatOptions, ChatResponse, ContentPart, LLMProvider } from "./openai.js";
-import { LLMApiError } from "./openai.js";
+import type { ChatMessage, ChatOptions, ChatResponse, ContentPart, LLMProvider } from "./types.js";
+import { LLMApiError } from "./types.js";
 import { fetchWithRetry, resolveTransportOptions } from "./transport.js";
 import type { TransportOptions } from "./transport.js";
 

@@ -1,6 +1,6 @@
 import type { JsonObject, TraceEvent } from "../shared/types.js";
 import { redactSecrets } from "../shared/redact.js";
-import type { ChatMessage, LLMProvider } from "../providers/llm/openai.js";
+import type { ChatMessage, LLMProvider } from "../providers/llm/types.js";
 import { stripInjectionPatterns } from "./context.js";
 import { contractToPrompt } from "./contract.js";
 import { proposeCriticalPoints, reviewCriticalPoints } from "./critical-points.js";

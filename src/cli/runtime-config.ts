@@ -1,7 +1,7 @@
 import type { SessionConfig } from "../shared/types.js";
 import { autoApprovingEngine, createPolicyEngine, type PolicyEngine } from "../policy/engine.js";
 import { createSteelActionHandlers, createSteelProvider } from "../providers/browser/steel.js";
-import type { LLMProvider } from "../providers/llm/openai.js";
+import type { LLMProvider } from "../providers/llm/types.js";
 import { createOpenAIProvider } from "../providers/llm/openai.js";
 import { createAnthropicProvider, createZaiProvider } from "../providers/llm/anthropic.js";
 import type { RuntimeConfig } from "../agent/runtime.js";

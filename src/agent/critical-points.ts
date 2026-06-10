@@ -3,7 +3,7 @@
 // reviewer judges evidence against each point instead of one all-or-nothing verdict.
 
 import type { Task } from "../shared/types.js";
-import type { ChatMessage, LLMProvider } from "../providers/llm/openai.js";
+import type { ChatMessage, LLMProvider } from "../providers/llm/types.js";
 import { extractFirstJsonArray } from "./llm-parse.js";
 
 export interface CriticalPoint {

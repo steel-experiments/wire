@@ -1,7 +1,7 @@
 // ABOUTME: Resilient fetch transport shared by LLM providers.
 // ABOUTME: Adds a per-request timeout and a bounded retry on transient network failures.
 
-import { LLMNetworkError } from "./openai.js";
+import { LLMNetworkError } from "./types.js";
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_MAX_RETRIES = 2;

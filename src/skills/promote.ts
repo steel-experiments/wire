@@ -7,7 +7,7 @@ import type {
   SkillId,
   TraceEvent,
 } from "../shared/types.js";
-import type { LLMProvider, ChatMessage } from "../providers/llm/openai.js";
+import type { LLMProvider, ChatMessage } from "../providers/llm/types.js";
 import { parseSkillFile } from "./parser.js";
 
 export interface PromotionCandidate {

@@ -7,7 +7,7 @@ import { ensureDir } from "../storage/atomic.js";
 import { scoreSkills, sortByRelevance, type SkillMatchScore } from "./matcher.js";
 import { extractSections, parseSkillFile } from "./parser.js";
 import { readSkillStats, type SkillStats } from "./stats.js";
-import { sanitizeSkillContent } from "../agent/context.js";
+import { sanitizeSkillContent } from "../shared/sanitize.js";
 
 // Load all skills from a directory
 

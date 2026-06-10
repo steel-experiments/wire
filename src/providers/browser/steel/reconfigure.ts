@@ -1,4 +1,4 @@
-import type { ActionHandler } from "../../../agent/actions.js";
+import type { ActionHandler } from "../../../browser/actions.js";
 import type { CreateSessionInput, JsonObject, SessionConfig } from "../../../shared/types.js";
 import { createId, nowIsoUtc } from "../../../shared/ids.js";
 import { normalizeSteelRegion, sanitizedSessionConfig } from "./api.js";

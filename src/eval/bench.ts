@@ -1,5 +1,5 @@
 import type { Run, RunId, TaskId, TraceEvent, SessionConfig } from "../shared/types.js";
-import type { LLMProvider } from "../providers/llm/openai.js";
+import type { LLMProvider } from "../providers/llm/types.js";
 import type { LlmProvider } from "../cli/config.js";
 
 import { readFile } from "node:fs/promises";

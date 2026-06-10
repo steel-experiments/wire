@@ -1,23 +1,11 @@
-import type { LoopState } from "./loop.js";
-import type { BrowserSession, ProposedAction, SessionId } from "../shared/types.js";
-import type { BrowserProvider } from "../browser/bridge.js";
-
-export interface ActionExecutionContext {
-  onSessionReconfigured?: (
-    details: { oldSessionId: SessionId; newSession: BrowserSession; summary: string },
-  ) => Promise<void> | void;
-}
-
-export interface ActionHandler {
-  kind: string;
-  description: string;
-  execute(
-    state: LoopState,
-    action: ProposedAction,
-    provider: BrowserProvider,
-    context?: ActionExecutionContext,
-  ): Promise<{ authWallHit?: boolean }>;
-}
+// The handler contract lives in browser/actions.ts so providers can implement
+// handlers without importing agent code; re-exported here for agent callers.
+export type {
+  ActionExecutionContext,
+  ActionHandler,
+  ActionHandlerState,
+} from "../browser/actions.js";
+import type { ActionHandler } from "../browser/actions.js";
 
 export class ActionRegistry {
   private readonly handlers = new Map<string, ActionHandler>();

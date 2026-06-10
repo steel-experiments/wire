@@ -4,7 +4,7 @@ import type { z } from "zod";
 
 import type { BrowserProvider } from "../browser/bridge.js";
 import { createPolicyEngine, type PolicyEngine } from "../policy/engine.js";
-import type { LLMProvider } from "../providers/llm/openai.js";
+import type { LLMProvider } from "../providers/llm/types.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
 import type {
   BrowserSession,

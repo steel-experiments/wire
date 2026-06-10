@@ -1,8 +1,18 @@
 
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { LoopResult } from "../agent/loop.js";
-import type { RunClassificationKind, RunId, SkillId, TraceEvent } from "../shared/types.js";
+import type { Run, RunClassificationKind, RunId, SkillId, TraceEvent } from "../shared/types.js";
+
+// The slice of a finished run the stats updater reads. Structurally satisfied
+// by the agent's LoopResult so skills/ never imports agent code.
+export interface SkillRunOutcome {
+  run: Run;
+  events: TraceEvent[];
+  classification: { kind: RunClassificationKind };
+  stepCount: number;
+  startedAt: string;
+  usage?: { totalTokens?: number | undefined } | undefined;
+}
 
 const MAX_RUN_SAMPLES = 20;
 
@@ -116,7 +126,7 @@ export async function writeSkillStats(skillDir: string, skillId: string, stats: 
   await writeFile(statsPath(skillDir, skillId), JSON.stringify(normalizeSkillStats(stats), null, 2), "utf-8");
 }
 
-export async function updateSkillStatsFromRun(skillDir: string, result: LoopResult): Promise<void> {
+export async function updateSkillStatsFromRun(skillDir: string, result: SkillRunOutcome): Promise<void> {
   const skillIds = extractLoadedSkills(result.events, result.run.id);
   if (skillIds.length === 0) return;
   const succeeded = result.classification.kind === "task-complete";

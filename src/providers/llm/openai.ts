@@ -1,16 +1,14 @@
-// LLM provider contract
+// OpenAI provider (Responses API)
 
 import { fetchWithRetry, resolveTransportOptions } from "./transport.js";
 import type { TransportOptions } from "./transport.js";
+import { LLMApiError, LLMNetworkError, LLMProviderError } from "./types.js";
+import type { ChatMessage, ChatOptions, ChatResponse, ContentPart, LLMProvider } from "./types.js";
 
-export type ContentPart =
-  | { type: "text"; text: string }
-  | { type: "image_url"; image_url: { url: string } };
-
-export interface ChatMessage {
-  role: "system" | "user" | "assistant";
-  content: string | ContentPart[];
-}
+// Re-export the provider-agnostic contract so existing importers keep working;
+// new code should import from ./types.js directly.
+export { LLMApiError, LLMNetworkError, LLMProviderError } from "./types.js";
+export type { ChatMessage, ChatOptions, ChatResponse, ContentPart, LLMProvider } from "./types.js";
 
 export type OpenAIReasoningEffort = "none" | "low" | "medium" | "high" | "xhigh";
 
@@ -20,61 +18,6 @@ export function parseOpenAIReasoningEffort(value: unknown): OpenAIReasoningEffor
   return (OPENAI_REASONING_EFFORT_VALUES as readonly string[]).includes(value as string)
     ? (value as OpenAIReasoningEffort)
     : undefined;
-}
-
-export interface ChatOptions {
-  model?: string;
-  temperature?: number;
-  maxTokens?: number;
-}
-
-export interface ChatResponse {
-  content: string;
-  model: string;
-  usage?: { inputTokens: number; outputTokens: number };
-}
-
-export interface LLMProvider {
-  readonly model: string;
-  readonly reasoningEffort?: string | undefined;
-  chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResponse>;
-}
-
-// Typed errors
-
-export class LLMProviderError extends Error {
-  constructor(
-    public readonly provider: string,
-    message: string,
-  ) {
-    super(`[${provider}] ${message}`);
-    this.name = "LLMProviderError";
-  }
-}
-
-export class LLMNetworkError extends LLMProviderError {
-  public override readonly cause: Error;
-  constructor(
-    provider: string,
-    cause: Error,
-  ) {
-    super(provider, `Network error: ${cause.message}`);
-    this.name = "LLMNetworkError";
-    this.cause = cause;
-  }
-}
-
-export class LLMApiError extends LLMProviderError {
-  public readonly status: number;
-  constructor(
-    provider: string,
-    status: number,
-    message: string,
-  ) {
-    super(provider, `API error (${status}): ${message}`);
-    this.name = "LLMApiError";
-    this.status = status;
-  }
 }
 
 // OpenAI provider configuration
