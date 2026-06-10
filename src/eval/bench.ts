@@ -293,16 +293,20 @@ async function judgeResult(
 }
 
 /**
- * Parse the judge's score from its raw reply. Returns null when no number is
+ * Parse the judge's score from its raw reply. Returns null when no score is
  * present (e.g. a reasoning model spent its token budget and returned empty or
  * prose) so an unscoreable reply is treated as "no judge signal" rather than a
- * 0.0 that masquerades as a failing answer. Scans for the first number anywhere
- * in the text and clamps to 0..1.
+ * 0.0 that masquerades as a failing answer. Only a bare number or an
+ * explicitly labeled "score" counts — an incidental number in prose ("Step 1:
+ * ...") must not parse as a passing score. Clamps to 0..1.
  */
 export function parseJudgeScore(content: string): number | null {
-  const match = content.match(/-?\d*\.?\d+/u);
+  const trimmed = content.trim();
+  const whole = trimmed.match(/^["'`]?(-?\d*\.?\d+)["'`]?$/u);
+  const labeled = trimmed.match(/\bscore\b(?:\s+is)?\W{0,3}(-?\d*\.?\d+)/iu);
+  const match = whole ?? labeled;
   if (!match) return null;
-  const score = parseFloat(match[0]);
+  const score = parseFloat(match[1]!);
   if (Number.isNaN(score)) return null;
   return Math.min(1, Math.max(0, score));
 }

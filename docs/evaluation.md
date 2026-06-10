@@ -147,7 +147,7 @@ wire export --format trajectory --run-id run_abc123
 
 ## Evaluation harness
 
-`src/eval/harness.ts` orchestrates benchmark execution:
+`src/eval/bench.ts` orchestrates benchmark execution:
 
 1. Load benchmark cases from file
 2. For each case, run the task via `runTask()`

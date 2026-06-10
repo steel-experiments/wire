@@ -154,7 +154,6 @@ Every run leaves immutable trace events and artifacts. No silent retries.
 | File | Responsibility |
 |------|---------------|
 | `bench.ts` | Benchmark runner with persistence |
-| `harness.ts` | Benchmark execution harness |
 | `metrics.ts` | Task metric computation |
 | `scoring.ts` | Run scoring and quality assessment |
 | `trajectories.ts` | Trace-to-training export formats |

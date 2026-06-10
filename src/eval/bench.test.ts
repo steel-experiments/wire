@@ -98,6 +98,17 @@ test("parseJudgeScore returns null for unscoreable replies, not a misleading 0",
   assert.equal(parseJudgeScore("-0.5"), 0);
 });
 
+test("parseJudgeScore ignores incidental numbers in prose", () => {
+  // A reasoning reply like "Step 1: ..." must not parse as a passing 1.0 —
+  // only a bare number or an explicitly labeled score counts.
+  assert.equal(parseJudgeScore("Step 1: the output does not answer the question"), null);
+  assert.equal(parseJudgeScore("The page listed 42 items but none matched"), null);
+  assert.equal(parseJudgeScore("I'd rate this 3 out of 10 stars"), null);
+  // Labeled scores still parse wherever they appear.
+  assert.equal(parseJudgeScore("After review, score: 0.9"), 0.9);
+  assert.equal(parseJudgeScore("The score is 0.4 because fields are empty"), 0.4);
+});
+
 test("loadBenchmarks preserves an optional per-case sessionConfig", async () => {
   // Anti-bot sites (booking) and fair-access sites (SEC EDGAR) only pass with
   // the right session config, so a case may carry stealth/proxy/userAgent.

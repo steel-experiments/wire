@@ -95,7 +95,12 @@ function classifyHypothesisOutcome(
     const classification = run.classification;
     const summary = run.outcomeSummary ?? `Run ${run.id}: ${run.status}`;
 
-    if (run.status === "succeeded") {
+    // A run only corroborates when its status AND classification agree it
+    // completed; a succeeded run classified partial/ambiguous is inconclusive
+    // evidence, not support.
+    const classificationAgrees = !classification || classification.kind === "task-complete";
+
+    if (run.status === "succeeded" && classificationAgrees) {
       successes += 1;
       evidence.push(`[support] ${summary}`);
     } else if (run.status === "failed") {
@@ -116,8 +121,15 @@ function classifyHypothesisOutcome(
     }
   }
 
-  if (successes > 0 && failures === 0) {
+  // MANIFESTO: "a lucky success that teaches nothing is weak" — one clean
+  // success is not confirmation. Supported requires at least two corroborating
+  // runs with no contradiction; a single success stays ambiguous.
+  if (successes >= 2 && failures === 0) {
     return { status: "supported", evidence };
+  }
+  if (successes === 1 && failures === 0 && ambiguous === 0) {
+    evidence.push("[inconclusive] single corroborating run — needs replication before the hypothesis counts as supported");
+    return { status: "ambiguous", evidence };
   }
   if (failures > 0 && successes === 0) {
     return { status: "rejected", evidence };
