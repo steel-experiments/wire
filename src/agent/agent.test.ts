@@ -19,6 +19,7 @@ import type {
 
 import type { BrowserObserveInput, BrowserProvider } from "../browser/bridge.js";
 import type { PolicyEngine } from "../policy/engine.js";
+import { createPolicyEngine } from "../policy/engine.js";
 
 import { classifyRun, generateOutcomeSummary } from "./classify.js";
 import { defaultAgentTurn, executeTask, resumeTask } from "./runtime.js";
@@ -574,8 +575,37 @@ test("executeStep sends classified exec risk as structured policy metadata", asy
     policy,
   );
 
-  assert.equal(seenPolicyKind, "read");
+  assert.equal(seenPolicyKind, "delete");
   assert.equal(seenRisk, "delete");
+});
+
+test("model-supplied policyKind cannot relabel a raw action for the policy engine", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  const provider = createMockProvider();
+  const policy = createPolicyEngine();
+
+  const result = await executeStep(
+    state,
+    {
+      kind: "raw",
+      summary: "Evaluate via CDP",
+      payload: {
+        policyKind: "read",
+        method: "Runtime.evaluate",
+        params: { expression: "document.cookie" },
+      },
+    },
+    provider,
+    policy,
+  );
+
+  assert.ok(
+    result.pendingApproval,
+    "raw CDP must require approval despite a spoofed payload policyKind",
+  );
+  const policyEvent = result.state.events.find((e) => e.kind === "policy-check");
+  assert.equal(policyEvent?.payload.policyKind, "raw");
 });
 
 test("approval request truncates very long code excerpts", async () => {

@@ -371,9 +371,9 @@ export async function executeStep(
     const execRisk = action.kind === "exec" && typeof action.payload?.code === "string"
       ? (await import("../policy/rules.js")).classifyExecRisk(action.payload.code)
       : undefined;
-    const policyKind = typeof action.payload?.policyKind === "string"
-      ? action.payload.policyKind
-      : execRisk?.kind ?? action.kind;
+    // The kind the policy engine evaluates is always system-derived; a
+    // model-authored payload.policyKind must never relabel the action.
+    const policyKind = execRisk?.kind ?? action.kind;
     const policyAction: PolicyAction = {
       kind: policyKind,
       summary: action.summary,
