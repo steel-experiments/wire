@@ -146,9 +146,9 @@ judgment calls made during execution:
   into `cli/` (it is the `wire bench` command); the import-graph allowlist is
   empty. A separate `verdict/` module remains an option if `agent/` keeps
   growing, but is no longer needed for boundary hygiene.
-- **C4 attachments:** `BrowserExecRequest.attachments` deletion deferred —
-  `shared/schemas.ts` was concurrently being modified by parallel work
-  (screenshot capture); remove it in a follow-up touch of that file.
+- **C4 attachments:** done in a follow-up commit the same day (the field,
+  schema line, forwarding, and its tests deleted; staged hunk-scoped around
+  the concurrent screenshot work in the same files).
 - **C5 fixtures:** `src/agent/fixtures.test.ts` created and adopted by the
   suites added in this plan (runtime-guards, finalize, recovery); remaining
   suites adopt incrementally as they are touched, per plan.
