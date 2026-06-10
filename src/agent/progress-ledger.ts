@@ -21,6 +21,10 @@ function entriesFromCandidate(value: unknown): ProgressLedgerEntry[] {
   return entry ? [entry] : [];
 }
 
+// Return-value properties that carry actions or browser state rather than
+// task progress; the generic fallback must never ingest them.
+const NON_PROGRESS_ENVELOPE_KEYS = new Set(["wireActions", "tabs", "links"]);
+
 export function progressEntriesFromValue(value: unknown): ProgressLedgerEntry[] {
   if (!isJsonObject(value)) return [];
   // Try known envelope keys first (explicit progress ledger usage)
@@ -35,13 +39,16 @@ export function progressEntriesFromValue(value: unknown): ProgressLedgerEntry[] 
   }
   // Generic fallback: find first array-of-objects property in the return
   // value. Captures LLM natural output like {units:[{...},{...}]} without
-  // requiring specific envelope names. Excludes artifact-shaped arrays.
-  for (const v of Object.values(value)) {
+  // requiring specific envelope names. Excludes artifact-shaped arrays,
+  // action/navigation envelopes, and CDP-command-shaped items — those are
+  // instructions or browser state, never evidence of task progress.
+  for (const [k, v] of Object.entries(value)) {
+    if (NON_PROGRESS_ENVELOPE_KEYS.has(k)) continue;
     if (
       Array.isArray(v) &&
       v.length > 0 &&
       v.every((item): item is JsonObject =>
-        isJsonObject(item) && !("filename" in item)
+        isJsonObject(item) && !("filename" in item) && !("method" in item)
       )
     ) {
       return v.map((item, i) => {

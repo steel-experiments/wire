@@ -555,7 +555,22 @@ async function runMainLoop(
     }
 
     if (action.kind === "finish") {
-      const finish = await handleFinishAction(state, action, config, signals, flushTraceSink);
+      // The finish flow calls reviewer LLMs; a transient provider error here
+      // must end the run classified, not reject out of executeTask.
+      let finish: Awaited<ReturnType<typeof handleFinishAction>>;
+      try {
+        finish = await handleFinishAction(state, action, config, signals, flushTraceSink);
+      } catch (err) {
+        state.events.push({
+          id: createId("event"),
+          runId: state.run.id,
+          ts: new Date().toISOString(),
+          kind: "error",
+          payload: { message: `finish flow failed: ${(err as Error).message}`, code: "EAGENT" },
+        });
+        await flushTraceSink(state, config, signals);
+        break;
+      }
       if (finish.kind === "continue") {
         continue;
       }

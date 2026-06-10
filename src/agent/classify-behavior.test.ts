@@ -156,6 +156,114 @@ test("classifyRun returns task-complete for all-successful code execs with obser
   assert.ok(result.confidence >= 0.8);
 });
 
+test("classifyRun ignores trailing bookkeeping events when checking terminal evidence", () => {
+  // llm-usage (and other bookkeeping kinds) are appended during the turn that
+  // proposes finish; they must not mask the evidence the run actually ended on.
+  const runId = createId("run");
+  const baseEvents: TraceEvent[] = [
+    {
+      id: createId("event"),
+      runId,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true },
+    },
+    {
+      id: createId("event"),
+      runId,
+      ts: new Date().toISOString(),
+      kind: "observation",
+      payload: { url: "https://example.com", title: "Example" },
+    },
+    {
+      id: createId("event"),
+      runId,
+      ts: new Date().toISOString(),
+      kind: "observation",
+      payload: { url: "https://example.com/done", title: "Done" },
+    },
+  ];
+  const bookkeeping: TraceEvent[] = [
+    {
+      id: createId("event"),
+      runId,
+      ts: new Date().toISOString(),
+      kind: "llm-usage",
+      payload: { inputTokens: 100, outputTokens: 20 },
+    },
+    {
+      id: createId("event"),
+      runId,
+      ts: new Date().toISOString(),
+      kind: "progress-ledger",
+      payload: { entries: [], ledger: [], count: 0, total: 0 },
+    },
+  ];
+
+  const input = {
+    mode: "investigate" as const,
+    successCriteria: ["Task completed"],
+    errorCount: 0,
+    authWallHit: false,
+    policyDenied: false,
+    budgetExhausted: false,
+  };
+  const without = classifyRun({ ...input, events: baseEvents });
+  const withBookkeeping = classifyRun({ ...input, events: [...baseEvents, ...bookkeeping] });
+
+  assert.equal(without.kind, "task-complete");
+  assert.equal(withBookkeeping.kind, without.kind);
+  assert.equal(withBookkeeping.confidence, without.confidence);
+});
+
+test("classifyRun does not flag blocked-auth when an early captcha page was recovered from", () => {
+  // A run that hit a challenge page, recovered, and completed with evidence
+  // must classify on that evidence — not on the historical block.
+  const runId = createId("run");
+  const events: TraceEvent[] = [
+    {
+      id: createId("event"),
+      runId,
+      ts: new Date().toISOString(),
+      kind: "observation",
+      payload: { url: "https://example.com", title: "Just a moment... | Cloudflare" },
+    },
+    {
+      id: createId("event"),
+      runId,
+      ts: new Date().toISOString(),
+      kind: "code-result",
+      payload: { ok: true, returnValue: { answer: "42 items found" } },
+    },
+    {
+      id: createId("event"),
+      runId,
+      ts: new Date().toISOString(),
+      kind: "observation",
+      payload: { url: "https://example.com/results", title: "Results" },
+    },
+    {
+      id: createId("event"),
+      runId,
+      ts: new Date().toISOString(),
+      kind: "artifact",
+      payload: { filename: "answer.md", content: "42 items found" },
+    },
+  ];
+
+  const result = classifyRun({
+    mode: "task",
+    events,
+    successCriteria: ["Items counted"],
+    errorCount: 0,
+    authWallHit: false,
+    policyDenied: false,
+    budgetExhausted: false,
+  });
+
+  assert.notEqual(result.kind, "blocked-auth");
+});
+
 test("classifyRun does not return task-complete when the latest evidence is missing", () => {
   const events: TraceEvent[] = [
     {

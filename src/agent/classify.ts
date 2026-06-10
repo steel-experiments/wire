@@ -74,6 +74,22 @@ function looksLikeQueryEcho(resultText: string): boolean {
   return QUERY_ECHO_MARKERS.some((m) => m.test(resultText));
 }
 
+// The terminal-evidence check asks "what did the run actually end on?". Only
+// substantive activity counts; bookkeeping kinds (usage records, ledgers,
+// review verdicts, skill bookkeeping) are appended around the finish turn and
+// must never mask the real terminal event. Allowlist, not denylist — new
+// bookkeeping kinds stay excluded by default.
+const SUBSTANTIVE_TERMINAL_KINDS = new Set([
+  "observation",
+  "code-exec",
+  "code-result",
+  "artifact",
+  "error",
+  "user-message",
+  "approval-request",
+  "approval-result",
+]);
+
 // Page-chrome markers — nav, ads, and boilerplate that ride along when the agent
 // dumps a whole page's innerText instead of extracting from it.
 const PAGE_CHROME_MARKERS = [
@@ -179,17 +195,18 @@ export function classifyRun(input: ClassificationInput): RunClassification {
     }
   }
 
-  // Captcha: observation content containing captcha indicators
-  const captchaObservation = events.find((e) => {
-    if (e.kind !== "observation") return false;
+  // Captcha: only the LATEST observation may flag a block. An early challenge
+  // page that the anti-bot recovery path got past (recovery.ts) is history,
+  // not the run's ending state — a recovered run must classify on evidence.
+  const latestObservationEvent = [...events].reverse().find((e) => e.kind === "observation");
+  if (latestObservationEvent) {
     const text = [
-      String(e.payload.url ?? ""),
-      String(e.payload.title ?? ""),
+      String(latestObservationEvent.payload.url ?? ""),
+      String(latestObservationEvent.payload.title ?? ""),
     ].join(" ").toLowerCase();
-    return text.includes("captcha") || text.includes("recaptcha") || text.includes("cloudflare");
-  });
-  if (captchaObservation) {
-    return { kind: "blocked-auth", confidence: 0.8, notes: ["Captcha or anti-bot challenge detected"] };
+    if (text.includes("captcha") || text.includes("recaptcha") || text.includes("cloudflare")) {
+      return { kind: "blocked-auth", confidence: 0.8, notes: ["Captcha or anti-bot challenge detected"] };
+    }
   }
 
   // Rate-limited: error events with 429/rate limit indicators
@@ -272,10 +289,7 @@ export function classifyRun(input: ClassificationInput): RunClassification {
   // It is complete when the artifacts prove what happened."
   const hasEvidence = artifactCount > 0 || observationCount >= 2;
   const terminalEvent = [...events].reverse().find((event) =>
-    event.kind !== "thought-summary" &&
-    event.kind !== "skill-load" &&
-    event.kind !== "policy-check" &&
-    event.kind !== "skill-proposal"
+    SUBSTANTIVE_TERMINAL_KINDS.has(event.kind)
   );
   const terminalEventIsEvidence = terminalEvent?.kind === "observation" || terminalEvent?.kind === "artifact";
   const terminalEventHasExtractedAnswer = terminalEvent?.kind === "code-result" &&

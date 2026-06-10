@@ -106,6 +106,34 @@ test("progressEntriesFromValue does not extract artifact arrays", () => {
   assert.equal(entries.length, 0);
 });
 
+test("progressEntriesFromValue ignores action and navigation envelopes", () => {
+  // wireActions are pending action batches, not evidence of progress.
+  const fromActions = progressEntriesFromValue({
+    wireActions: [
+      { method: "Page.navigate", params: { url: "https://example.com" } },
+      { method: "Input.dispatchMouseEvent", params: { x: 1, y: 2 } },
+    ],
+  });
+  assert.equal(fromActions.length, 0);
+
+  // Tab lists and exploratory link scans are navigation state, not progress.
+  const fromTabs = progressEntriesFromValue({
+    tabs: [{ id: "tab-1", title: "Example", url: "https://example.com" }],
+  });
+  assert.equal(fromTabs.length, 0);
+
+  const fromLinks = progressEntriesFromValue({
+    links: [{ href: "https://a.example", text: "A" }],
+  });
+  assert.equal(fromLinks.length, 0);
+
+  // CDP-command-shaped items are excluded under any property name.
+  const fromCommands = progressEntriesFromValue({
+    queued: [{ method: "Network.enable", params: {} }],
+  });
+  assert.equal(fromCommands.length, 0);
+});
+
 test("progressEntriesFromValue prefers known envelope over auto-extraction", () => {
   const entries = progressEntriesFromValue({
     progress: [{ key: "from-envelope" }],
