@@ -1,4 +1,5 @@
 import type { ArtifactKind, JsonObject, Task, TraceEvent } from "../shared/types.js";
+import { looksLikeUnextractedPage } from "./classify.js";
 import { extractFirstJsonObject, extractFirstJsonArray } from "./llm-parse.js";
 
 export type ContractArtifactFormat = "markdown" | "json" | "csv" | "text" | "file";
@@ -6,6 +7,8 @@ export type ContractArtifactFormat = "markdown" | "json" | "csv" | "text" | "fil
 export interface TaskContract {
   mustVisit: string[];
   mustMention: string[];
+  /** Question-shaped objectives must end with a stated answer, not page material. */
+  mustAnswer?: boolean;
   mustProduce?: {
     artifact?: boolean;
     format?: ContractArtifactFormat;
@@ -89,6 +92,15 @@ function inferFormat(text: string): ContractArtifactFormat | undefined {
   return undefined;
 }
 
+// An objective is question-shaped when it opens with an interrogative word or
+// ends in a question mark. Only the objective itself is checked — success
+// criteria and constraints routinely contain incidental questions.
+const QUESTION_PATTERN = /^(?:what|who|whom|whose|when|where|which|why|how)\b|\?\s*$/iu;
+
+function isQuestionObjective(objective: string): boolean {
+  return QUESTION_PATTERN.test(objective.trim());
+}
+
 function inferMinItems(text: string): number | undefined {
   const match = text.match(/\b(?:top|first|find|extract|collect|list|return|save)\s+(\d{1,3})\b/iu);
   if (!match) return undefined;
@@ -114,6 +126,11 @@ export function createTaskContract(task: Task): TaskContract {
     }
     : undefined;
 
+  // Investigate/experiment objectives are often phrased as questions but end
+  // in findings rather than a single extractable answer, so only task mode
+  // carries the answer requirement.
+  const mustAnswer = task.mode === "task" && isQuestionObjective(task.objective);
+
   return {
     mustVisit,
     // No mention requirement is inferred from domains: mustVisit already
@@ -121,6 +138,7 @@ export function createTaskContract(task: Task): TaskContract {
     // final result falsely fails extraction tasks whose output is data from
     // the site rather than its name. mustMention stays settable via task-file.
     mustMention: [],
+    ...(mustAnswer ? { mustAnswer: true } : {}),
     ...(mustProduce ? { mustProduce } : {}),
     mustNotContain: lower.includes("extract") || lower.includes("save") || lower.includes("compare")
       ? PLACEHOLDER_PHRASES
@@ -132,6 +150,9 @@ export function contractToPrompt(contract: TaskContract): string {
   const lines: string[] = [];
   if (contract.mustVisit.length > 0) lines.push(`- Must visit: ${contract.mustVisit.join(", ")}`);
   if (contract.mustMention.length > 0) lines.push(`- Final result must mention: ${contract.mustMention.join(", ")}`);
+  if (contract.mustAnswer) {
+    lines.push("- Final result must state a direct answer to the question, extracted from a source — not raw page text or search-results text.");
+  }
   if (contract.mustProduce) {
     const parts: string[] = [];
     if (contract.mustProduce.artifact) parts.push("artifact");
@@ -149,6 +170,7 @@ export function contractToPrompt(contract: TaskContract): string {
 export function contractSummary(contract: TaskContract): string {
   const parts: string[] = [];
   if (contract.mustVisit.length > 0) parts.push(`visit: ${contract.mustVisit.join(", ")}`);
+  if (contract.mustAnswer) parts.push("answer required");
   if (contract.mustProduce) {
     const produce: string[] = [];
     if (contract.mustProduce.format) produce.push(contract.mustProduce.format);
@@ -168,6 +190,9 @@ function contractToJson(contract: TaskContract): JsonObject {
     mustMention: contract.mustMention,
     mustNotContain: contract.mustNotContain,
   };
+  if (contract.mustAnswer) {
+    value.mustAnswer = true;
+  }
   if (contract.mustProduce) {
     value.mustProduce = { ...contract.mustProduce };
   }
@@ -341,6 +366,20 @@ export function validateTaskContract(
       missing.push(`Final result does not mention ${label}`);
     } else {
       satisfied.push(`Final result mentions ${label}`);
+    }
+  }
+
+  // The answer check looks only at the run's final result, not the combined
+  // evidence trail: SERP dumps legitimately appear as evidence in artifacts
+  // and code-results, but the result itself must be the extracted answer.
+  if (contract.mustAnswer) {
+    const resultText = result?.trim() ?? "";
+    if (resultText.length === 0) {
+      missing.push("Final result does not state an answer to the question");
+    } else if (looksLikeUnextractedPage(resultText)) {
+      missing.push("Final result looks like raw page or search-results text, not an extracted answer");
+    } else {
+      satisfied.push("Final result states an extracted answer");
     }
   }
 

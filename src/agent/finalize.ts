@@ -28,6 +28,7 @@ type FlushTraceSink = (state: LoopState, config: RuntimeConfig, signals: LoopSig
 function contractHasChecks(state: LoopState): boolean {
   return state.contract.mustVisit.length > 0 ||
     state.contract.mustMention.length > 0 ||
+    state.contract.mustAnswer === true ||
     state.contract.mustProduce !== undefined ||
     state.contract.mustNotContain.length > 0;
 }
@@ -134,20 +135,19 @@ export async function finalizeExecution(
 
   recordFinalContractCheckIfNeeded(state);
 
-  // Only mint a skill from a run that actually accomplished something. A skill
-  // captures durable, working browser knowledge; proposing one from a run
-  // classified as an error or dead-end (agent-error, site-error, blocked-auth,
-  // ambiguous, …) would bake a broken trajectory into a reusable skill.
+  // Only mint a skill from a run that verifiably completed its objective. A
+  // skill captures durable, working browser knowledge; proposing one from any
+  // lesser classification — errors and dead-ends, but also partial-success,
+  // whose trajectory by definition did not fully work (live case: a query-echo
+  // SERP dump classified partial-success and minted a skill teaching circular
+  // SERP "verification") — would bake a broken trajectory into a reusable skill.
   const finalClassification = computeFinalClassification(state, finalizeOptions);
   if (
     config.skillPromotion !== "off" &&
-    (
-      finalClassification.kind === "task-complete" ||
-      finalClassification.kind === "partial-success"
-    )
+    finalClassification.kind === "task-complete"
   ) {
     await appendSkillProposalEvents(state, config.skillDir, config.llmProvider, {
-      completed: finalClassification.kind === "task-complete",
+      completed: true,
     });
   }
   await flushTraceSink(state, config, signals);

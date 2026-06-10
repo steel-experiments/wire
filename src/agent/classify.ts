@@ -98,10 +98,17 @@ function looksLikeRawPageDump(resultText: string): boolean {
   return chromeHits >= 2;
 }
 
+// A result that is still page material — a reflected query or a wholesale
+// innerText dump — rather than content extracted from it. Shared with the
+// completion contract so question tasks can demand an actual answer.
+export function looksLikeUnextractedPage(resultText: string): boolean {
+  return looksLikeQueryEcho(resultText) || looksLikeRawPageDump(resultText);
+}
+
 function hasGenericExtractionFailure(resultText: string | undefined): boolean {
   if (!resultText) return false;
   if (hasMostlyEmptyFields(resultText)) return true;
-  return looksLikeQueryEcho(resultText) || looksLikeRawPageDump(resultText);
+  return looksLikeUnextractedPage(resultText);
 }
 
 function latestFailedContractCheck(events: TraceEvent[]): string[] {

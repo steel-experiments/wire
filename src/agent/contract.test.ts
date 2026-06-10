@@ -292,3 +292,63 @@ test("classifyRun downgrades completion when contract check failed", () => {
   assert.equal(classification.kind, "partial-success");
   assert.ok(classification.notes?.some((note) => note.includes("Completion contract failed")));
 });
+
+test("createTaskContract requires an answer for a question-shaped task objective", () => {
+  // Live regression (run_631123ec, 2026-06-10): a question task finished with a
+  // SERP dump as its result and "no extra completion contract" let it pass.
+  // Question-shaped objectives must demand a stated answer.
+  const questions = [
+    "What was the name of the 5K race hosted at the old Great America theme park in California that had 'bubble gum' in its title?",
+    "Who wrote the first comment on the top Hacker News story today",
+    "How many moons does Neptune have?",
+    "Find the founding year of the company behind vercel.com — when was it founded?",
+  ];
+  for (const objective of questions) {
+    const contract = createTaskContract(makeTask({ objective }));
+    assert.equal(contract.mustAnswer, true, `expected mustAnswer from: ${objective}`);
+  }
+  assert.match(contractToPrompt(createTaskContract(makeTask({ objective: questions[0]! }))), /answer/iu);
+});
+
+test("createTaskContract does not require an answer for non-question or non-task objectives", () => {
+  const nonQuestions = [
+    "Open the pricing pages of vercel.com and save a comparison table in md format.",
+    "Go to news.ycombinator.com and return the titles of the top 5 stories",
+  ];
+  for (const objective of nonQuestions) {
+    const contract = createTaskContract(makeTask({ objective }));
+    assert.notEqual(contract.mustAnswer, true, `expected no mustAnswer from: ${objective}`);
+  }
+
+  const investigate = createTaskContract(makeTask({
+    mode: "investigate",
+    objective: "Why does the checkout page fail to load for logged-out users?",
+  }));
+  assert.notEqual(investigate.mustAnswer, true, "investigate mode must not require an answer contract");
+});
+
+test("validateTaskContract fails mustAnswer when the result is a query echo or missing", () => {
+  const contract = createTaskContract(makeTask({
+    objective: "What was the name of the 5K race hosted at the old Great America theme park in California?",
+  }));
+  const events = [
+    event("observation", { url: "https://duckduckgo.com/?q=Great+America+5K", title: "Search" }),
+  ];
+
+  // Result is a SERP echo of the query — the agent never extracted an answer.
+  const echoResult = JSON.stringify({
+    match: true,
+    results: [{ title: "5K race %22bubble gum%22 great america Crossword Clue", href: "https://www.wordplays.com/" }],
+  });
+  const echoValidation = validateTaskContract(contract, events, echoResult);
+  assert.equal(echoValidation.passed, false);
+  assert.ok(echoValidation.missing.some((item) => item.includes("extracted answer")));
+
+  const missingValidation = validateTaskContract(contract, events, undefined);
+  assert.equal(missingValidation.passed, false);
+  assert.ok(missingValidation.missing.some((item) => item.includes("answer")));
+
+  const answeredValidation = validateTaskContract(contract, events, "The race was called the Bubble Gum Challenge 5K.");
+  assert.equal(answeredValidation.passed, true);
+  assert.ok(answeredValidation.satisfied.some((item) => item.includes("answer")));
+});
