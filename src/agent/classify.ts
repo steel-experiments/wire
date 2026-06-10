@@ -128,12 +128,9 @@ function hasGenericExtractionFailure(resultText: string | undefined): boolean {
 }
 
 function latestFailedContractCheck(events: TraceEvent[]): string[] {
-  const failed = [...events].reverse().find((event) =>
-    event.kind === "contract-check" &&
-    event.payload.passed === false
-  );
-  if (!failed) return [];
-  const missing = failed.payload.missing;
+  const latest = [...events].reverse().find((event) => event.kind === "contract-check");
+  if (!latest || latest.payload.passed !== false) return [];
+  const missing = latest.payload.missing;
   return Array.isArray(missing) ? missing.map(String).filter((item) => item.length > 0) : ["Completion contract failed"];
 }
 

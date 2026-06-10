@@ -191,6 +191,30 @@ describe("classifyRun", () => {
     assert.equal(result.confidence, 0.7);
   });
 
+  it("classifies partial-success when the latest contract check failed", () => {
+    const events = [
+      makeEvent("code-result", { ok: true, stdout: "the answer" }),
+      makeEvent("artifact", { kind: "answer", content: "the answer" }),
+      makeEvent("contract-check", { passed: false, missing: ["Answer not extracted"] }),
+    ];
+    const result = classifyRun(makeInput({ mode: "task", events, errorCount: 0 }));
+    assert.equal(result.kind, "partial-success");
+    assert.equal(result.confidence, 0.55);
+    assert.ok(result.notes?.includes("Completion contract failed"));
+  });
+
+  it("classifies task-complete when a failed contract check is superseded by a passing one", () => {
+    const events = [
+      makeEvent("code-result", { ok: true, stdout: "the answer" }),
+      makeEvent("contract-check", { passed: false, missing: ["Answer not extracted"] }),
+      makeEvent("artifact", { kind: "answer", content: "the answer" }),
+      makeEvent("contract-check", { passed: true }),
+    ];
+    const result = classifyRun(makeInput({ mode: "task", events, errorCount: 0 }));
+    assert.equal(result.kind, "task-complete");
+    assert.equal(result.confidence, 0.85);
+  });
+
   it("does not downgrade artifact-backed task completion for stale observations", () => {
     const events = [
       makeEvent("observation", { url: "https://example.com", title: "Example" }),
