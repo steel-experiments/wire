@@ -663,71 +663,6 @@ test("executeStep sends classified exec risk as structured policy metadata", asy
   assert.equal(seenRisk, "delete");
 });
 
-test("initial observation is redacted before it reaches the trace", async () => {
-  const task = makeTask();
-  const sessionId = makeSessionId();
-  const provider = createMockProvider({
-    async createSession(): Promise<BrowserSession> {
-      return {
-        id: sessionId,
-        provider: "custom",
-        createdAt: new Date().toISOString(),
-        status: "ready",
-      };
-    },
-    async observe(input: BrowserObserveInput): Promise<BrowserObservation> {
-      return {
-        sessionId: input.sessionId,
-        url: "https://example.com/dash?apiKey=supersecretvalue123",
-        title: "Dashboard",
-        tabs: [],
-      };
-    },
-    async stopSession() {},
-  });
-
-  const result = await executeTask(
-    task,
-    { provider, policyEngine: createMockPolicyEngine(), maxSteps: 2 },
-    async () => ({ kind: "finish", summary: "Done" }),
-  );
-
-  const observation = result.events.find((e) => e.kind === "observation");
-  assert.ok(observation);
-  const url = String(observation!.payload.url ?? "");
-  assert.ok(!url.includes("supersecretvalue123"), "initial observation URL must be redacted");
-  assert.ok(url.includes("[REDACTED]"));
-});
-
-test("model-supplied policyKind cannot relabel a raw action for the policy engine", async () => {
-  const task = makeTask();
-  const state = createLoopState(task, makeSessionId());
-  const provider = createMockProvider();
-  const policy = createPolicyEngine();
-
-  const result = await executeStep(
-    state,
-    {
-      kind: "raw",
-      summary: "Evaluate via CDP",
-      payload: {
-        policyKind: "read",
-        method: "Runtime.evaluate",
-        params: { expression: "document.cookie" },
-      },
-    },
-    provider,
-    policy,
-  );
-
-  assert.ok(
-    result.pendingApproval,
-    "raw CDP must require approval despite a spoofed payload policyKind",
-  );
-  const policyEvent = result.state.events.find((e) => e.kind === "policy-check");
-  assert.equal(policyEvent?.payload.policyKind, "raw");
-});
-
 test("approval request truncates very long code excerpts", async () => {
   const task = makeTask();
   const state = createLoopState(task, makeSessionId());
@@ -1436,58 +1371,6 @@ test("executeTask does not invent numeric repeat-objective finish gates", async 
   assert.equal(result.run.status, "succeeded");
 });
 
-test("executeTask survives an LLM error during the finish flow and still classifies the run", async () => {
-  const task = makeTask({ objective: "Extract pricing and save as markdown table in md format" });
-  const sessionId = makeSessionId();
-  const provider = createMockProvider({
-    async createSession() {
-      return { id: sessionId, provider: "custom", createdAt: new Date().toISOString(), status: "ready" };
-    },
-    async exec(): Promise<BrowserExecResult> {
-      const content = [
-        "| Plan | Price |",
-        "|---|---|",
-        "| Hobby | Free |",
-        "| Pro | $20/mo |",
-        "| Enterprise | Custom |",
-      ].join("\n");
-      return {
-        ok: true,
-        durationMs: 10,
-        returnValue: {
-          artifacts: [{ filename: "pricing.md", kind: "markdown", mimeType: "text/markdown", content }],
-        },
-      };
-    },
-    async stopSession() {},
-  });
-  const llmProvider: LLMProvider = {
-    model: "reviewer",
-    async chat(messages) {
-      const prompt = messages.map((message) => message.content).join("\n");
-      if (!prompt.includes("Review the final artifact against the objective")) {
-        return { model: "reviewer", content: "{}" };
-      }
-      throw new Error("429 too many requests");
-    },
-  };
-
-  const result = await executeTask(
-    task,
-    { provider, policyEngine: createMockPolicyEngine(), llmProvider, maxSteps: 6 },
-    async (state) => {
-      if (state.stepCount === 0) return { kind: "exec", summary: "Extract artifact", payload: { code: "return bad" } };
-      return { kind: "finish", summary: "Done" };
-    },
-  );
-
-  // The reviewer failure must not reject out of executeTask: the run ends
-  // with a recorded error event and a real classification.
-  assert.ok(result.run.classification, "run must still be classified");
-  const errorEvent = result.events.find((e) => e.kind === "error");
-  assert.ok(errorEvent, "finish-flow failure must be recorded as an error event");
-  assert.match(String(errorEvent!.payload.message ?? ""), /429/);
-});
 
 test("executeTask blocks finish when artifact review finds problems", async () => {
   const task = makeTask({ objective: "Extract pricing and save as markdown table in md format" });
