@@ -579,6 +579,42 @@ test("executeStep sends classified exec risk as structured policy metadata", asy
   assert.equal(seenRisk, "delete");
 });
 
+test("initial observation is redacted before it reaches the trace", async () => {
+  const task = makeTask();
+  const sessionId = makeSessionId();
+  const provider = createMockProvider({
+    async createSession(): Promise<BrowserSession> {
+      return {
+        id: sessionId,
+        provider: "custom",
+        createdAt: new Date().toISOString(),
+        status: "ready",
+      };
+    },
+    async observe(input: BrowserObserveInput): Promise<BrowserObservation> {
+      return {
+        sessionId: input.sessionId,
+        url: "https://example.com/dash?apiKey=supersecretvalue123",
+        title: "Dashboard",
+        tabs: [],
+      };
+    },
+    async stopSession() {},
+  });
+
+  const result = await executeTask(
+    task,
+    { provider, policyEngine: createMockPolicyEngine(), maxSteps: 2 },
+    async () => ({ kind: "finish", summary: "Done" }),
+  );
+
+  const observation = result.events.find((e) => e.kind === "observation");
+  assert.ok(observation);
+  const url = String(observation!.payload.url ?? "");
+  assert.ok(!url.includes("supersecretvalue123"), "initial observation URL must be redacted");
+  assert.ok(url.includes("[REDACTED]"));
+});
+
 test("model-supplied policyKind cannot relabel a raw action for the policy engine", async () => {
   const task = makeTask();
   const state = createLoopState(task, makeSessionId());

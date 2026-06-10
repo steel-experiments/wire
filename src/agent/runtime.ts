@@ -16,6 +16,7 @@ import type {
   TraceEvent,
 } from "../shared/types.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
+import { redactJsonObject } from "../shared/redact.js";
 import { defaultSkillDir } from "../shared/paths.js";
 
 import type { BrowserProvider } from "../browser/bridge.js";
@@ -388,7 +389,7 @@ async function initializeState(
       provider: config.provider,
       sessionId: state.sessionId,
     });
-    const obsPayload = toObservationPayload(observation);
+    const obsPayload = redactJsonObject(toObservationPayload(observation));
 
     state.events.push({
       id: createId("event"),
@@ -772,7 +773,7 @@ async function runMainLoop(
               runId: state.run.id,
               ts: nowIsoUtc(),
               kind: "observation",
-              payload: toObservationPayload(observation),
+              payload: redactJsonObject(toObservationPayload(observation)),
             });
             if (observation.screenshotBase64) {
               state.latestScreenshotBase64 = observation.screenshotBase64;

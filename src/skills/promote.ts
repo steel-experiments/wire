@@ -44,19 +44,10 @@ export const DEFAULT_SKILL_PROMOTION_POLICY: SkillPromotionPolicy = {
   allowAutoPromote: true,
 };
 
-const SECRET_PATTERNS: RegExp[] = [
-  /(?:password|passwd|pwd)\s*[:=]\s*\S+/iu,
-  /(?:api[_-]?key|apikey)\s*[:=]\s*\S+/iu,
-  /(?:secret|token|bearer)\s*[:=]\s*\S+/iu,
-  /(?:auth[_-]?token|accesstoken|refresh[_-]?token)\s*[:=]\s*\S+/iu,
-  /\bAKIA[0-9A-Z]{16}\b/u,
-  /\bsk-[a-zA-Z0-9]{20,}\b/u,
-  /\b(?:GH[pousr])_[A-Za-z0-9_]{36,}\b/u,
-];
-
-export function containsSecrets(content: string): boolean {
-  return SECRET_PATTERNS.some((re) => re.test(content));
-}
+// Secret detection shares the redaction pattern list so the minting gate and
+// trace redaction can never disagree about what counts as a secret.
+export { containsSecrets } from "../shared/redact.js";
+import { containsSecrets } from "../shared/redact.js";
 
 // A skill hostname must be a plausible public hostname: dot-separated labels
 // of letters/digits/hyphens with an alphabetic TLD. The distiller occasionally

@@ -88,6 +88,7 @@ export function createSteelActionHandlers(): ActionHandler[] {
         state.profileId = newSession.profileId;
       }
 
+      const { redactJsonObject } = await import("../../../shared/redact.js");
       state.events.push({
         id: createId("event"),
         runId: state.run.id,
@@ -98,14 +99,13 @@ export function createSteelActionHandlers(): ActionHandler[] {
           kind: "reconfigure",
           oldSessionId,
           newSessionId: newSession.id,
-          config: merged as JsonObject,
+          config: redactJsonObject(merged as JsonObject),
         },
       });
 
       // Auto-observe new session so agent sees about:blank
       const observation = await provider.observe({ sessionId: state.sessionId });
       const { toObservationPayload } = await import("../../../browser/observe.js");
-      const { redactJsonObject } = await import("../../../shared/redact.js");
       state.events.push({
         id: createId("event"),
         runId: state.run.id,

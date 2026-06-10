@@ -1241,6 +1241,59 @@ test("Steel reconfigure action notifies replacement session callback", async () 
   assert.equal(state.sessionLiveUrl, newSession.liveUrl);
 });
 
+test("Steel reconfigure redacts proxy credentials in the thought-summary event", async () => {
+  const oldSessionId = createId("session");
+  const newSession: BrowserSession = {
+    id: createId("session"),
+    provider: "steel",
+    createdAt: new Date().toISOString(),
+    status: "ready",
+  };
+  const state = createLoopState(makeTask(), oldSessionId);
+
+  const provider: BrowserProvider = {
+    async createSession() {
+      return newSession;
+    },
+    async getSession() {
+      return newSession;
+    },
+    async stopSession() {},
+    async observe(input): Promise<BrowserObservation> {
+      return {
+        sessionId: input.sessionId,
+        url: "about:blank",
+        title: "about:blank",
+        tabs: [],
+        pageSummary: {},
+      };
+    },
+    async exec() {
+      throw new Error("not implemented");
+    },
+  };
+
+  const handler = createSteelActionHandlers()[0]!;
+  await handler.execute(
+    state,
+    {
+      kind: "reconfigure",
+      summary: "Route through authenticated proxy",
+      payload: {
+        useProxy: { server: "http://alice:hunter2pass@proxy.example.com:8080" },
+      },
+    },
+    provider,
+    {},
+  );
+
+  const thought = state.events.find((e) => e.kind === "thought-summary");
+  assert.ok(thought);
+  const serialized = JSON.stringify(thought!.payload);
+  assert.ok(!serialized.includes("hunter2pass"), "proxy password must not reach the trace");
+  assert.ok(serialized.includes("[REDACTED]"));
+});
+
 test("Steel reconfigure action strips invalid region from requested config", async () => {
   const oldSessionId = createId("session");
   const newSession: BrowserSession = {

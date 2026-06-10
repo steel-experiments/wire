@@ -12,6 +12,7 @@ import {
 import {
   redactJsonObject,
   redactSecrets,
+  containsSecrets,
 } from "./redact.js";
 import type {
   BrowserExecRequest,
@@ -209,6 +210,53 @@ test("redactSecrets replaces API key patterns with [REDACTED]", () => {
   assert.ok(result.includes("[REDACTED]"));
   assert.ok(result.includes("Use key"));
   assert.ok(result.includes("to connect."));
+});
+
+test("redactSecrets replaces Anthropic-format keys (hyphenated sk- body)", () => {
+  const result = redactSecrets(
+    "ANTHROPIC_API_KEY=sk-ant-api03-AbCdEf123456-7890GhIjKlMnOpQrStUvWxYz_AA was set",
+  );
+
+  assert.ok(!result.includes("sk-ant-api03"));
+  assert.ok(result.includes("[REDACTED]"));
+});
+
+test("redactSecrets replaces GitHub tokens and fine-grained PATs", () => {
+  const classic = redactSecrets("token ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789 in env");
+  const fineGrained = redactSecrets(
+    "github_pat_11ABCDEFG0abcdefghijklmnopqrstuvwxyz_ABCDEFGhijklmn used",
+  );
+
+  assert.ok(!classic.includes("ghp_"));
+  assert.ok(classic.includes("[REDACTED]"));
+  assert.ok(!fineGrained.includes("github_pat_"));
+  assert.ok(fineGrained.includes("[REDACTED]"));
+});
+
+test("redactSecrets replaces JWTs", () => {
+  const jwt =
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c";
+  const result = redactSecrets(`Authorization used ${jwt} for the call`);
+
+  assert.ok(!result.includes("eyJhbGciOiJIUzI1NiI"));
+  assert.ok(result.includes("[REDACTED]"));
+});
+
+test("containsSecrets flags every provider key format on repeated calls", () => {
+  // Repeated calls guard against lastIndex statefulness from /g patterns.
+  for (let i = 0; i < 2; i++) {
+    assert.equal(containsSecrets("sk-ant-api03-AbCdEf123456-7890GhIjKlMnOpQrStUvWxYz_AA"), true);
+    assert.equal(containsSecrets("ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"), true);
+    assert.equal(containsSecrets("plain prose with no credentials at all"), false);
+  }
+});
+
+test("redactSecrets strips userinfo credentials from URLs", () => {
+  const result = redactSecrets("proxy http://alice:hunter2pass@proxy.example.com:8080 set");
+
+  assert.ok(!result.includes("hunter2pass"));
+  assert.ok(result.includes("[REDACTED]"));
+  assert.ok(result.includes("proxy.example.com:8080"));
 });
 
 test("redactSecrets replaces password patterns", () => {
