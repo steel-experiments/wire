@@ -345,6 +345,78 @@ export function shouldStop(
   return { stop: false };
 }
 
+// How many consecutive observations must land on the same auth-walled host
+// before the run stops for user assistance. SPECS §22.3 forbids improvising
+// credential entry, not trying a different source — so the first hit nudges
+// the agent to route around the wall, and only still being on the same wall
+// after that turn ends the run.
+export const AUTH_WALL_STOP_STREAK = 2;
+
+/** Auth-wall accounting carried in the loop signals. */
+export interface AuthWallSignals {
+  /** True only when the wall has persisted long enough to end the run. */
+  authWallHit: boolean;
+  /** Consecutive auth-wall observations on the same host. */
+  authWallStreak: number;
+  /** Host of the wall the streak is counting. */
+  authWallHost: string | undefined;
+}
+
+function hostnameOf(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Fold one observation's auth-wall detection into the loop signals.
+ *
+ * An auth wall on a single candidate source is a dead end to route around,
+ * not a task blocker: the first hit records a nudge the agent sees on its
+ * next turn and leaves `authWallHit` false. Only when the following
+ * observation is still an auth wall on the same host does `authWallHit`
+ * become true and stop the run for user assistance. A wall on a different
+ * host starts a fresh streak — two paywalled sources in a row do not prove
+ * the task itself is auth-blocked.
+ */
+export function applyAuthWallSignal(
+  state: LoopState,
+  signals: AuthWallSignals,
+  detected: boolean,
+): void {
+  if (!detected) {
+    signals.authWallHit = false;
+    signals.authWallStreak = 0;
+    signals.authWallHost = undefined;
+    return;
+  }
+
+  const observation = latestObservation(state);
+  const url = typeof observation?.payload.url === "string" ? observation.payload.url : "";
+  const host = hostnameOf(url);
+  signals.authWallStreak = host === signals.authWallHost ? signals.authWallStreak + 1 : 1;
+  signals.authWallHost = host;
+  signals.authWallHit = signals.authWallStreak >= AUTH_WALL_STOP_STREAK;
+
+  if (signals.authWallStreak === 1) {
+    state.events.push({
+      id: createId("event"),
+      runId: state.run.id,
+      ts: nowIsoUtc(),
+      kind: "thought-summary",
+      payload: {
+        kind: "auth-wall-detected",
+        reason:
+          `Auth wall detected at ${url || "the current page"}. Do not enter credentials. ` +
+          "If the objective can be met from another source, go back and continue there; " +
+          "staying on this sign-in page will end the run for user assistance.",
+      },
+    });
+  }
+}
+
 export async function executeStep(
   state: LoopState,
   action: ProposedAction,

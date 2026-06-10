@@ -25,9 +25,10 @@ import { createBrowserSession, stopBrowserSession } from "../browser/session.js"
 
 import type { PolicyEngine } from "../policy/engine.js";
 
-import type { LLMProvider } from "../providers/llm/openai.js";
+import type { LLMProvider } from "../providers/llm/types.js";
 
 import {
+  applyAuthWallSignal,
   createLoopState,
   executeStep,
   shouldStop,
@@ -264,6 +265,8 @@ function buildActionRegistry(config: RuntimeConfig): ActionRegistry {
 export interface LoopSignals {
   policyDenied: boolean;
   authWallHit: boolean;
+  authWallStreak: number;
+  authWallHost: string | undefined;
   antiBotRecoveryAttempted: boolean;
   maxStepsReached: boolean;
   awaitingApproval: boolean;
@@ -279,6 +282,8 @@ function createLoopSignals(): LoopSignals {
   return {
     policyDenied: false,
     authWallHit: false,
+    authWallStreak: 0,
+    authWallHost: undefined,
     antiBotRecoveryAttempted: false,
     maxStepsReached: false,
     awaitingApproval: false,
@@ -365,7 +370,7 @@ async function initializeState(
     );
     Object.assign(state, resumedStep.state);
     signals.policyDenied = resumedStep.policyDenied;
-    signals.authWallHit = resumedStep.authWallHit;
+    applyAuthWallSignal(state, signals, resumedStep.authWallHit);
 
     if (signals.policyDenied) {
       state.events.push({
@@ -401,7 +406,7 @@ async function initializeState(
     if (observation.screenshotBase64) {
       state.latestScreenshotBase64 = observation.screenshotBase64;
     }
-    signals.authWallHit = detectAuthWall(observation).detected;
+    applyAuthWallSignal(state, signals, detectAuthWall(observation).detected);
     await syncMatchedSkills(state, config.skillDir);
   } else {
     await syncMatchedSkills(state, config.skillDir);
@@ -593,7 +598,7 @@ async function runMainLoop(
       const stepResult = await executeStep(state, action, config.provider, config.policyEngine, stepOpts);
       Object.assign(state, stepResult.state);
       signals.policyDenied = stepResult.policyDenied;
-      signals.authWallHit = stepResult.authWallHit;
+      applyAuthWallSignal(state, signals, stepResult.authWallHit);
       consecutiveRecoverableErrors = 0;
       await syncMatchedSkills(state, config.skillDir);
 
@@ -793,7 +798,7 @@ async function runMainLoop(
             if (observation.screenshotBase64) {
               state.latestScreenshotBase64 = observation.screenshotBase64;
             }
-            signals.authWallHit = detectAuthWall(observation).detected;
+            applyAuthWallSignal(state, signals, detectAuthWall(observation).detected);
             await syncMatchedSkills(state, config.skillDir);
             await flushTraceSink(state, config, signals);
           } catch (observeErr) {

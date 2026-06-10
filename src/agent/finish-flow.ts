@@ -29,6 +29,8 @@ import type { RuntimeConfig } from "./runtime.js";
 export interface FinishFlowSignals {
   policyDenied: boolean;
   authWallHit: boolean;
+  authWallStreak: number;
+  authWallHost: string | undefined;
   antiBotRecoveryAttempted: boolean;
   maxStepsReached: boolean;
   awaitingApproval: boolean;

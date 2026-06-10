@@ -1,5 +1,5 @@
 import type { ActionRegistry } from "./actions.js";
-import { executeStep, type LoopResult, type LoopState } from "./loop.js";
+import { applyAuthWallSignal, executeStep, type LoopResult, type LoopState } from "./loop.js";
 import { latestObservation, reconfigureJustified } from "./state-helpers.js";
 import { syncMatchedSkills } from "./skill-context.js";
 import { createId, nowIsoUtc } from "../shared/ids.js";
@@ -9,6 +9,8 @@ import type { RuntimeConfig } from "./runtime.js";
 export interface RecoverySignals {
   policyDenied: boolean;
   authWallHit: boolean;
+  authWallStreak: number;
+  authWallHost: string | undefined;
   antiBotRecoveryAttempted: boolean;
   maxStepsReached: boolean;
   awaitingApproval: boolean;
@@ -96,7 +98,7 @@ export async function tryAntiBotRecovery(
     const stepResult = await executeStep(state, action, config.provider, config.policyEngine, stepOpts);
     Object.assign(state, stepResult.state);
     signals.policyDenied = stepResult.policyDenied;
-    signals.authWallHit = stepResult.authWallHit;
+    applyAuthWallSignal(state, signals, stepResult.authWallHit);
     if (stepResult.pendingApproval) {
       signals.awaitingApproval = true;
       signals.pendingApproval = stepResult.pendingApproval;

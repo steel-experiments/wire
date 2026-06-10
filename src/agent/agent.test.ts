@@ -24,6 +24,7 @@ import { createPolicyEngine } from "../policy/engine.js";
 import { classifyRun, generateOutcomeSummary } from "./classify.js";
 import { defaultAgentTurn, executeTask, resumeTask } from "./runtime.js";
 import {
+  applyAuthWallSignal,
   createLoopState,
   executeStep,
   finalizeRun,
@@ -267,6 +268,89 @@ test("shouldStop prioritizes user cancellation over other conditions", () => {
   const result = shouldStop(state, conditions);
   assert.equal(result.stop, true);
   assert.equal(result.reason, "User cancelled");
+});
+
+// ---------------------------------------------------------------------------
+// applyAuthWallSignal
+// ---------------------------------------------------------------------------
+
+function makeAuthWallSignals(): { authWallHit: boolean; authWallStreak: number; authWallHost: string | undefined } {
+  return { authWallHit: false, authWallStreak: 0, authWallHost: undefined };
+}
+
+function pushObservationEvent(state: LoopState, url: string, title: string): void {
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: new Date().toISOString(),
+    kind: "observation",
+    payload: { url, title },
+  });
+}
+
+test("applyAuthWallSignal nudges instead of stopping on the first auth wall", () => {
+  const state = createLoopState(makeTask(), makeSessionId());
+  const signals = makeAuthWallSignals();
+  pushObservationEvent(state, "https://www.wordplays.com/crossword-solver/clue", "Sign In | Wordplays.com");
+
+  applyAuthWallSignal(state, signals, true);
+
+  assert.equal(signals.authWallHit, false, "a single auth-walled page must not end the run");
+  assert.equal(signals.authWallStreak, 1);
+  assert.equal(signals.authWallHost, "www.wordplays.com");
+
+  const nudge = state.events[state.events.length - 1]!;
+  assert.equal(nudge.kind, "thought-summary");
+  assert.equal(nudge.payload.kind, "auth-wall-detected");
+  const reason = String(nudge.payload.reason);
+  assert.ok(reason.includes("https://www.wordplays.com/crossword-solver/clue"), "nudge names the walled URL");
+  assert.ok(/credentials/iu.test(reason), "nudge forbids credential entry");
+});
+
+test("applyAuthWallSignal stops after consecutive auth walls on the same host", () => {
+  const state = createLoopState(makeTask(), makeSessionId());
+  const signals = makeAuthWallSignals();
+
+  pushObservationEvent(state, "https://www.wordplays.com/crossword-solver/clue", "Sign In | Wordplays.com");
+  applyAuthWallSignal(state, signals, true);
+  pushObservationEvent(state, "https://www.wordplays.com/login", "Sign In | Wordplays.com");
+  applyAuthWallSignal(state, signals, true);
+
+  assert.equal(signals.authWallHit, true, "staying on the wall after the nudge ends the run");
+  assert.equal(signals.authWallStreak, 2);
+
+  const nudges = state.events.filter(
+    (e) => e.kind === "thought-summary" && e.payload.kind === "auth-wall-detected",
+  );
+  assert.equal(nudges.length, 1, "the nudge is not repeated while stuck on the same host");
+});
+
+test("applyAuthWallSignal treats an auth wall on a different host as a fresh dead end", () => {
+  const state = createLoopState(makeTask(), makeSessionId());
+  const signals = makeAuthWallSignals();
+
+  pushObservationEvent(state, "https://www.wordplays.com/login", "Sign In | Wordplays.com");
+  applyAuthWallSignal(state, signals, true);
+  pushObservationEvent(state, "https://www.linkedin.com/jobs/view/123", "Sign In | LinkedIn");
+  applyAuthWallSignal(state, signals, true);
+
+  assert.equal(signals.authWallHit, false, "walls on two different sources are dead ends, not a blocked task");
+  assert.equal(signals.authWallStreak, 1);
+  assert.equal(signals.authWallHost, "www.linkedin.com");
+});
+
+test("applyAuthWallSignal clears the streak when the agent routes around the wall", () => {
+  const state = createLoopState(makeTask(), makeSessionId());
+  const signals = makeAuthWallSignals();
+
+  pushObservationEvent(state, "https://www.wordplays.com/login", "Sign In | Wordplays.com");
+  applyAuthWallSignal(state, signals, true);
+  pushObservationEvent(state, "https://duckduckgo.com/?q=race", "race at DuckDuckGo");
+  applyAuthWallSignal(state, signals, false);
+
+  assert.equal(signals.authWallHit, false);
+  assert.equal(signals.authWallStreak, 0);
+  assert.equal(signals.authWallHost, undefined);
 });
 
 // ---------------------------------------------------------------------------
