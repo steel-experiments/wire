@@ -19,8 +19,19 @@ export class CdpConnection {
     private readonly logger?: SteelLogger,
   ) {
     this.ready = new Promise((resolve, reject) => {
-      this.socket.onopen = () => resolve();
+      // A socket stuck in CONNECTING (accepted TCP, stalled handshake) must
+      // not hang every command forever — bound the handshake like commands.
+      const connectTimer = setTimeout(() => {
+        const message = `Steel CDP WebSocket connect timed out after ${this.commandTimeoutMs}ms`;
+        this.logger?.error?.(`steel:ws ${message}`);
+        reject(new Error(message));
+      }, this.commandTimeoutMs);
+      this.socket.onopen = () => {
+        clearTimeout(connectTimer);
+        resolve();
+      };
       this.socket.onerror = (event) => {
+        clearTimeout(connectTimer);
         const parts: string[] = [];
         if (event && typeof event === "object") {
           if (event.message) parts.push(`message=${event.message}`);
@@ -84,6 +95,9 @@ export class CdpConnection {
         entry.resolve(message.result);
       };
     });
+    // A handshake failure with no command in flight must not surface as an
+    // unhandled rejection; senders still observe the rejection via `ready`.
+    this.ready.catch(() => {});
   }
 
   async send<T>(method: string, params?: Record<string, unknown>, sessionId?: string, timeoutMs?: number): Promise<T> {

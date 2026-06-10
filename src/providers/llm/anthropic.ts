@@ -143,11 +143,12 @@ export class AnthropicProvider implements LLMProvider {
       "Content-Type": "application/json",
     };
 
+    let transportRetries = 0;
     const response = await fetchWithRetry(
       "anthropic",
       url,
       { method: "POST", headers, body: JSON.stringify(body) },
-      this.transport,
+      { ...this.transport, onRetry: () => { transportRetries += 1; } },
     );
 
     if (!response.ok) {
@@ -178,11 +179,20 @@ export class AnthropicProvider implements LLMProvider {
     const result: ChatResponse = {
       content,
       model: data.model,
-      usage: {
+    };
+
+    // Gateways that speak the Anthropic protocol loosely may omit usage; a
+    // missing block must read as "no usage data", not a TypeError mid-run.
+    if (data.usage && typeof data.usage.input_tokens === "number") {
+      result.usage = {
         inputTokens: data.usage.input_tokens,
         outputTokens: data.usage.output_tokens,
-      },
-    };
+      };
+    }
+
+    if (transportRetries > 0) {
+      result.retries = transportRetries;
+    }
 
     return result;
   }

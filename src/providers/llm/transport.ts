@@ -17,6 +17,9 @@ export interface TransportConfig {
 export interface TransportOptions {
   timeoutMs: number;
   maxRetries: number;
+  // Invoked before each retry so callers can surface the discarded attempt
+  // (MANIFESTO: no hidden retries).
+  onRetry?: (info: { attempt: number; error: Error }) => void;
   // Injectable so tests can avoid real backoff delays.
   sleep?: (ms: number) => Promise<void>;
   // Injectable so tests can drive fetch behavior; defaults to globalThis.fetch.
@@ -57,10 +60,13 @@ function isAbortError(err: unknown): boolean {
 
 /**
  * POST to an LLM endpoint with a hard timeout and a bounded retry on transient
- * network failures (connection errors and timeouts). Non-2xx responses are NOT
- * retried here — the caller inspects `response.ok` and raises LLMApiError — so
- * we never silently retry rate limits or server errors. Each attempt gets a
- * fresh AbortController; exhausting the budget throws LLMNetworkError.
+ * connection failures. Non-2xx responses are NOT retried here — the caller
+ * inspects `response.ok` and raises LLMApiError — so we never silently retry
+ * rate limits or server errors. Timeouts are NOT retried either: a timed-out
+ * request may have completed server-side, and re-POSTing it double-bills
+ * tokens. Every retried attempt is reported through `onRetry` (MANIFESTO: no
+ * hidden retries). Each attempt gets a fresh AbortController; exhausting the
+ * budget throws LLMNetworkError.
  */
 export async function fetchWithRetry(
   provider: string,
@@ -78,14 +84,16 @@ export async function fetchWithRetry(
     try {
       return await doFetch(url, { ...init, signal: controller.signal });
     } catch (err) {
-      lastError = isAbortError(err)
-        ? new Error(`request timed out after ${opts.timeoutMs}ms`)
-        : (err as Error);
+      if (isAbortError(err)) {
+        throw new LLMNetworkError(provider, new Error(`request timed out after ${opts.timeoutMs}ms`));
+      }
+      lastError = err as Error;
     } finally {
       clearTimeout(timer);
     }
 
     if (attempt < opts.maxRetries) {
+      opts.onRetry?.({ attempt: attempt + 1, error: lastError });
       await sleep(BACKOFF_BASE_MS * 2 ** attempt);
     }
   }

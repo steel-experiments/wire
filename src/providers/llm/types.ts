@@ -20,6 +20,9 @@ export interface ChatResponse {
   content: string;
   model: string;
   usage?: { inputTokens: number; outputTokens: number };
+  // How many transport-level retries the request needed (absent when none).
+  // Surfaced so the run trace can record discarded attempts — no hidden retries.
+  retries?: number;
 }
 
 export interface LLMProvider {

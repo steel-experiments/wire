@@ -8,6 +8,7 @@ import {
   validateBrowserCode,
   type SteelLogger,
 } from "../../providers/browser/steel.js";
+import { CdpConnection } from "./steel/cdp.js";
 import { createLoopState } from "../../agent/loop.js";
 import type { BrowserProvider } from "../../browser/bridge.js";
 import { createId } from "../../shared/ids.js";
@@ -1239,6 +1240,24 @@ test("Steel reconfigure action notifies replacement session callback", async () 
   assert.equal(callback?.summary, "Enable stealth session");
   assert.equal(state.sessionId, newSession.id);
   assert.equal(state.sessionLiveUrl, newSession.liveUrl);
+});
+
+test("CDP send rejects when the websocket handshake never completes", async () => {
+  // A socket stuck in CONNECTING must not hang observe/exec forever.
+  const stuckSocket = {
+    onopen: null,
+    onmessage: null,
+    onerror: null,
+    onclose: null,
+    send() {},
+    close() {},
+  };
+  const cdp = new CdpConnection(stuckSocket as never, 50);
+
+  await assert.rejects(
+    () => cdp.send("Target.getTargets"),
+    /connect timed out/iu,
+  );
 });
 
 test("Steel reconfigure redacts proxy credentials in the thought-summary event", async () => {

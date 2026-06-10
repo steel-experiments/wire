@@ -102,6 +102,58 @@ test("fetchWithRetry aborts a hung request after the timeout and surfaces LLMNet
   assert.equal(calls, 1);
 });
 
+test("fetchWithRetry does not retry timeouts", async () => {
+  // A timed-out request may have completed server-side; re-POSTing it
+  // double-bills tokens. Only connection-level failures are retried.
+  let calls = 0;
+  const fetchImpl = (_url: string | URL | Request, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      calls += 1;
+      init?.signal?.addEventListener("abort", () => {
+        reject(new DOMException("The operation was aborted", "AbortError"));
+      });
+    });
+
+  await assert.rejects(
+    () => fetchWithRetry("openai", "https://example.test", {}, {
+      timeoutMs: 10,
+      maxRetries: 2,
+      sleep: noSleep,
+      fetchImpl,
+    }),
+    (err: unknown) => {
+      assert.ok(err instanceof LLMNetworkError);
+      assert.ok(/timed out/iu.test(err.message));
+      return true;
+    },
+  );
+
+  assert.equal(calls, 1, "a timeout must not be retried");
+});
+
+test("fetchWithRetry reports each retry through onRetry", async () => {
+  // MANIFESTO: no hidden retries — every discarded attempt must be observable.
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    if (calls < 3) throw new Error("connection reset");
+    return okResponse();
+  };
+  const seen: Array<{ attempt: number; message: string }> = [];
+
+  const res = await fetchWithRetry("openai", "https://example.test", {}, {
+    timeoutMs: 1000,
+    maxRetries: 2,
+    sleep: noSleep,
+    fetchImpl,
+    onRetry: (info) => seen.push({ attempt: info.attempt, message: info.error.message }),
+  });
+
+  assert.equal(res.status, 200);
+  assert.deepEqual(seen.map((s) => s.attempt), [1, 2]);
+  assert.ok(seen.every((s) => s.message.includes("connection reset")));
+});
+
 test("fetchWithRetry passes an AbortSignal through to fetch", async () => {
   let seenSignal: unknown;
   const fetchImpl = async (_url: string | URL | Request, init?: RequestInit) => {

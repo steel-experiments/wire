@@ -136,11 +136,12 @@ export class OpenAIProvider implements LLMProvider {
       "Content-Type": "application/json",
     };
 
+    let transportRetries = 0;
     const response = await fetchWithRetry(
       "openai",
       url,
       { method: "POST", headers, body: JSON.stringify(body) },
-      this.transport,
+      { ...this.transport, onRetry: () => { transportRetries += 1; } },
     );
 
     if (!response.ok) {
@@ -176,6 +177,10 @@ export class OpenAIProvider implements LLMProvider {
         inputTokens: data.usage.input_tokens,
         outputTokens: data.usage.output_tokens,
       };
+    }
+
+    if (transportRetries > 0) {
+      result.retries = transportRetries;
     }
 
     return result;

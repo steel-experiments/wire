@@ -72,6 +72,10 @@ export class SteelApiError extends Error {
   }
 }
 
+// Steel REST calls front every observe/exec; a stalled API must not hang a
+// run forever. Mirrors the LLM transport's 60s request bound.
+const STEEL_FETCH_TIMEOUT_MS = 60_000;
+
 export async function steelFetch<T>(
   baseUrl: string,
   apiKey: string,
@@ -86,10 +90,20 @@ export async function steelFetch<T>(
   };
 
   let response: Response;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), STEEL_FETCH_TIMEOUT_MS);
   try {
-    response = await fetch(url, { ...options, headers });
+    response = await fetch(url, { ...options, headers, signal: controller.signal });
   } catch (err) {
-    throw new SteelApiError(0, `Network error: ${(err as Error).message}`);
+    const aborted = err instanceof Error && err.name === "AbortError";
+    throw new SteelApiError(
+      0,
+      aborted
+        ? `Network error: request timed out after ${STEEL_FETCH_TIMEOUT_MS}ms`
+        : `Network error: ${(err as Error).message}`,
+    );
+  } finally {
+    clearTimeout(timer);
   }
 
   if (!response.ok) {

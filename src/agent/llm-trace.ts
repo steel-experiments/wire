@@ -48,18 +48,25 @@ export async function recordLlmCall(
       },
     });
   }
-  if (response.usage) {
+  if (response.usage || response.retries) {
+    const payload: JsonObject = {
+      callIndex: state.stepCount + 1,
+      purpose,
+      model: response.model,
+    };
+    if (response.usage) {
+      payload.usage = response.usage;
+    }
+    // Discarded transport attempts are part of the run record — no hidden retries.
+    if (response.retries) {
+      payload.transportRetries = response.retries;
+    }
     state.events.push({
       id: createId("event"),
       runId: state.run.id,
       ts: nowIsoUtc(),
       kind: "llm-usage",
-      payload: {
-        callIndex: state.stepCount + 1,
-        purpose,
-        model: response.model,
-        usage: response.usage,
-      },
+      payload,
     });
   }
 }
