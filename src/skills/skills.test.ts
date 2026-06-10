@@ -9,10 +9,10 @@ import { test, afterEach } from "node:test";
 import { createId } from "../shared/ids.js";
 import type { SkillFrontmatter, SkillMetadata } from "../shared/types.js";
 
-import { loadSkillDocsFromDir, loadSkillsFromDir, findMatchingSkills, setSkillLoadWarningSink } from "./loader.js";
+import { loadSkillDocsFromDir, loadSkillsFromDir, findMatchingSkills, findMatchingSkillDocMatches, setSkillLoadWarningSink } from "./loader.js";
 import { matchSkillsByHostname, matchSkillsByTags, scoreSkills, sortByRelevance } from "./matcher.js";
 import { extractSections, parseSkillFile } from "./parser.js";
-import { manageSkillPromotion, promoteSkill, generateSkillProposal, writeSkillProposal, parseSkillProposalResponse, hasReusableSignal, type PromotionCandidate } from "./promote.js";
+import { manageSkillPromotion, promoteSkill, generateSkillProposal, writeSkillProposal, parseSkillProposalResponse, llmProposeSkill, hasReusableSignal, type PromotionCandidate } from "./promote.js";
 import { mergeStats, readSkillStats, writeSkillStats, updateSkillStatsFromRun, DEFAULT_STATS, type SkillStats } from "./stats.js";
 
 // ---------------------------------------------------------------------------
@@ -849,7 +849,7 @@ test("scoreSkills penalizes repeatedly ineffective expensive skills", () => {
   ));
 });
 
-test("findMatchingSkills returns more than six valid matches", async () => {
+test("findMatchingSkills caps tag-only matches at the injection limit", async () => {
   testRoot = makeRoot();
   const dir = join(testRoot, "skills");
   await mkdir(dir, { recursive: true });
@@ -861,7 +861,7 @@ test("findMatchingSkills returns more than six valid matches", async () => {
   }
 
   const matched = await findMatchingSkills(dir, undefined, ["dialogs"]);
-  assert.equal(matched.length, 7);
+  assert.equal(matched.length, 5, "every matched skill rides into context; accumulation is capped");
 });
 
 test("findMatchingSkills uses persisted effectiveness stats when ranking", async () => {
@@ -1050,8 +1050,12 @@ test("manageSkillPromotion writes proposal first and only auto-promotes high con
   const highConfidence = makeCandidate({ hostname: "high.example.com", confidence: 0.95 });
   const high = await manageSkillPromotion(highConfidence, dir);
   assert.equal(high.promoted, true);
-  assert.ok(high.proposalPath?.includes(".proposals"));
   assert.ok(high.activePath?.endsWith(".md"));
+  // Promotion consumes the hostname's proposal copies; only the unpromoted
+  // example.com proposal from the low-confidence candidate remains.
+  assert.equal(high.proposalPath, undefined);
+  const remaining = await readdir(join(dir, ".proposals"));
+  assert.ok(remaining.every((name) => !name.startsWith("high_example_com")), "promoted proposals are removed");
 });
 
 test("manageSkillPromotion rejects duplicate proposals for a hostname", async () => {
@@ -1098,8 +1102,15 @@ test("manageSkillPromotion caps proposals per hostname", async () => {
   testRoot = makeRoot();
   const dir = join(testRoot, "skills");
 
+  // allowAutoPromote: false keeps every candidate in quarantine (the path a
+  // run that didn't fully complete used to take), so the cap itself is what
+  // bounds accumulation.
   for (let i = 0; i < 7; i++) {
-    await manageSkillPromotion(makeCandidate({ confidence: 0.7, facts: [`Unique fact ${i} selector-${i}`] }), dir);
+    await manageSkillPromotion(
+      makeCandidate({ confidence: 0.7, facts: [`Unique fact ${i} selector-${i}`] }),
+      dir,
+      { autoPromoteMinConfidence: 0.9, requireReusableSignal: true, proposalCapPerHostname: 5, allowAutoPromote: false },
+    );
   }
 
   assert.equal((await readdir(join(dir, ".proposals"))).length, 5);
@@ -1459,4 +1470,247 @@ test("workflow text contributes to dedup similarity between proposals", async ()
   const result = await manageSkillPromotion(second, dir);
   // Dedup: near-duplicate workflow → no new proposal written
   assert.ok(!result.promoted, "dedup should block near-duplicate workflow proposal");
+});
+
+// ---------------------------------------------------------------------------
+// Skill accumulation controls: injection cap, id dedup, hostname validity,
+// stats-driven retirement
+// ---------------------------------------------------------------------------
+
+test("findMatchingSkillDocMatches caps the number of injected skills", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  await mkdir(join(dir, ".proposals"), { recursive: true });
+
+  // 8 distinct proposals matching the same hostname — without a cap they
+  // would all ride along into the run context.
+  for (let i = 0; i < 8; i++) {
+    const id = createId("skill");
+    await writeFile(join(dir, ".proposals", `duckduckgo_com-${i}.md`), [
+      "---",
+      `id: ${id}`,
+      "scope: domain",
+      "status: proposed",
+      "source: generated",
+      "confidence: 0.8",
+      "tags:",
+      "  - duckduckgo.com",
+      "updatedAt: 2026-06-10",
+      "hostnamePatterns:",
+      '  - "duckduckgo.com"',
+      "---",
+      `# Proposal ${i}`,
+      "## Facts",
+      `- Fact number ${i}.`,
+    ].join("\n"), "utf-8");
+  }
+
+  const matches = await findMatchingSkillDocMatches(dir, "duckduckgo.com", ["search"], { includeProposals: true });
+  assert.ok(matches.length <= 5, `expected at most 5 matches, got ${matches.length}`);
+});
+
+test("loadSkillDocsFromDir dedups by skill id, preferring the active copy", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  await mkdir(join(dir, ".proposals"), { recursive: true });
+  const id = createId("skill");
+  const frontmatter = (status: string) => [
+    "---",
+    `id: ${id}`,
+    "scope: domain",
+    `status: ${status}`,
+    "source: generated",
+    "confidence: 0.85",
+    "tags:",
+    "  - example.com",
+    "updatedAt: 2026-06-10",
+    "hostnamePatterns:",
+    '  - "example.com"',
+    "---",
+    "# Skill",
+    "## Facts",
+    "- A fact.",
+  ].join("\n");
+  await writeFile(join(dir, "example_com-promoted.md"), frontmatter("active"), "utf-8");
+  await writeFile(join(dir, ".proposals", "example_com-promoted.md"), frontmatter("proposed"), "utf-8");
+
+  const loaded = await loadSkillDocsFromDir(dir, { includeProposals: true });
+  const copies = loaded.filter((skill) => skill.id === id);
+  assert.equal(copies.length, 1, "the same skill id must not load twice");
+  assert.equal(copies[0]!.status, "active", "the active copy wins over the proposal copy");
+});
+
+test("parseSkillProposalResponse rejects invalid hostnames", () => {
+  const runId = createId("run");
+  const invalid = ["about:blank", "3ego_addeventlistener", "localhost", "data:text/html", "no spaces.com x"];
+  for (const hostname of invalid) {
+    const candidate = parseSkillProposalResponse(
+      JSON.stringify({ hostname, facts: ["something"], confidence: 0.9 }),
+      runId,
+    );
+    assert.equal(candidate, null, `expected hostname to be rejected: ${hostname}`);
+  }
+
+  const valid = parseSkillProposalResponse(
+    JSON.stringify({ hostname: "dashboard.stripe.com", facts: ["something"], confidence: 0.9 }),
+    runId,
+  );
+  assert.ok(valid, "a real hostname must still parse");
+});
+
+test("manageSkillPromotion removes hostname proposals once promoted", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+
+  // First, a low-confidence proposal stays quarantined.
+  await manageSkillPromotion(makeCandidate({ confidence: 0.7, facts: ["deep links resolve to home"] }), dir);
+  assert.equal((await readdir(join(dir, ".proposals"))).length, 1);
+
+  // A second distinct proposal triggers cumulative promotion. Once the
+  // knowledge graduates to an active skill, the proposal evidence is spent:
+  // leaving it behind would keep the rediscovery counter saturated and
+  // auto-promote every future mediocre proposal for the hostname.
+  const second = await manageSkillPromotion(
+    makeCandidate({ confidence: 0.7, facts: ["search box bounces to homepage"], selectors: ["input[type='search']"] }),
+    dir,
+  );
+  assert.equal(second.promoted, true);
+  assert.ok(second.activePath?.endsWith(".md"));
+  assert.equal(second.proposalPath, undefined, "promoted result must not point at a removed proposal");
+  assert.equal((await readdir(join(dir, ".proposals"))).length, 0, "promotion consumes the hostname's proposals");
+});
+
+test("updateSkillStatsFromRun retires a generated skill after repeated failures", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  await mkdir(dir, { recursive: true });
+  const skillId = createId("skill");
+  await writeFile(join(dir, "flaky_example_com-skill.md"), [
+    "---",
+    `id: ${skillId}`,
+    "scope: domain",
+    "status: active",
+    "source: generated",
+    "confidence: 0.9",
+    "tags:",
+    "  - flaky.example.com",
+    "updatedAt: 2026-06-01",
+    "hostnamePatterns:",
+    '  - "flaky.example.com"',
+    "---",
+    "# Skill",
+    "## Facts",
+    "- A fact that keeps not helping.",
+  ].join("\n"), "utf-8");
+
+  // 4 prior loads, 1 success. This failing run makes it 5 loads at 20%.
+  await writeSkillStats(dir, skillId, {
+    ...DEFAULT_STATS,
+    loadedCount: 4,
+    successCount: 1,
+    totalSteps: 40,
+    totalTokens: 4000,
+    lastLoadedAt: "2026-06-09T00:00:00.000Z",
+  });
+
+  const result = {
+    run: { id: createId("run") },
+    events: [
+      {
+        id: createId("event"),
+        runId: createId("run"),
+        ts: "2026-06-10T00:00:00.000Z",
+        kind: "skill-load",
+        payload: { skills: [skillId] },
+      },
+    ],
+    classification: { kind: "partial-success", confidence: 0.55 },
+    stepCount: 12,
+    startedAt: "2026-06-10T00:00:00.000Z",
+  };
+  // skill-load events carry the run id they belong to.
+  result.events[0]!.runId = result.run.id;
+
+  await updateSkillStatsFromRun(dir, result as never);
+
+  const raw = await readFile(join(dir, "flaky_example_com-skill.md"), "utf-8");
+  assert.match(raw, /^status: rejected$/mu, "an ineffective generated skill is retired");
+});
+
+test("updateSkillStatsFromRun never retires authored skills", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  await mkdir(dir, { recursive: true });
+  const skillId = createId("skill");
+  await writeFile(join(dir, "team_example_com-skill.md"), [
+    "---",
+    `id: ${skillId}`,
+    "scope: domain",
+    "status: active",
+    "source: team",
+    "tags:",
+    "  - team.example.com",
+    "updatedAt: 2026-06-01",
+    "hostnamePatterns:",
+    '  - "team.example.com"',
+    "---",
+    "# Skill",
+    "## Facts",
+    "- Curated knowledge.",
+  ].join("\n"), "utf-8");
+
+  await writeSkillStats(dir, skillId, {
+    ...DEFAULT_STATS,
+    loadedCount: 9,
+    successCount: 0,
+    lastLoadedAt: "2026-06-09T00:00:00.000Z",
+  });
+
+  const runId = createId("run");
+  const result = {
+    run: { id: runId },
+    events: [
+      { id: createId("event"), runId, ts: "2026-06-10T00:00:00.000Z", kind: "skill-load", payload: { skills: [skillId] } },
+    ],
+    classification: { kind: "agent-error", confidence: 0.7 },
+    stepCount: 30,
+    startedAt: "2026-06-10T00:00:00.000Z",
+  };
+
+  await updateSkillStatsFromRun(dir, result as never);
+
+  const raw = await readFile(join(dir, "team_example_com-skill.md"), "utf-8");
+  assert.match(raw, /^status: active$/mu, "authored skills are sacred to retirement");
+});
+
+test("llmProposeSkill rejects candidates whose hostname was never observed in the trace", async () => {
+  // Shape validation can't catch syntactically-plausible hallucinations like
+  // "3ego.addeventlistener" (a JS API mistaken for a domain). The trace can:
+  // a skill may only be minted for a hostname the run actually visited.
+  const runId = createId("run");
+  const events = [
+    {
+      id: createId("event"),
+      runId,
+      ts: "2026-06-10T00:00:00.000Z",
+      kind: "observation",
+      payload: { url: "https://www.amazon.com/s?k=gizmo", title: "Amazon search" },
+    },
+  ];
+
+  const proposerFor = (hostname: string) => ({
+    model: "test-model",
+    async chat() {
+      return {
+        content: JSON.stringify({ hostname, facts: ["something"], confidence: 0.9 }),
+        model: "test-model",
+      };
+    },
+  });
+
+  const hallucinated = await llmProposeSkill(events as never, runId, proposerFor("3ego.addeventlistener") as never);
+  assert.equal(hallucinated, null, "unvisited hostname must be rejected");
+
+  const visited = await llmProposeSkill(events as never, runId, proposerFor("amazon.com") as never);
+  assert.equal(visited?.hostname, "amazon.com", "the registrable parent of an observed hostname is fine");
 });

@@ -58,6 +58,37 @@ export function containsSecrets(content: string): boolean {
   return SECRET_PATTERNS.some((re) => re.test(content));
 }
 
+// A skill hostname must be a plausible public hostname: dot-separated labels
+// of letters/digits/hyphens with an alphabetic TLD. The distiller occasionally
+// hallucinates pseudo-hostnames ("about:blank", JS identifiers), and each one
+// would otherwise get its own proposal bucket and pollute matching forever.
+const HOSTNAME_PATTERN = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/iu;
+
+export function isValidSkillHostname(hostname: string): boolean {
+  return HOSTNAME_PATTERN.test(hostname);
+}
+
+// Shape validation can't catch syntactically-plausible hallucinations (a JS
+// API name shaped like a domain). The trace can: a skill may only be minted
+// for a hostname the run actually observed, or its registrable parent (the
+// distiller often generalizes "www.amazon.com" to "amazon.com" — that's fine).
+export function hostnameObservedInTrace(events: TraceEvent[], hostname: string): boolean {
+  const wanted = hostname.toLowerCase().replace(/^www\./u, "");
+  for (const event of events) {
+    if (event.kind !== "observation") continue;
+    const url = event.payload["url"];
+    if (typeof url !== "string") continue;
+    let observed: string;
+    try {
+      observed = new URL(url).hostname.toLowerCase().replace(/^www\./u, "");
+    } catch {
+      continue;
+    }
+    if (observed === wanted || observed.endsWith(`.${wanted}`)) return true;
+  }
+  return false;
+}
+
 function extractHostname(url: string): string | null {
   try {
     return new URL(url).hostname;
@@ -140,7 +171,7 @@ export function parseSkillProposalResponse(
     }
   }
 
-  if (typeof parsed.hostname !== "string" || !parsed.hostname) return null;
+  if (typeof parsed.hostname !== "string" || !isValidSkillHostname(parsed.hostname)) return null;
 
   const confidence = typeof parsed.confidence === "number"
     ? Math.max(0, Math.min(1, Math.round(parsed.confidence * 100) / 100))
@@ -198,7 +229,9 @@ export async function llmProposeSkill(
 
     const response = await llmProvider.chat(messages, { maxTokens: 500 });
 
-    return parseSkillProposalResponse(response.content, runId);
+    const candidate = parseSkillProposalResponse(response.content, runId);
+    if (candidate && !hostnameObservedInTrace(events, candidate.hostname)) return null;
+    return candidate;
   } catch (err) {
     if (process.env["WIRE_DEBUG_SKILLS"]) {
       console.error("[skill-promote] llmProposeSkill failed:", err instanceof Error ? err.message : err);
@@ -426,16 +459,28 @@ export async function manageSkillPromotion(
   }
 
   const activePath = await promoteSkill(candidate, skillDir, { activeStatus: "active" });
+  if (!activePath) {
+    return {
+      proposalPath,
+      promoted: false,
+      reason: "proposal-only: active skill confidence is clearly higher",
+    };
+  }
+
+  // Promotion consumes the hostname's proposals. The evidence has graduated
+  // into the active skill; leaving the proposal copies behind would double-load
+  // the same knowledge (active + proposal) and keep the rediscovery counter
+  // saturated, auto-promoting every future proposal for the hostname.
+  await pruneProposals(skillDir, candidate.hostname, 0);
+
   const promotedReason = repeatedDiscovery && candidate.confidence < policy.autoPromoteMinConfidence
     ? `auto-promoted: rediscovered knowledge across ${proposalCount} proposals`
     : "auto-promoted";
-  const managed: ManagedSkillPromotion = {
-    proposalPath,
-    promoted: Boolean(activePath),
-    reason: activePath ? promotedReason : "proposal-only: active skill confidence is clearly higher",
+  return {
+    promoted: true,
+    reason: promotedReason,
+    activePath,
   };
-  if (activePath) managed.activePath = activePath;
-  return managed;
 }
 
 async function findExistingSkillsForHostname(

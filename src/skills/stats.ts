@@ -1,5 +1,5 @@
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { LoopResult } from "../agent/loop.js";
 import type { RunClassificationKind, RunId, SkillId, TraceEvent } from "../shared/types.js";
@@ -133,7 +133,36 @@ export async function updateSkillStatsFromRun(skillDir: string, result: LoopResu
       loadedWithSkillIds: skillIds.filter((skillId) => skillId !== id),
     });
     await writeSkillStats(skillDir, id, updated);
+    await retireIfIneffective(skillDir, id, updated);
   }
+}
+
+// Retirement floor: once a skill has had a fair number of chances and runs
+// that load it almost never complete, marking it rejected takes it out of
+// matching entirely (the loader filters rejected skills) instead of letting
+// it ride along forever at a score penalty.
+const RETIRE_MIN_LOADS = 5;
+const RETIRE_MAX_SUCCESS_RATE = 0.25;
+
+async function retireIfIneffective(skillDir: string, skillId: SkillId, stats: SkillStats): Promise<void> {
+  if (stats.loadedCount < RETIRE_MIN_LOADS) return;
+  if (skillSuccessRate(stats) > RETIRE_MAX_SUCCESS_RATE) return;
+  try {
+    for (const name of await readdir(skillDir)) {
+      if (!name.endsWith(".md")) continue;
+      const path = join(skillDir, name);
+      const raw = await readFile(path, "utf-8");
+      const frontmatter = raw.match(/^---\n([\s\S]*?)\n---/u)?.[1];
+      if (!frontmatter) continue;
+      if (frontmatter.match(/^id:\s*(\S+)/mu)?.[1] !== skillId) continue;
+      // Authored skills are sacred: only generated knowledge is retired, and
+      // only via its status line — files without one are left untouched.
+      if (frontmatter.match(/^source:\s*(\S+)/mu)?.[1] !== "generated") return;
+      if (!/^status:\s*\S+$/mu.test(frontmatter)) return;
+      await writeFile(path, raw.replace(/^status:\s*\S+$/mu, "status: rejected"), "utf-8");
+      return;
+    }
+  } catch { /* best effort — retirement must never affect run outcome */ }
 }
 
 function extractLoadedSkills(events: TraceEvent[], runId: string): SkillId[] {

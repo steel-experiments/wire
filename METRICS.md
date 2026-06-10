@@ -106,3 +106,7 @@ Track lightweight project size signals here when code changes.
 | 2026-06-08 | `src/` test TypeScript LOC | 18,027 | `pnpm metrics` |
 | 2026-06-08 | `src/` production TypeScript LOC | 17,726 | `pnpm metrics` |
 | 2026-06-08 | `src/` test TypeScript LOC | 18,339 | `pnpm metrics` |
+| 2026-06-10 | `src/` production TypeScript LOC | 17,839 | `pnpm metrics` |
+| 2026-06-10 | `src/` test TypeScript LOC | 18,723 | `pnpm metrics` |
+| 2026-06-10 | `src/` production TypeScript LOC | 17,929 | `pnpm metrics` |
+| 2026-06-10 | `src/` test TypeScript LOC | 18,977 | `pnpm metrics` |

@@ -68,6 +68,10 @@ async function skillFileCandidates(dir: string, options: SkillLoadOptions): Prom
 export async function loadSkillDocsFromDir(dir: string, options: SkillLoadOptions = {}): Promise<LoadedSkill[]> {
   const candidates = await skillFileCandidates(dir, options);
   const results: LoadedSkill[] = [];
+  // Active-dir candidates are listed before .proposals/, so keeping the first
+  // occurrence of an id means a promoted skill's active copy shadows any
+  // lingering proposal copy instead of both loading into the run.
+  const seenIds = new Set<string>();
 
   for (const { filePath } of candidates) {
     let raw: string;
@@ -80,6 +84,8 @@ export async function loadSkillDocsFromDir(dir: string, options: SkillLoadOption
 
     try {
       const frontmatter = parseSkillFile(raw, filePath);
+      if (seenIds.has(frontmatter.id)) continue;
+      seenIds.add(frontmatter.id);
       const sections = Object.fromEntries(extractSections(raw));
       const loadedSkill: LoadedSkill = {
         id: frontmatter.id,
@@ -172,6 +178,12 @@ function sortByEffectiveness(active: LoadedSkill[], statsBySkillId: Record<strin
   });
 }
 
+// Per-run injection cap: every matched skill rides into the model context, so
+// the cost of accumulation is paid on each step. Hostname matches outscore
+// tag-only matches by an order of magnitude, so the cap keeps the most
+// relevant skills and drops incidental tag overlap first.
+const MAX_MATCHED_SKILLS = 5;
+
 function filterMatchingSkillDocMatches(
   all: LoadedSkill[],
   hostname?: string,
@@ -189,13 +201,17 @@ function filterMatchingSkillDocMatches(
   );
 
   if (!hasHostname && !hasTags) {
-    return Object.keys(statsBySkillId).length > 0
+    const unfiltered = Object.keys(statsBySkillId).length > 0
       ? sortByEffectiveness(active, statsBySkillId)
       : sortByRelevance(active).map((skill) => ({ skill, score: 0, reasons: ["recent-or-confident"] }));
+    return unfiltered.slice(0, MAX_MATCHED_SKILLS);
   }
 
   const minScore = hasHostname ? 6 : 6;
-  const scoreOptions: { hostname?: string; tags?: string[]; minScore: number; statsBySkillId?: Record<string, SkillStats> } = { minScore };
+  const scoreOptions: { hostname?: string; tags?: string[]; minScore: number; limit: number; statsBySkillId?: Record<string, SkillStats> } = {
+    minScore,
+    limit: MAX_MATCHED_SKILLS,
+  };
   if (hostname) scoreOptions.hostname = hostname;
   if (tags) scoreOptions.tags = tags;
   if (Object.keys(statsBySkillId).length > 0) scoreOptions.statsBySkillId = statsBySkillId;
