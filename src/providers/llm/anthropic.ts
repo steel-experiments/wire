@@ -225,6 +225,12 @@ export function createAnthropicProvider(
     providerConfig.reasoningEffort = reasoningEffort;
   }
 
+  if (config?.timeoutMs !== undefined) {
+    providerConfig.timeoutMs = config.timeoutMs;
+  }
+  if (config?.maxRetries !== undefined) {
+    providerConfig.maxRetries = config.maxRetries;
+  }
   return new AnthropicProvider(providerConfig);
 }
 
@@ -249,5 +255,11 @@ export function createZaiProvider(
     providerConfig.reasoningEffort = reasoningEffort;
   }
 
+  if (config?.timeoutMs !== undefined) {
+    providerConfig.timeoutMs = config.timeoutMs;
+  }
+  if (config?.maxRetries !== undefined) {
+    providerConfig.maxRetries = config.maxRetries;
+  }
   return new AnthropicProvider(providerConfig);
 }

@@ -409,6 +409,26 @@ test("SteelProvider.observe returns page snapshot", async () => {
   }
 });
 
+test("SteelProvider.screenshot captures the selected page target", async () => {
+  const { provider, setNextResponse, setCdpResponse, restore } = createMockedProvider();
+  setNextResponse("/sessions/aaa-bbb-ccc", fakeSteelSession({ id: "aaa-bbb-ccc" }));
+  setCdpResponse("Target.getTargets", {
+    targetInfos: [{ targetId: "tab-1", type: "page", title: "Example", url: "https://example.com" }],
+  });
+  setCdpResponse("Target.attachToTarget", { sessionId: "cdp-session-1" });
+  setCdpResponse("Page.captureScreenshot", { data: "cG5n" });
+
+  try {
+    const screenshot = await provider.screenshot({ sessionId: "session_aaa-bbb-ccc" as never, targetId: "tab-1" });
+
+    assert.equal(screenshot.dataBase64, "cG5n");
+    assert.equal(screenshot.mimeType, "image/png");
+    assert.equal(screenshot.targetId, "tab-1");
+  } finally {
+    restore();
+  }
+});
+
 test("SteelProvider.exec evaluates code in the page target", async () => {
   const { provider, setNextResponse, setCdpResponse, restore } = createMockedProvider();
   setNextResponse("/sessions/aaa-bbb-ccc", fakeSteelSession({ id: "aaa-bbb-ccc" }));

@@ -214,5 +214,11 @@ export function createOpenAIProvider(
     providerConfig.reasoningEffort = reasoningEffort;
   }
 
+  if (config?.timeoutMs !== undefined) {
+    providerConfig.timeoutMs = config.timeoutMs;
+  }
+  if (config?.maxRetries !== undefined) {
+    providerConfig.maxRetries = config.maxRetries;
+  }
   return new OpenAIProvider(providerConfig);
 }

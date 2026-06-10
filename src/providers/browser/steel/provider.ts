@@ -3,6 +3,8 @@ import type {
   BrowserExecResult,
   BrowserObservation,
   BrowserRawRequest,
+  BrowserScreenshotRequest,
+  BrowserScreenshotResult,
   BrowserSession,
   CreateSessionInput,
   JsonObject,
@@ -211,6 +213,29 @@ export class SteelProvider implements BrowserProvider {
     });
   }
 
+  async screenshot(input: BrowserScreenshotRequest): Promise<BrowserScreenshotResult> {
+    const session = this.withAuth(await this.getSession(input.sessionId));
+
+    return withConnection(this.webSocketFactory, session, this.cdpCommandTimeoutMs, this.logger, async (cdp) => {
+      const targets = await listPageTargets(cdp);
+      const target = pickTarget(targets, input.targetId);
+      const sessionId = await attachToTarget(cdp, target.targetId);
+      const result = await cdp.send<{ data?: string }>(
+        "Page.captureScreenshot",
+        { format: "png" },
+        sessionId,
+      );
+      if (!result.data) {
+        throw new Error("Page.captureScreenshot returned no data");
+      }
+      return {
+        dataBase64: result.data,
+        mimeType: "image/png",
+        targetId: target.targetId,
+      };
+    });
+  }
+
   async exec(input: BrowserExecRequest): Promise<BrowserExecResult> {
     const session = this.withAuth(await this.getSession(input.sessionId));
 
@@ -369,6 +394,18 @@ export function createSteelProvider(
   }
   if (config?.onRetry) {
     providerConfig.onRetry = config.onRetry;
+  }
+  if (config?.createSessionMaxRetries !== undefined) {
+    providerConfig.createSessionMaxRetries = config.createSessionMaxRetries;
+  }
+  if (config?.getSessionRetryDelayMs !== undefined) {
+    providerConfig.getSessionRetryDelayMs = config.getSessionRetryDelayMs;
+  }
+  if (config?.wireClickPolicy) {
+    providerConfig.wireClickPolicy = config.wireClickPolicy;
+  }
+  if (config?.logger) {
+    providerConfig.logger = config.logger;
   }
 
   return new SteelProvider(providerConfig);
