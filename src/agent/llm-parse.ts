@@ -52,10 +52,18 @@ export function parseActionFromLlm(content: string, state: LoopState): ProposedA
     };
   }
 
+  // The summary is a clean sentence (it can become the surfaced run result in
+  // non-task modes); the raw model text is preserved in the payload for the
+  // trace only. parseFailure lets the turn issue one corrective reprompt.
   return {
     kind: "finish",
-    summary: `Model returned an invalid action payload: ${content.slice(0, 400)}`,
+    summary: "Model returned an invalid action payload; ending the run without a parseable action.",
+    payload: { parseFailure: true, rawContent: content.slice(0, 400) },
   };
+}
+
+export function isParseFailureFinish(action: ProposedAction): boolean {
+  return action.kind === "finish" && action.payload?.parseFailure === true;
 }
 
 export function tryParseAction(content: string): ProposedAction | undefined {

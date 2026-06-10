@@ -154,9 +154,13 @@ export function deriveRunResult(events: TraceEvent[], mode: TaskMode): string | 
       return progressLedgerText(progressLedger);
     }
 
+    // Synthetic task-summary notes ("Reached <title> at <url>") are runtime
+    // narration, not answers — surfacing one would defeat the agent-error
+    // downgrade for runs that extracted nothing (mirrors answerArtifactCount).
     const latestNoteArtifact = [...events].reverse().find((event) =>
       event.kind === "artifact" &&
       event.payload.kind === "note" &&
+      event.payload.source !== "task-summary" &&
       typeof event.payload.content === "string" &&
       event.payload.content.trim().length > 0
     );
@@ -250,6 +254,9 @@ export function computeFinalClassification(
     events: state.events,
     successCriteria: state.task.successCriteria,
     objective: state.task.objective,
+    // Judge the exact text the caller will receive, not a re-derivation —
+    // the two paths can disagree on which code-result is "final".
+    ...(derivedResult !== undefined ? { finalResultText: derivedResult } : {}),
     errorCount,
     authWallHit: options.authWallHit ?? false,
     policyDenied: options.policyDenied ?? false,
@@ -298,6 +305,21 @@ export function computeFinalClassification(
   return classification;
 }
 
+// Diagnostic fallback only: a synthetic task-summary note may surface on a
+// run that did NOT succeed, where it explains the stop. It must never stand
+// in for an answer — deriveRunResult and hasMeaningfulDerivedResult cannot
+// see it, so it can't defeat the agent-error downgrade.
+function latestTaskSummaryNote(events: TraceEvent[]): string | undefined {
+  const note = [...events].reverse().find((event) =>
+    event.kind === "artifact" &&
+    event.payload.kind === "note" &&
+    event.payload.source === "task-summary" &&
+    typeof event.payload.content === "string" &&
+    event.payload.content.trim().length > 0
+  );
+  return note && typeof note.payload.content === "string" ? note.payload.content : undefined;
+}
+
 export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): LoopResult {
   const derivedResult = deriveRunResult(state.events, state.task.mode);
   const classification = computeFinalClassification(state, options);
@@ -328,10 +350,12 @@ export function finalizeRun(state: LoopState, options: FinalizeOptions = {}): Lo
   const resultBlocked =
     (options.maxStepsReached === true && !hasMeaningfulDerivedResult(derivedResult)) ||
     (options.userCancelled === true && !hasMeaningfulDerivedResult(derivedResult));
-  if (derivedResult !== undefined && !resultBlocked) {
-    finishedRun.result = derivedResult;
+  const surfacedResult = derivedResult ??
+    (status !== "succeeded" ? latestTaskSummaryNote(state.events) : undefined);
+  if (surfacedResult !== undefined && !resultBlocked) {
+    finishedRun.result = surfacedResult;
     try {
-      const resultPayload = JSON.parse(derivedResult) as JsonValue;
+      const resultPayload = JSON.parse(surfacedResult) as JsonValue;
       finishedRun.resultPayload = resultPayload;
     } catch {
       // Keep the compatibility string for non-JSON answers.

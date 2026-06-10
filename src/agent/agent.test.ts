@@ -381,6 +381,46 @@ test("executeStep handles observe action", async () => {
   assert.equal(result.state.events[0]!.kind, "observation");
 });
 
+test("executeStep captures one screenshot artifact after a step", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  let screenshotCalls = 0;
+  const provider = createMockProvider({
+    async observe(input: BrowserObserveInput): Promise<BrowserObservation> {
+      return {
+        sessionId: input.sessionId,
+        targetId: "tab-1",
+        url: "https://example.com",
+        title: "Example",
+        tabs: [
+          { id: "tab-1", title: "Example", url: "https://example.com", active: true },
+        ],
+      };
+    },
+    async screenshot(input) {
+      screenshotCalls++;
+      assert.equal(input.targetId, "tab-1");
+      return {
+        dataBase64: Buffer.from("png bytes").toString("base64"),
+        mimeType: "image/png",
+        targetId: "tab-1",
+      };
+    },
+  });
+  const policy = createMockPolicyEngine();
+
+  const result = await executeStep(state, { kind: "observe", summary: "Look at page" }, provider, policy);
+
+  assert.equal(screenshotCalls, 1);
+  assert.equal(result.state.stepCount, 1);
+  assert.equal(result.state.events.length, 2);
+  assert.equal(result.state.events[1]!.kind, "artifact");
+  assert.equal(result.state.events[1]!.payload.kind, "screenshot");
+  assert.equal(result.state.events[1]!.payload.mimeType, "image/png");
+  assert.equal(result.state.events[1]!.payload.contentBase64, Buffer.from("png bytes").toString("base64"));
+  assert.equal(result.state.latestScreenshotBase64, Buffer.from("png bytes").toString("base64"));
+});
+
 // ---------------------------------------------------------------------------
 // executeStep — exec action
 // ---------------------------------------------------------------------------
@@ -1193,8 +1233,11 @@ test("executeTask persists a task note artifact when finishing without extracted
     },
   );
 
-  assert.equal(result.run.status, "partial");
-  assert.equal(result.classification.kind, "partial-success");
+  // The synthetic note is persisted as diagnostics, but it is NOT an answer:
+  // a run that extracted nothing and burned its step budget classifies as
+  // agent-error instead of riding the note to partial-success.
+  assert.equal(result.run.status, "failed");
+  assert.equal(result.classification.kind, "agent-error");
   const noteArtifact = result.events.find((event) =>
     event.kind === "artifact" &&
     event.payload.kind === "note" &&

@@ -5,7 +5,7 @@ import { assembleSystemPrompt, assembleUserPrompt, buildActionGuidance, type Con
 import { contractToPrompt } from "./contract.js";
 import { latestExtractionsPerUrl } from "./evidence.js";
 import { type AgentTurnFn, type LoopState } from "./loop.js";
-import { parseActionFromLlm } from "./llm-parse.js";
+import { isParseFailureFinish, parseActionFromLlm } from "./llm-parse.js";
 import { recordLlmCall, type LlmTraceOptions } from "./llm-trace.js";
 import { createPlan, planToContext, advancePlanBy, type TaskPlan } from "./planning.js";
 import { skillGuidance } from "./skill-context.js";
@@ -102,7 +102,12 @@ function metacognitionTraces(events: TraceEvent[]): Array<{ kind: string; summar
   const recentResults = events
     .filter((e) => e.kind === "code-result")
     .slice(-5)
-    .map((e) => String(e.payload.stderr ?? e.payload.error ?? e.payload.result ?? ""));
+    .map((e) => String(
+      e.payload.stderr ??
+      e.payload.error ??
+      e.payload.stdout ??
+      (e.payload.returnValue !== undefined ? JSON.stringify(e.payload.returnValue) : ""),
+    ));
   if (
     recentExecs.some((e) => /\bwire\.goto\s*\(/u.test(String(e.payload.code ?? ""))) ||
     recentResults.some((text) => /\bwire\.goto\b/u.test(text))
@@ -213,11 +218,22 @@ export function defaultAgentTurn(
         case "code-exec":
           summary = capForPrompt(String(e.payload.code ?? e.kind));
           break;
-        case "code-result":
+        case "code-result": {
+          // Wire's exec idiom is `return {...}` — show the returnValue, not
+          // just stdout, or the planner cannot see the answer it extracted
+          // and re-extracts until the stuck guards punish it.
+          const okOutput = typeof e.payload.stdout === "string" && e.payload.stdout.trim().length > 0
+            ? e.payload.stdout
+            : e.payload.returnValue !== undefined
+              ? typeof e.payload.returnValue === "string"
+                ? e.payload.returnValue
+                : JSON.stringify(e.payload.returnValue)
+              : "no output";
           summary = e.payload.ok
-            ? `ok: ${capForPrompt(String(e.payload.stdout ?? "no output"))}`
+            ? `ok: ${capForPrompt(okOutput)}`
             : `error: ${capForPrompt(String(e.payload.stderr ?? "unknown"))}`;
           break;
+        }
         case "observation":
           summary = `page: ${String(e.payload.url ?? "?")} title="${String(e.payload.title ?? "")}"`;
           {
@@ -375,7 +391,24 @@ export function defaultAgentTurn(
 
       await recordLlmCall(state, traceOptions, "agent", messages, response);
 
-      return normalizeProposedAction(parseActionFromLlm(response.content, state));
+      let action = parseActionFromLlm(response.content, state);
+      if (isParseFailureFinish(action)) {
+        // One corrective reprompt — a single malformed completion must not
+        // end the run. If the retry is also unparseable, the failure finish
+        // stands and the run ends with a clean summary.
+        const retryMessages: ChatMessage[] = [
+          ...messages,
+          { role: "assistant", content: response.content },
+          {
+            role: "user",
+            content: "Your previous reply was not a valid action. Reply with ONLY one JSON object with fields kind, summary, and optional payload — no prose, no code fences.",
+          },
+        ];
+        const retry = await llmProvider.chat(retryMessages);
+        await recordLlmCall(state, traceOptions, "agent-parse-retry", retryMessages, retry);
+        action = parseActionFromLlm(retry.content, state);
+      }
+      return normalizeProposedAction(action);
     }
 
     const hasRecentObservation = state.events.some(

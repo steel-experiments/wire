@@ -18,7 +18,7 @@ import type { PolicyEngine } from "../policy/engine.js";
 import { createPolicyEngine } from "../policy/engine.js";
 import type { LLMProvider } from "../providers/llm/types.js";
 
-import { executeTask } from "./runtime.js";
+import { defaultAgentTurn, executeTask } from "./runtime.js";
 import { createLoopState, executeStep } from "./loop.js";
 
 function makeTask(overrides: Partial<Task> = {}): Task {
@@ -191,4 +191,63 @@ test("executeTask survives an LLM error during the finish flow and still classif
   const errorEvent = result.events.find((e) => e.kind === "error");
   assert.ok(errorEvent, "finish-flow failure must be recorded as an error event");
   assert.match(String(errorEvent!.payload.message ?? ""), /429/);
+});
+
+test("defaultAgentTurn reprompts once on unparseable output before finishing", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  // An observation must exist, otherwise the parse fallback is observe.
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: new Date().toISOString(),
+    kind: "observation",
+    payload: { url: "https://example.com", title: "Example" },
+  });
+  const provider = createMockProvider();
+  let calls = 0;
+  const turn = defaultAgentTurn({
+    model: "test-model",
+    async chat() {
+      calls += 1;
+      return calls === 1
+        ? { content: "I will now click the button for you!", model: "test-model" }
+        : { content: '{"kind":"observe","summary":"Recovered"}', model: "test-model" };
+    },
+  });
+
+  const action = await turn(state, provider);
+
+  assert.equal(calls, 2, "one corrective reprompt is issued");
+  assert.equal(action.kind, "observe");
+  assert.equal(action.summary, "Recovered");
+});
+
+test("defaultAgentTurn ends with a clean failure finish when the reprompt also fails", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  state.events.push({
+    id: createId("event"),
+    runId: state.run.id,
+    ts: new Date().toISOString(),
+    kind: "observation",
+    payload: { url: "https://example.com", title: "Example" },
+  });
+  const provider = createMockProvider();
+  let calls = 0;
+  const turn = defaultAgentTurn({
+    model: "test-model",
+    async chat() {
+      calls += 1;
+      return { content: "still not json, sorry", model: "test-model" };
+    },
+  });
+
+  const action = await turn(state, provider);
+
+  assert.equal(calls, 2);
+  assert.equal(action.kind, "finish");
+  // Raw model text must not be the summary (it can surface as run.result).
+  assert.ok(!action.summary.includes("still not json"));
+  assert.equal(action.payload?.parseFailure, true);
 });

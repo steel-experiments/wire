@@ -455,6 +455,7 @@ async function runMainLoop(
   // Catches the grants.gov-shaped failure where the agent walks across
   // different dead URLs and signature/digest-based guards never fire.
   let noProgressCount = 0;
+  let lastProgressResultId: string | undefined;
   const NO_PROGRESS_THRESHOLD = 4;
 
   while (true) {
@@ -614,8 +615,11 @@ async function runMainLoop(
       // Cross-signature no-progress stall — fires regardless of action sig.
       // Counts consecutive successful execs that produced nothing usable
       // (empty/nav-only/error-shaped). Resets on any meaningful result.
+      // Only a NEW code-result may count: non-exec steps (observe, refused
+      // reconfigure) re-surface the same stale result and must not double it.
       const lastResultForProgress = latestCodeResult(state);
-      if (lastResultForProgress) {
+      if (lastResultForProgress && lastResultForProgress.id !== lastProgressResultId) {
+        lastProgressResultId = lastResultForProgress.id;
         if (lastResultForProgress.payload.ok === true && isNoProgressResult(lastResultForProgress)) {
           noProgressCount += 1;
           if (noProgressCount > NO_PROGRESS_THRESHOLD) {

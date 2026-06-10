@@ -146,6 +146,11 @@ export interface ClassificationInput {
   events: TraceEvent[];
   successCriteria: string[];
   objective?: string;
+  // The result text the caller will actually receive (deriveRunResult).
+  // When provided, generic-extraction-failure checks judge THIS text instead
+  // of re-deriving one — the two derivations can disagree on which
+  // code-result is final.
+  finalResultText?: string;
   errorCount: number;
   authWallHit: boolean;
   policyDenied: boolean;
@@ -297,7 +302,7 @@ export function classifyRun(input: ClassificationInput): RunClassification {
     );
   const terminalIsNavOnly = terminalEvent?.kind === "code-result" && isNavigationOnlyResult(terminalEvent);
 
-  const finalResultText = extractFinalResultText(events);
+  const finalResultText = input.finalResultText ?? extractFinalResultText(events);
   const genericExtractionFailure = mode === "task" && hasGenericExtractionFailure(finalResultText);
   const contractFailures = latestFailedContractCheck(events);
   const contractPassed = contractFailures.length === 0;

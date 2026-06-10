@@ -265,7 +265,13 @@ function hasVisitedDomain(events: TraceEvent[], domain: string): boolean {
     return candidates.some((candidate) => {
       try {
         const observed = normalizeDomain(new URL(candidate).hostname);
-        return observed.endsWith(wanted) || observed.split(".")[0] === wantedLabel;
+        // Exact match or true subdomain (dot boundary) — a lookalike like
+        // evilgithub.com must not satisfy github.com. The first-label match
+        // is deliberate redirect tolerance: sites migrate TLDs mid-run
+        // (railway.app -> railway.com) and the visit should still count.
+        return observed === wanted ||
+          observed.endsWith(`.${wanted}`) ||
+          observed.split(".")[0] === wantedLabel;
       } catch {
         return candidate.toLowerCase().includes(wanted);
       }

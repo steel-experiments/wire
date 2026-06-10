@@ -138,6 +138,26 @@ test("validateTaskContract rejects placeholder multi-site extraction artifacts",
   assert.ok(validation.missing.some((item) => item.includes("included in prior")));
 });
 
+test("hasVisitedDomain requires a dot boundary on suffix matches", () => {
+  // evilgithub.com must not satisfy mustVisit github.com; a true subdomain
+  // (gist.github.com) and a TLD migration (railway.app -> railway.com) must.
+  const contract = createTaskContract(makeTask({
+    objective: "Open github.com and extract the trending repos. Save as md format table.",
+  }));
+  const spoofed = validateTaskContract(contract, [
+    event("observation", { url: "https://evilgithub.com/trending", title: "Trending" }),
+  ]);
+  assert.ok(
+    spoofed.missing.some((item) => item.includes("visited evidence for github.com")),
+    "a lookalike domain must not count as a visit",
+  );
+
+  const subdomain = validateTaskContract(contract, [
+    event("observation", { url: "https://gist.github.com/discover", title: "Discover" }),
+  ]);
+  assert.ok(subdomain.satisfied.some((item) => item.includes("Visited github.com")));
+});
+
 test("validateTaskContract accepts a substantive markdown comparison artifact", () => {
   const contract = createTaskContract(makeTask({
     objective: "Open vercel.com, netlify.com, and railway.app. Extract pricing and save as comparison table in markdown.",

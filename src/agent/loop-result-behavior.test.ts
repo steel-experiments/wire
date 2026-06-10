@@ -522,6 +522,26 @@ test("deriveRunResult never surfaces a bare click ack as the result", () => {
   assert.ok(!result?.includes("clicked"), "click ack must not be surfaced");
 });
 
+test("deriveRunResult never surfaces a synthetic task-summary note as the result", () => {
+  const note = (source: string | undefined, content: string): TraceEvent => ({
+    id: createId("event"),
+    runId: "run_test" as never,
+    ts: new Date().toISOString(),
+    kind: "artifact" as const,
+    payload: source !== undefined
+      ? { kind: "note", source, content }
+      : { kind: "note", content },
+  });
+  // Runtime narration ("Reached X at URL") must not pass for an answer —
+  // surfacing it would defeat the agent-error downgrade for empty runs.
+  assert.equal(
+    deriveRunResult([note("task-summary", "Done\nTitle: Example\nURL: https://example.com")], "task"),
+    undefined,
+  );
+  // A genuine note artifact still surfaces.
+  assert.equal(deriveRunResult([note(undefined, "The answer is 42")], "task"), "The answer is 42");
+});
+
 // ---------------------------------------------------------------------------
 // isNoProgressResult
 // ---------------------------------------------------------------------------

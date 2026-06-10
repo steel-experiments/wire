@@ -47,6 +47,7 @@ import {
 } from "./action-dispatch.js";
 import { appendProgressLedgerEntries, progressEntriesFromExecResult } from "./progress-ledger.js";
 import { observeAndRecord } from "./observation.js";
+import { captureStepScreenshotArtifact } from "./screenshots.js";
 
 const DEFAULT_EXEC_TIMEOUT_MS = 12_000;
 const APPROVAL_CODE_EXCERPT_MAX = 2000;
@@ -455,6 +456,11 @@ export async function executeStep(
           "Reconfigure refused: the current page is not blocked (no navigation yet, or it already loaded with no anti-bot signal). Navigate and extract instead of switching the browser session.",
       },
     });
+    // The refusal still consumes a step: each one burns an LLM call, and no
+    // stuck-loop guard sees non-exec actions — without this a model that
+    // keeps proposing reconfigure on an unblocked page loops forever.
+    state.stepCount++;
+    await captureStepScreenshotArtifact(state, provider);
     return { state, policyDenied, authWallHit };
   }
 
@@ -635,6 +641,7 @@ export async function executeStep(
   }
 
   state.stepCount++;
+  await captureStepScreenshotArtifact(state, provider);
   return { state, policyDenied, authWallHit };
 }
 
