@@ -45,6 +45,14 @@ export type FinishFlowResult =
 // the run is allowed to finish anyway (and classified ambiguous).
 const OUTPUT_SCHEMA_REPROMPT_LIMIT = 2;
 
+// How many times a finish may be rejected for failing the completion contract
+// before the run finishes anyway. Without a cap a never-satisfiable contract
+// (e.g. a question whose answer isn't on the pages the agent can reach) bounces
+// the agent finish→reject→finish until maxSteps, burning the whole budget with
+// no new information. The contract-check event still records the failure, so the
+// classifier downgrades the run either way.
+const CONTRACT_REPROMPT_LIMIT = 2;
+
 // Validates the run's derived result against the configured output schema.
 // The derived result is JSON-parsed when possible so object schemas match.
 function validateOutputSchema(state: LoopState, schema: ZodTypeAny): { ok: boolean; errors: string } {
@@ -159,10 +167,36 @@ export async function handleFinishAction(
     kind: "contract-check",
     payload: contractValidationPayload(validation),
   });
-  if (!validation.passed && state.stepCount < config.maxSteps) {
-    state.stepCount++;
-    await flushTraceSink(state, config, signals);
-    return { kind: "continue" };
+  if (!validation.passed) {
+    if (state.contractRepromptCount < CONTRACT_REPROMPT_LIMIT && state.stepCount < config.maxSteps) {
+      state.contractRepromptCount++;
+      state.events.push({
+        id: createId("event"),
+        runId: state.run.id,
+        ts: nowIsoUtc(),
+        kind: "thought-summary",
+        payload: {
+          kind: "contract-unmet",
+          reason: `The finish was rejected: ${validation.missing.slice(0, 3).join("; ")}. Extract the specific answer the objective asks for from a source page and return it as the result — not search-results listings or raw page text. If the pages you have reached cannot answer it, try a different source before finishing.`,
+        },
+      });
+      state.stepCount++;
+      await flushTraceSink(state, config, signals);
+      return { kind: "continue" };
+    }
+    // Reprompt budget exhausted (or out of steps): stop bouncing and finish
+    // with the unmet result. The contract-check failure is already recorded
+    // for the classifier; grinding to maxSteps adds no information.
+    state.events.push({
+      id: createId("event"),
+      runId: state.run.id,
+      ts: nowIsoUtc(),
+      kind: "thought-summary",
+      payload: {
+        kind: "contract-unmet",
+        reason: `Completion contract still unmet after ${state.contractRepromptCount} reprompt${state.contractRepromptCount === 1 ? "" : "s"}; finishing with the best available result.`,
+      },
+    });
   }
 
   if (hasUnfixedArtifactReviewFailure(state)) {

@@ -131,6 +131,14 @@ export interface LoopState extends TaskContext, RunTrace, StepCounter {
    */
   schemaRepromptCount: number;
   /**
+   * How many times the loop has rejected a finish for failing the completion
+   * contract (e.g. a question task finishing with search-results or raw page
+   * text instead of an extracted answer) and reprompted the agent. Bounded so
+   * a never-satisfiable contract can't loop the run to maxSteps. Ephemeral —
+   * re-initialized on resume.
+   */
+  contractRepromptCount: number;
+  /**
    * Set when the run produced a result that never satisfied the configured
    * `outputSchema` after exhausting the reprompt budget. Drives the `ambiguous`
    * classification. Ephemeral.
@@ -204,6 +212,7 @@ export function createLoopState(
     progressLedger: [],
     extractionRepromptCount: 0,
     schemaRepromptCount: 0,
+    contractRepromptCount: 0,
   };
 
   if (sessionLiveUrl !== undefined) {

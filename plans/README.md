@@ -15,7 +15,7 @@ codebase is in strong shape and the alignment plan covers the rest.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 001  | CI enforces `pnpm check` on push and PR | P1 | S | — | TODO |
+| 001  | CI enforces `pnpm check` on push and PR | P1 | S | — | DONE (branch `advisor/001-ci-check-pipeline`, not merged) |
 | 002  | Make the finish-error test deterministic under load | P1 | S–M | — | TODO |
 | 003  | Close the browser session when `onSessionCreated` throws | P2 | S | — | TODO |
 

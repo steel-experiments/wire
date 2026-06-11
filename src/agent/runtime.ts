@@ -245,6 +245,7 @@ export async function resumeTask(
     progressLedger: progressLedgerFromEvents(checkpoint.events),
     extractionRepromptCount: 0,
     schemaRepromptCount: 0,
+    contractRepromptCount: 0,
   };
 
   try {

@@ -1477,6 +1477,61 @@ test("artifact reviewer retries exactly once before accepting (Change D)", async
   assert.equal(reviewerCalls, 2, `reviewer must fire initial + 1 retry; got ${reviewerCalls}`);
 });
 
+test("completion contract reprompt is bounded, not ground to maxSteps", async () => {
+  // Regression: a question-mode run that keeps finishing with search-results /
+  // query-echo text (no extractable answer) used to bounce on the completion
+  // contract finish→reject→finish every turn until maxSteps was exhausted. The
+  // contract reprompt is now capped like the schema and artifact-review
+  // reprompts (see finish-flow.ts CONTRACT_REPROMPT_LIMIT).
+  const task: Task = {
+    id: createId("task"),
+    title: "test",
+    mode: "task",
+    // Question-shaped objective → contract.mustAnswer is set.
+    objective: "What was the name of the bubble gum 5K race at Great America?",
+    constraints: [],
+    successCriteria: [],
+    createdAt: nowIsoUtc(),
+  };
+  // A search-results blob with a percent-encoded query reflected back — the
+  // exact shape looksLikeUnextractedPage rejects, so the contract never passes.
+  const queryEcho = [
+    { text: "Only include results for this site", href: "https://duckduckgo.com/?q=%22bubble%20gum%22%205K" },
+  ];
+  const provider: BrowserProvider = {
+    createSession: async () => makeSession(),
+    getSession: async () => makeSession(),
+    stopSession: async () => {},
+    observe: async () => makeObservation(),
+    exec: async () => ({ ok: true, durationMs: 1, returnValue: queryEcho }),
+  };
+
+  const maxSteps = 20;
+  let extracted = false;
+  let finishProposals = 0;
+  const result = await executeTask(
+    task,
+    makeConfig({ provider, maxSteps }),
+    async () => {
+      if (!extracted) {
+        extracted = true;
+        return { kind: "exec", summary: "Read search results", payload: { code: "return [...document.querySelectorAll('a')];" } };
+      }
+      finishProposals++;
+      return { kind: "finish", summary: "Here are the search results" };
+    },
+  );
+
+  // Bounded: finish is rejected for the contract reprompt limit (2), then the
+  // run finishes — it must NOT bounce ~maxSteps times.
+  assert.equal(finishProposals, 3, `expected bounded contract reprompts (limit + 1), got ${finishProposals}`);
+  assert.ok(result.stepCount < maxSteps, `run should stop well before maxSteps; stepCount=${result.stepCount}`);
+  // Deliberate classification preserved: a query-echo result is partial-success
+  // (see classify.test.ts), not silently promoted or grandfathered.
+  assert.equal(result.classification.kind, "partial-success");
+  assert.equal(result.classification.confidence, 0.55);
+});
+
 // ---------------------------------------------------------------------------
 // Embedded mode (Phase 1): unattended approval resolution, wall-clock timeout,
 // skill-write control. See docs/embedded-mode.md.
