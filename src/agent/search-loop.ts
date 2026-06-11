@@ -10,6 +10,10 @@ import { isNavigationOnlyResult } from "./state-helpers.js";
 // or by carrying a literal query.
 const SEARCH_HOST_PATTERN = /(^|\.)(duckduckgo\.com|bing\.com|google\.[a-z.]+|startpage\.com|ecosia\.org|search\.brave\.com)$/iu;
 const QUERY_PARAM_PATTERN = /[?&](q|query|search_query)=/iu;
+// An encoded quote in a URL is a literal phrase query regardless of where it
+// rides — SEO-spam solvers embed it in the path (observed live:
+// /crossword-solver/5K-race-%22bubble-gum%22-... with no q= parameter).
+const ENCODED_PHRASE_PATTERN = /%22/u;
 
 export function isSearchNavigationUrl(url: string): boolean {
   try {
@@ -18,7 +22,7 @@ export function isSearchNavigationUrl(url: string): boolean {
   } catch {
     return false;
   }
-  return QUERY_PARAM_PATTERN.test(url);
+  return QUERY_PARAM_PATTERN.test(url) || ENCODED_PHRASE_PATTERN.test(url);
 }
 
 function resultText(event: TraceEvent): string | undefined {

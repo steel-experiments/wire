@@ -27,6 +27,12 @@ test("isSearchNavigationUrl recognizes engines and query params, not content pag
   assert.equal(isSearchNavigationUrl("https://www.google.com/search?q=x"), true);
   // A non-engine page carrying a literal query is still a search-shaped hop.
   assert.equal(isSearchNavigationUrl("https://www.wordplays.com/crossword-solver?query=5K-race"), true);
+  // Live case: SEO-spam solvers embed the query in the PATH with encoded
+  // quotes — a literal phrase query, even with no q= parameter.
+  assert.equal(
+    isSearchNavigationUrl("https://www.wordplays.com/crossword-solver/5K-race-%22bubble-gum%22-great-america"),
+    true,
+  );
   assert.equal(isSearchNavigationUrl("https://example.com/docs/page"), false);
   assert.equal(isSearchNavigationUrl("https://www.iana.org/domains/example"), false);
   assert.equal(isSearchNavigationUrl("not a url"), false);
