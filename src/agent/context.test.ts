@@ -168,6 +168,18 @@ test("buildActionGuidance ships skill-home guidance only when skills are loaded"
   assert.ok(withSkills.includes(skillItemText));
 });
 
+test("buildActionGuidance ships the query-echo trap warning only when detected", () => {
+  // Live case run_3383faa5: SEO-spam sites synthesize a page for any literal
+  // query; the agent chased its own reflected query three times. The warning
+  // is conditional — for ordinary runs it is prompt soup.
+  const without = buildActionGuidance(makeContext({}));
+  assert.ok(!/query-echo/u.test(without), "no query-echo guidance without the signal");
+
+  const withEcho = buildActionGuidance(makeContext({ queryEchoDetected: true }));
+  assert.ok(/query-echo/u.test(withEcho));
+  assert.ok(/result farms, not sources/u.test(withEcho));
+});
+
 test("assembleUserPrompt includes tab target and drift warning", () => {
   const context = makeContext({
     observations: [{

@@ -78,6 +78,8 @@ export interface ContextBundle {
   progressLedger?: JsonObject[];
   /** Concrete reviewer failures that must be repaired before finishing. */
   repairInstructions?: string[];
+  /** Latest result reflects the search query back — surface the SERP-trap warning. */
+  queryEchoDetected?: boolean;
 }
 
 import { redactSecrets } from "../shared/redact.js";
@@ -295,7 +297,10 @@ export function buildActionGuidance(context: ContextBundle): string {
 
   const lines = [
     `Use this shape: {"kind":"${allKinds}","summary":"short text","payload":{...}}.`,
-    ...actionGuidanceTexts({ skillsLoaded: context.skills.length > 0 }),
+    ...actionGuidanceTexts({
+      skillsLoaded: context.skills.length > 0,
+      ...(context.queryEchoDetected === true ? { queryEchoDetected: true } : {}),
+    }),
   ];
 
   // Add provider action descriptions

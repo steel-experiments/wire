@@ -2,6 +2,7 @@ import type { BrowserProvider } from "../browser/bridge.js";
 import type { LLMProvider, ChatMessage, ContentPart } from "../providers/llm/types.js";
 import type { JsonObject, ProposedAction, TraceEvent } from "../shared/types.js";
 import { assembleSystemPrompt, assembleUserPrompt, buildActionGuidance, type ContextBundle } from "./context.js";
+import { looksLikeQueryEcho } from "./classify.js";
 import { contractToPrompt } from "./contract.js";
 import { latestExtractionsPerUrl } from "./evidence.js";
 import { type AgentTurnFn, type LoopState } from "./loop.js";
@@ -317,6 +318,26 @@ export function defaultAgentTurn(
     const evidence = latestExtractionsPerUrl(state.events);
     if (evidence.length > 0) {
       context.evidence = evidence;
+    }
+
+    // In-loop SERP-trap awareness: when the latest result is the agent's own
+    // query reflected back, ship the query-echo guidance with the next turn —
+    // the after-the-fact classifier check can't stop the agent from chasing it.
+    const latestOkResult = [...state.events].reverse().find((event) =>
+      event.kind === "code-result" &&
+      event.payload.ok === true &&
+      (
+        (typeof event.payload.stdout === "string" && event.payload.stdout.trim().length > 0) ||
+        event.payload.returnValue !== undefined
+      )
+    );
+    if (latestOkResult) {
+      const text = typeof latestOkResult.payload.stdout === "string" && latestOkResult.payload.stdout.trim().length > 0
+        ? latestOkResult.payload.stdout
+        : JSON.stringify(latestOkResult.payload.returnValue);
+      if (looksLikeQueryEcho(text)) {
+        context.queryEchoDetected = true;
+      }
     }
 
     if (state.sessionConfig) {

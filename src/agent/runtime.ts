@@ -66,6 +66,7 @@ import {
 import { tryAntiBotRecovery } from "./recovery.js";
 import { handleFinishAction } from "./finish-flow.js";
 import { progressLedgerFromEvents } from "./progress-ledger.js";
+import { countSearchesSinceExtraction } from "./search-loop.js";
 import { createStartupFailureResult } from "./startup-failure.js";
 import { withApprovalResolution, withWallClockTimeout } from "./run-limits.js";
 import { finalizeExecution } from "./finalize.js";
@@ -479,6 +480,15 @@ async function runMainLoop(
   let noProgressCount = 0;
   let lastProgressResultId: string | undefined;
   const NO_PROGRESS_THRESHOLD = 4;
+  // Pattern-level stall: search navigations with no meaningful extraction.
+  // A semantic search loop (new query, new URL, new dump every turn) defeats
+  // every guard above — nothing repeats at the action level. Nudge first so
+  // the agent can change source or admit the answer isn't reachable; abort
+  // when it keeps searching past the nudge. Live case: run_3383faa5 burned 30
+  // steps oscillating between DuckDuckGo and SEO-spam crossword sites.
+  let searchLoopNudged = false;
+  const SEARCH_LOOP_NUDGE_THRESHOLD = 3;
+  const SEARCH_LOOP_ABORT_THRESHOLD = 6;
 
   while (true) {
     if (config.pauseToken?.isPaused()) {
@@ -662,6 +672,42 @@ async function runMainLoop(
           }
         } else if (lastResultForProgress.payload.ok === true) {
           noProgressCount = 0;
+        }
+      }
+
+      // Pattern-level search-loop guard (see constants above for rationale).
+      if (state.task.mode === "task") {
+        const searchCount = countSearchesSinceExtraction(state.events);
+        if (searchCount === 0) {
+          searchLoopNudged = false;
+        } else if (searchCount >= SEARCH_LOOP_ABORT_THRESHOLD) {
+          const reason = `Searched ${searchCount} times without extracting an answer — aborting to force re-plan`;
+          state.events.push({
+            id: createId("event"),
+            runId: state.run.id,
+            ts: nowIsoUtc(),
+            kind: "thought-summary",
+            payload: { reason },
+          });
+          signals.stopReason = reason;
+          await flushTraceSink(state, config, signals);
+          break;
+        } else if (searchCount >= SEARCH_LOOP_NUDGE_THRESHOLD && !searchLoopNudged) {
+          searchLoopNudged = true;
+          state.events.push({
+            id: createId("event"),
+            runId: state.run.id,
+            ts: nowIsoUtc(),
+            kind: "thought-summary",
+            payload: {
+              kind: "search-loop",
+              reason:
+                `You have searched ${searchCount} times without extracting an answer. ` +
+                "The sources you are reaching may not contain it — extract what the objective asks for from a page you trust, " +
+                "try a fundamentally different source (a direct authoritative site, an archive), " +
+                "or finish stating the answer could not be found. Do not run another reworded web search.",
+            },
+          });
         }
       }
 

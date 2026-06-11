@@ -3,6 +3,8 @@ export type ActionGuidanceHome = "core" | "helper" | "skill";
 export interface ActionGuidanceItem {
   id: string;
   home: ActionGuidanceHome;
+  /** Ships only when the named runtime signal is active; absent = always. */
+  when?: "query-echo";
   text: string;
 }
 
@@ -113,6 +115,12 @@ export const ACTION_GUIDANCE_ITEMS: ActionGuidanceItem[] = [
     text: "Before extracting search result selectors, confirm the current URL is still the search results page. If you opened a result tab/page, switch back to the search target or re-run the search before scraping SERP selectors.",
   },
   {
+    id: "query-echo-trap",
+    home: "core",
+    when: "query-echo",
+    text: "Your latest result mostly reflects your own search query back (query-echo). Pages titled with your exact query are almost certainly auto-generated result farms, not sources. Do not extract from them and do not chase further such results — pick a different result, a direct authoritative site, or refine the query.",
+  },
+  {
     id: "tab-drift",
     home: "core",
     text: "If an observation warns about tab drift or a new tab, choose the intended tab explicitly with observe payload.targetId or exec payload.target {tabId}.",
@@ -194,9 +202,11 @@ export const BASE_ACTION_GUIDANCE = ACTION_GUIDANCE_ITEMS.map((item) => item.tex
 // The `home` tag is load-bearing: core items always ship; helper items ship
 // because the helper preamble is unconditionally available in exec; skill
 // items ship only when skills are actually loaded — guidance about skills a
-// run doesn't have is prompt soup.
-export function actionGuidanceTexts(options: { skillsLoaded: boolean }): string[] {
+// run doesn't have is prompt soup. `when`-tagged items ship only while their
+// runtime signal is active, for the same reason.
+export function actionGuidanceTexts(options: { skillsLoaded: boolean; queryEchoDetected?: boolean }): string[] {
   return ACTION_GUIDANCE_ITEMS
     .filter((item) => item.home !== "skill" || options.skillsLoaded)
+    .filter((item) => item.when !== "query-echo" || options.queryEchoDetected === true)
     .map((item) => item.text);
 }

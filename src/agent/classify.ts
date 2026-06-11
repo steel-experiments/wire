@@ -97,7 +97,9 @@ const QUERY_ECHO_MARKERS: RegExp[] = [
   /showing results for\b/i,
 ];
 
-function looksLikeQueryEcho(resultText: string): boolean {
+// Exported for in-loop awareness: the SERP-trap guidance fires while the
+// agent is choosing its next action, not only at the classification verdict.
+export function looksLikeQueryEcho(resultText: string): boolean {
   return QUERY_ECHO_MARKERS.some((m) => m.test(resultText));
 }
 

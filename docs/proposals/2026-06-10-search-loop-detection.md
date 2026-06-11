@@ -1,5 +1,14 @@
 # Proposal — detect semantic search loops and query-echo SERP traps
 
+**Status: IMPLEMENTED 2026-06-11.** Finding 1 → `src/agent/search-loop.ts`
+(`countSearchesSinceExtraction`) wired into the runtime guard block: nudge at 3
+search navigations without a meaningful extraction, abort to re-plan at 6
+(conservative defaults per Open Question 1; classification unchanged per Open
+Question 2 — the run finishes through the normal evidence path). Finding 2 →
+guidance-only (the lean option): a conditional `query-echo-trap` entry in
+`action-guidance.ts` ships when the latest result trips `looksLikeQueryEcho`.
+Escalation beyond guidance deferred until the harness shows the agent ignoring it.
+
 Date: 2026-06-10. Source: live test `run_3383faa5` (task `task_f88c4f9d`), objective
 *"What was the name of the 5K race hosted at the old Great America theme park in
 California that had 'bubble gum' in its title?"* — a question whose answer is not
