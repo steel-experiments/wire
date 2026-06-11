@@ -218,8 +218,10 @@ export async function runTask(options: RunOptions): Promise<RunResult> {
     if (!isJson) {
       console.log(`Run finished: ${last.run.id}`);
       console.log(`Status:       ${last.run.status}`);
+      // Classifier confidence is a fixed per-rule prior, not a calibrated
+      // probability — printing it as a percentage here was fake precision.
       console.log(
-        `Classification: ${last.run.classification?.kind ?? "unknown"} (${(((last.run.classification?.confidence) ?? 0) * 100).toFixed(0)}%)`,
+        `Classification: ${last.run.classification?.kind ?? "unknown"}`,
       );
       if (last.run.result) {
         console.log(`Result:       ${last.run.result}`);
@@ -255,7 +257,7 @@ export async function runTask(options: RunOptions): Promise<RunResult> {
     console.log(`Run finished: ${result.run.id}`);
     console.log(`Status:       ${result.run.status}`);
     console.log(
-      `Classification: ${result.run.classification?.kind ?? "unknown"} (${(((result.run.classification?.confidence) ?? 0) * 100).toFixed(0)}%)`,
+      `Classification: ${result.run.classification?.kind ?? "unknown"}`,
     );
     if (result.run.result) {
       console.log(`Result:       ${result.run.result}`);

@@ -38,9 +38,9 @@ export function formatReview(data: ReviewData): string {
   if (run.classification) {
     lines.push("--- Classification ---");
     lines.push(`Kind:         ${run.classification.kind}`);
-    lines.push(
-      `Confidence:   ${(run.classification.confidence * 100).toFixed(0)}%`,
-    );
+    // The classifier assigns a fixed confidence per rule (a prior), not a
+    // calibrated probability — render the raw value, not a fake percentage.
+    lines.push(`Rule prior:   ${run.classification.confidence}`);
     if (run.classification.notes && run.classification.notes.length > 0) {
       lines.push(`Notes:`);
       for (const note of run.classification.notes) {

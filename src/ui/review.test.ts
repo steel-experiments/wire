@@ -67,6 +67,32 @@ test("formatTimeline summarizes artifact reviews", () => {
   assert.match(output, /navigation text/u);
 });
 
+test("formatReview labels classification confidence as a rule prior, not a percentage", () => {
+  // Classifier confidences are fixed constants per rule (e.g. task-complete is
+  // always 0.7 or 0.85), not calibrated probabilities. Rendering them as
+  // "Confidence: 85%" is fake precision; the honest label is the raw prior.
+  const task: Task = {
+    id: createId("task"),
+    title: "Prior label task",
+    mode: "task",
+    objective: "Open example.com",
+    constraints: [],
+    successCriteria: ["Opened"],
+    createdAt: nowIsoUtc(),
+  };
+  const run: Run = {
+    id: createId("run"),
+    taskId: task.id,
+    status: "succeeded",
+    classification: { kind: "task-complete", confidence: 0.85 },
+  };
+
+  const output = formatReview({ task, run, events: [], artifacts: [] });
+
+  assert.match(output, /Rule prior:   0\.85/u);
+  assert.doesNotMatch(output, /Confidence:/u);
+});
+
 test("formatReview includes score when task is available", () => {
   const task: Task = {
     id: createId("task"),
