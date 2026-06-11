@@ -35,4 +35,4 @@ jobs:
         run: pnpm run typecheck
 
       - name: Tests
-        run: node --import tsx --test --test-concurrency=1 'src/**/*.test.ts'
+        run: pnpm test

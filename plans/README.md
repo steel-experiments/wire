@@ -16,7 +16,7 @@ codebase is in strong shape and the alignment plan covers the rest.
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
 | 001  | CI enforces `pnpm check` on push and PR | P1 | S | — | DONE (merged to main 2026-06-11) |
-| 002  | Make the finish-error test deterministic under load | P1 | S–M | — | TODO |
+| 002  | Make the finish-error test deterministic under load | P1 | S–M | — | DONE (2026-06-11: no repro in 62 loaded full-suite runs at default concurrency under 4x CPU burners — flake evidently fixed by interim result-derivation changes; CI `--test-concurrency=1` pin removed per the plan's maintenance note. Re-pin if CI ever flakes on this test.) |
 | 003  | Close the browser session when `onSessionCreated` throws | P2 | S | — | DONE (2026-06-11) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) | REJECTED (one-line rationale)
