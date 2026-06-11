@@ -331,16 +331,21 @@ function skillFileName(candidate: PromotionCandidate): string {
   return `${candidate.hostname.replace(/\./gu, "_")}-${candidate.skillId.slice(0, 16)}.md`;
 }
 
-function proposalSignal(candidate: PromotionCandidate): Set<string> {
-  const text = [...candidate.workflow, ...candidate.facts, ...candidate.selectors, ...candidate.routes, ...candidate.waits, ...candidate.traps].join(" ");
+// Tokenize skill text into a comparable signal set. Shared by proposal dedup
+// here and proposal shadowing in the loader so "similar" means one thing.
+export function textSignal(text: string): Set<string> {
   return new Set((text.toLowerCase().match(/[a-z0-9.#/-]{3,}/gu) ?? []).filter((w) => !["the", "and", "for", "with"].includes(w)));
 }
 
-function similarity(a: Set<string>, b: Set<string>): number {
+export function signalSimilarity(a: Set<string>, b: Set<string>): number {
   if (a.size === 0 || b.size === 0) return 0;
   let overlap = 0;
   for (const word of a) if (b.has(word)) overlap++;
   return overlap / Math.min(a.size, b.size);
+}
+
+function proposalSignal(candidate: PromotionCandidate): Set<string> {
+  return textSignal([...candidate.workflow, ...candidate.facts, ...candidate.selectors, ...candidate.routes, ...candidate.waits, ...candidate.traps].join(" "));
 }
 
 async function findSimilarProposal(candidate: PromotionCandidate, skillDir: string): Promise<string | undefined> {
@@ -352,7 +357,7 @@ async function findSimilarProposal(candidate: PromotionCandidate, skillDir: stri
       if (!name.startsWith(prefix) || !name.endsWith(".md")) continue;
       const path = join(dir, name);
       const raw = await readFile(path, "utf-8");
-      if (similarity(signal, new Set(raw.toLowerCase().match(/[a-z0-9.#/-]{3,}/gu) ?? [])) >= 0.7) return path;
+      if (signalSimilarity(signal, textSignal(raw)) >= 0.7) return path;
     }
   } catch { /* no proposal dir yet */ }
   return undefined;

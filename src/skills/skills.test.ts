@@ -1683,6 +1683,128 @@ test("updateSkillStatsFromRun never retires authored skills", async () => {
   assert.match(raw, /^status: active$/mu, "authored skills are sacred to retirement");
 });
 
+test("updateSkillStatsFromRun prunes an ineffective proposal file", async () => {
+  // Retirement used to scan only the skill root, so a 0%-success proposal in
+  // .proposals/ rode along forever (proposals load with includeProposals and
+  // count toward cumulative-evidence promotion). Ineffective proposals are
+  // deleted outright: unlike active skills there is nothing to supersede.
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  const proposalDir = join(dir, ".proposals");
+  await mkdir(proposalDir, { recursive: true });
+  const skillId = createId("skill");
+  const proposalPath = join(proposalDir, "flaky_example_com-proposal.md");
+  await writeFile(proposalPath, [
+    "---",
+    `id: ${skillId}`,
+    "scope: domain",
+    "status: proposed",
+    "source: generated",
+    "confidence: 0.6",
+    "tags:",
+    "  - flaky.example.com",
+    "updatedAt: 2026-06-01",
+    "hostnamePatterns:",
+    '  - "flaky.example.com"',
+    "---",
+    "# Skill Proposal",
+    "## Facts",
+    "- A fact that keeps not helping.",
+  ].join("\n"), "utf-8");
+
+  // 4 prior loads, 0 successes. This failing run makes it 5 loads at 0%.
+  await writeSkillStats(dir, skillId, {
+    ...DEFAULT_STATS,
+    loadedCount: 4,
+    successCount: 0,
+    lastLoadedAt: "2026-06-09T00:00:00.000Z",
+  });
+
+  const result = {
+    run: { id: createId("run") },
+    events: [
+      {
+        id: createId("event"),
+        runId: createId("run"),
+        ts: "2026-06-10T00:00:00.000Z",
+        kind: "skill-load",
+        payload: { skills: [skillId] },
+      },
+    ],
+    classification: { kind: "partial-success", confidence: 0.55 },
+    stepCount: 12,
+    startedAt: "2026-06-10T00:00:00.000Z",
+  };
+  result.events[0]!.runId = result.run.id;
+
+  await updateSkillStatsFromRun(dir, result as never);
+
+  await assert.rejects(
+    () => readFile(proposalPath, "utf-8"),
+    { code: "ENOENT" } as never,
+    "an ineffective proposal is deleted, not left to ride along",
+  );
+});
+
+test("findMatchingSkills shadows proposals that duplicate an active skill for the same hostname", async () => {
+  // Observed live: one active example.com skill plus four near-identical
+  // proposals all rode into context together — same knowledge, five times.
+  // A proposal that is mostly contained in an active skill for the same
+  // hostname adds nothing; a proposal with genuinely new content still loads.
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  const proposalDir = join(dir, ".proposals");
+  await mkdir(proposalDir, { recursive: true });
+
+  const skillBody = (id: string, status: string, facts: string[]) => [
+    "---",
+    `id: ${id}`,
+    "scope: domain",
+    `status: ${status}`,
+    "source: generated",
+    "confidence: 0.9",
+    "tags:",
+    "  - example.com",
+    "updatedAt: 2026-06-01",
+    "hostnamePatterns:",
+    '  - "example.com"',
+    "---",
+    "# Example skill",
+    "## Facts",
+    ...facts.map((fact) => `- ${fact}`),
+  ].join("\n");
+
+  const sharedFacts = [
+    "Navigate directly to https://example.com/ by setting window.location.href.",
+    "The main visible heading text on the homepage is contained in an h1 element.",
+    "The homepage loads successfully at https://example.com/.",
+  ];
+  await writeFile(join(dir, "example_com-active.md"), skillBody("skill_example-active", "active", sharedFacts), "utf-8");
+  await writeFile(
+    join(proposalDir, "example_com-duplicate.md"),
+    skillBody("skill_example-duplicate", "proposed", sharedFacts),
+    "utf-8",
+  );
+  await writeFile(
+    join(proposalDir, "example_com-novel.md"),
+    skillBody("skill_example-novel", "proposed", [
+      "POST /subscribe returns 422 unless the csrf token from the meta tag rides along.",
+      "Checkout iframe swallows clicks until the spinner overlay detaches.",
+    ]),
+    "utf-8",
+  );
+
+  const matched = await findMatchingSkills(dir, "example.com", undefined, { includeProposals: true });
+  const ids = matched.map((skill) => skill.id);
+
+  assert.ok(ids.includes("skill_example-active"), "active skill always loads");
+  assert.ok(ids.includes("skill_example-novel"), "a proposal with new knowledge still loads");
+  assert.ok(
+    !ids.includes("skill_example-duplicate"),
+    "a proposal near-identical to the active skill is shadowed",
+  );
+});
+
 test("llmProposeSkill rejects candidates whose hostname was never observed in the trace", async () => {
   // Shape validation can't catch syntactically-plausible hallucinations like
   // "3ego.addeventlistener" (a JS API mistaken for a domain). The trace can:

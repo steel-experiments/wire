@@ -6,6 +6,7 @@ import { ensureDir } from "../storage/atomic.js";
 
 import { scoreSkills, sortByRelevance, type SkillMatchScore } from "./matcher.js";
 import { extractSections, parseSkillFile } from "./parser.js";
+import { signalSimilarity, textSignal } from "./promote.js";
 import { readSkillStats, type SkillStats } from "./stats.js";
 import { sanitizeSkillContent } from "../shared/sanitize.js";
 
@@ -194,11 +195,11 @@ function filterMatchingSkillDocMatches(
 
   const hasHostname = hostname !== undefined && hostname.length > 0;
   const hasTags = tags !== undefined && tags.length > 0;
-  const active = all.filter((skill) =>
+  const active = shadowDuplicateProposals(all.filter((skill) =>
     (options.includeProposals === true || skill.status !== "proposed") &&
     skill.status !== "rejected" &&
     skill.status !== "superseded"
-  );
+  ));
 
   if (!hasHostname && !hasTags) {
     const unfiltered = Object.keys(statsBySkillId).length > 0
@@ -216,6 +217,54 @@ function filterMatchingSkillDocMatches(
   if (tags) scoreOptions.tags = tags;
   if (Object.keys(statsBySkillId).length > 0) scoreOptions.statsBySkillId = statsBySkillId;
   return scoreSkills(active, scoreOptions);
+}
+
+// Proposals for a hostname that already has an active skill are mostly
+// re-derivations of the same knowledge (observed live: one active example.com
+// skill plus four phrasing-variant proposals all rode into context together).
+// Per active-covered hostname, at most ONE proposal loads — the most novel
+// relative to the covering active skills. Proposal files stay on disk (they
+// still count as rediscovery evidence for cumulative promotion); they just
+// don't all ride into the run. Uncovered proposals always load.
+function shadowDuplicateProposals(skills: LoadedSkill[]): LoadedSkill[] {
+  const actives = skills.filter((skill) => skill.status !== "proposed");
+  if (actives.length === 0 || actives.length === skills.length) return skills;
+
+  const activeSignals = new Map(actives.map((skill) => [skill, textSignal(skill.body)]));
+  const kept = new Set<LoadedSkill>(actives);
+  const buckets = new Map<string, Array<{ skill: LoadedSkill; novelty: number }>>();
+
+  for (const skill of skills) {
+    if (skill.status !== "proposed") continue;
+    const covering = actives.filter((activeSkill) => sharesHostnamePattern(activeSkill, skill));
+    if (covering.length === 0) {
+      kept.add(skill);
+      continue;
+    }
+    const signal = textSignal(skill.body);
+    const closest = Math.max(
+      ...covering.map((activeSkill) => signalSimilarity(signal, activeSignals.get(activeSkill)!)),
+    );
+    const key = covering.map((activeSkill) => activeSkill.id).sort().join("|");
+    const bucket = buckets.get(key) ?? [];
+    bucket.push({ skill, novelty: 1 - closest });
+    buckets.set(key, bucket);
+  }
+
+  for (const bucket of buckets.values()) {
+    bucket.sort((a, b) =>
+      b.novelty - a.novelty || b.skill.updatedAt.localeCompare(a.skill.updatedAt)
+    );
+    kept.add(bucket[0]!.skill);
+  }
+
+  return skills.filter((skill) => kept.has(skill));
+}
+
+function sharesHostnamePattern(a: LoadedSkill, b: LoadedSkill): boolean {
+  if (!a.hostnamePatterns || !b.hostnamePatterns) return false;
+  const patterns = new Set(a.hostnamePatterns.map((pattern) => pattern.toLowerCase()));
+  return b.hostnamePatterns.some((pattern) => patterns.has(pattern.toLowerCase()));
 }
 
 function toSkillMetadata(skill: LoadedSkill): SkillMetadata {

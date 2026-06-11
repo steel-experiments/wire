@@ -1,5 +1,5 @@
 
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Run, RunClassificationKind, RunId, SkillId, TraceEvent } from "../shared/types.js";
 
@@ -170,6 +170,21 @@ async function retireIfIneffective(skillDir: string, skillId: SkillId, stats: Sk
       if (frontmatter.match(/^source:\s*(\S+)/mu)?.[1] !== "generated") return;
       if (!/^status:\s*\S+$/mu.test(frontmatter)) return;
       await writeFile(path, raw.replace(/^status:\s*\S+$/mu, "status: rejected"), "utf-8");
+      return;
+    }
+    // Proposals load too (includeProposals) and count as rediscovery evidence
+    // for promotion, so an ineffective one must not ride along forever. Unlike
+    // an active skill there is nothing to supersede — delete the file.
+    const proposalDir = join(skillDir, ".proposals");
+    for (const name of await readdir(proposalDir)) {
+      if (!name.endsWith(".md")) continue;
+      const path = join(proposalDir, name);
+      const raw = await readFile(path, "utf-8");
+      const frontmatter = raw.match(/^---\n([\s\S]*?)\n---/u)?.[1];
+      if (!frontmatter) continue;
+      if (frontmatter.match(/^id:\s*(\S+)/mu)?.[1] !== skillId) continue;
+      if (frontmatter.match(/^source:\s*(\S+)/mu)?.[1] !== "generated") return;
+      await unlink(path);
       return;
     }
   } catch { /* best effort — retirement must never affect run outcome */ }
