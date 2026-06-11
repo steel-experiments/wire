@@ -1,6 +1,33 @@
 import type { RunClassification, RunClassificationKind, TaskMode, TraceEvent } from "../shared/types.js";
 import { isNavigationOnlyResult } from "./state-helpers.js";
 
+// Verbs that make an objective a *discrete action* task: completion requires
+// the agent to have acted on the page, not just navigated and read. Live
+// over-credit case: "complete the iframe inception challenge" classified
+// task-complete on an answer string from a read-only trace.
+// Deliberately excludes watch-loop verbs (play, refresh, poll, watch): that
+// task class reports structured per-cycle evidence and is protected from
+// repeat-semantics second-guessing (see the progress-aware stuck-loop guard).
+const INTERACTION_OBJECTIVE_PATTERN =
+  /\b(complete|submit|fill( in| out)?|sign (in|up)|log ?in|click|press|add(s|ed)? to (the )?cart|check ?out|purchase|buy|order|book|upload|post|send|register|subscribe|apply|vote|drag|toggle)\b/iu;
+
+// Code shapes that constitute acting on a page, mirroring the interact
+// intent in trace crystallization plus key/refresh dispatch.
+const INTERACTION_CODE_PATTERN =
+  /wire\.click|clickVisibleText|fillByLabel|\.click\s*\(|\.submit\s*\(|dispatchMouseEvent|dispatchKeyEvent|dispatchEvent\s*\(|sendKeys|wireActions|location\.reload|Page\.reload/u;
+
+function objectiveDemandsInteraction(objective: string | undefined): boolean {
+  return objective !== undefined && INTERACTION_OBJECTIVE_PATTERN.test(objective);
+}
+
+function hasInteractionEvidence(events: TraceEvent[]): boolean {
+  return events.some((event) =>
+    event.kind === "code-exec" &&
+    typeof event.payload.code === "string" &&
+    INTERACTION_CODE_PATTERN.test(event.payload.code)
+  );
+}
+
 function extractFinalResultText(events: TraceEvent[]): string | undefined {
   const lastResult = [...events].reverse().find((e) =>
     e.kind === "code-result" &&
@@ -298,6 +325,11 @@ export function classifyRun(input: ClassificationInput): RunClassification {
 
   const finalResultText = input.finalResultText ?? extractFinalResultText(events);
   const genericExtractionFailure = mode === "task" && hasGenericExtractionFailure(finalResultText);
+  // An action objective with a read-only trace cannot be complete: extracted
+  // text can describe the challenge, but only an interaction step can do it.
+  const interactionUnevidenced = mode === "task" &&
+    objectiveDemandsInteraction(input.objective) &&
+    !hasInteractionEvidence(events);
   const contractFailures = latestFailedContractCheck(events);
   const contractPassed = contractFailures.length === 0;
   const artifactReviewFailures = latestFailedArtifactReview(events);
@@ -322,6 +354,13 @@ export function classifyRun(input: ClassificationInput): RunClassification {
           kind: "partial-success",
           confidence: 0.55,
           notes: ["Artifact review failed", ...artifactReviewFailures.slice(0, 3)],
+        };
+      }
+      if (interactionUnevidenced) {
+        return {
+          kind: "partial-success",
+          confidence: 0.6,
+          notes: ["Objective requires interaction but the trace only navigated and read"],
         };
       }
       if (!genericExtractionFailure) {
@@ -382,6 +421,13 @@ export function classifyRun(input: ClassificationInput): RunClassification {
           "Artifact review failed",
           ...artifactReviewFailures.slice(0, 3),
         ],
+      };
+    }
+    if (mode === "task" && hasAnswerArtifact && interactionUnevidenced) {
+      return {
+        kind: "partial-success",
+        confidence: 0.6,
+        notes: ["Objective requires interaction but the trace only navigated and read"],
       };
     }
     if (mode === "task" && hasAnswerArtifact && !genericExtractionFailure) {

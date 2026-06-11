@@ -143,6 +143,97 @@ describe("classifyRun", () => {
     assert.equal(result.confidence, 0.7);
   });
 
+  it("downgrades an interaction objective to partial when the trace never interacts", () => {
+    // Live over-credit case: "complete the iframe inception challenge" judged
+    // task-complete on {"answer":"Level 2 Iframe -> Level 3 Iframe"} — a
+    // read-only trace. An objective that demands acting on the page cannot be
+    // complete when every exec only navigated and read.
+    const events = [
+      makeEvent("code-exec", { code: "window.location.href = 'https://x.test/challenge'; return {navigated:true};" }),
+      makeEvent("code-result", { ok: true, returnValue: { navigated: true } }),
+      makeEvent("code-exec", { code: "return document.querySelector('h2').innerText;" }),
+      makeEvent("code-result", { ok: true, stdout: "Level 2 Iframe -> Level 3 Iframe" }),
+      makeEvent("artifact", { kind: "answer", content: "Level 2 Iframe -> Level 3 Iframe" }),
+    ];
+    const result = classifyRun(makeInput({
+      mode: "task",
+      objective: "Go to the URL and complete the iframe inception challenge",
+      events,
+      errorCount: 0,
+    }));
+    assert.equal(result.kind, "partial-success");
+    assert.ok(result.notes?.some((n) => /interaction/iu.test(n)));
+  });
+
+  it("keeps task-complete for an interaction objective when the trace interacted", () => {
+    const events = [
+      makeEvent("code-exec", { code: "await clickVisibleText('Start Bot'); return {started:true};" }),
+      makeEvent("code-result", { ok: true, returnValue: { started: true } }),
+      makeEvent("code-exec", { code: "return {score: 1234};" }),
+      makeEvent("code-result", { ok: true, returnValue: { score: 1234 } }),
+      makeEvent("artifact", { kind: "answer", content: "{\"score\":1234}" }),
+    ];
+    const result = classifyRun(makeInput({
+      mode: "task",
+      objective: "Click Start Bot and report the final score",
+      events,
+      errorCount: 0,
+    }));
+    assert.equal(result.kind, "task-complete");
+    assert.equal(result.confidence, 0.85);
+  });
+
+  it("watch-loop verbs are exempt from the interaction-evidence rule", () => {
+    // play/refresh/poll tasks report structured per-cycle evidence and are
+    // protected from repeat-semantics second-guessing — the classifier must
+    // not demand click-shaped execs from them.
+    const events = [
+      makeEvent("code-exec", { code: "return collectRuns();" }),
+      makeEvent("code-result", { ok: true, returnValue: { runs: [{ run: 1, status: "completed", over: true }] } }),
+      makeEvent("artifact", { kind: "answer", content: "{\"runs\":1}" }),
+    ];
+    const result = classifyRun(makeInput({
+      mode: "task",
+      objective: "play 2048 and refresh for new game 5 times",
+      events,
+      errorCount: 0,
+    }));
+    assert.equal(result.kind, "task-complete");
+  });
+
+  it("leaves extraction objectives untouched by the interaction-evidence rule", () => {
+    const events = [
+      makeEvent("code-exec", { code: "return document.body.innerText;" }),
+      makeEvent("code-result", { ok: true, stdout: "User-Agent: x" }),
+      makeEvent("artifact", { kind: "answer", content: "User-Agent: x" }),
+    ];
+    const result = classifyRun(makeInput({
+      mode: "task",
+      objective: "Navigate to httpbin.org/headers and return the User-Agent header",
+      events,
+      errorCount: 0,
+    }));
+    assert.equal(result.kind, "task-complete");
+  });
+
+  it("interaction-evidence rule also gates the recovered task-complete path", () => {
+    const events = [
+      makeEvent("code-exec", { code: "return document.title;" }),
+      makeEvent("code-result", { ok: false, error: "boom" }),
+      makeEvent("code-exec", { code: "return document.title;" }),
+      makeEvent("code-result", { ok: true, stdout: "Challenge page" }),
+      makeEvent("artifact", { kind: "answer", content: "Challenge page" }),
+    ];
+    const result = classifyRun(makeInput({
+      mode: "task",
+      objective: "Fill in the form and submit it",
+      events,
+      errorCount: 0,
+    }));
+    assert.equal(result.kind, "partial-success");
+    assert.ok(result.notes?.some((n) => /interaction/iu.test(n)));
+  });
+
   it("classifies task-complete in investigate mode with evidence", () => {
     const events = [
       makeEvent("observation", { url: "https://example.com", title: "Example" }),
