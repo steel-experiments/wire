@@ -422,6 +422,69 @@ test("loadRun throws CorruptError for schema-invalid file", async () => {
   } as Error);
 });
 
+test("saveRun + loadRun round-trips resultProvenance", async () => {
+  // Regression: the run writer gained resultProvenance but the read schema
+  // rejected it, so review/result/replay/craft failed on every fresh run.
+  testRoot = makeRoot();
+  const run = makeRun({
+    status: "succeeded",
+    resultProvenance: {
+      url: "https://example.com/",
+      artifactIds: [createId("artifact"), createId("artifact")],
+      sourceEventId: createId("event"),
+    },
+  });
+
+  await saveRun(testRoot, run);
+  const loaded = await loadRun(testRoot, run.id);
+
+  assert.deepEqual(loaded.resultProvenance, run.resultProvenance);
+});
+
+test("loadRun tolerates and preserves unknown top-level keys (forward compat)", async () => {
+  // Stored records are durable assets: a record written by a newer wire with
+  // an extra top-level field must still load (and round-trip) in this one.
+  // Known fields are still validated, so corruption detection keeps its teeth.
+  testRoot = makeRoot();
+  const run = makeRun({ status: "succeeded" });
+
+  const dir = join(testRoot, "runs");
+  await mkdir(dir, { recursive: true });
+  await writeFile(
+    join(dir, `${run.id}.json`),
+    JSON.stringify({ ...run, futureField: { added: "by a newer wire" } }),
+    "utf-8",
+  );
+
+  const loaded = await loadRun(testRoot, run.id);
+  assert.equal(loaded.id, run.id);
+  assert.equal(loaded.status, "succeeded");
+  assert.deepEqual(
+    (loaded as Run & { futureField?: unknown }).futureField,
+    { added: "by a newer wire" },
+    "unknown keys must survive a load so a re-save cannot drop them",
+  );
+});
+
+test("loadTask tolerates unknown top-level keys (forward compat)", async () => {
+  // Same policy as runs: every stored record type tolerates fields it does
+  // not know about, instead of reporting its own future as corruption.
+  testRoot = makeRoot();
+  const task = makeTask();
+
+  const dir = join(testRoot, "tasks");
+  await mkdir(dir, { recursive: true });
+  await writeFile(
+    join(dir, `${task.id}.json`),
+    JSON.stringify({ ...task, futureField: true }),
+    "utf-8",
+  );
+
+  const loaded = await loadTask(testRoot, task.id);
+  assert.equal(loaded.id, task.id);
+  assert.equal(loaded.objective, task.objective);
+});
+
 // ---------------------------------------------------------------------------
 // runs.ts — hypotheses
 // ---------------------------------------------------------------------------

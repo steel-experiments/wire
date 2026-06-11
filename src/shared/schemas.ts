@@ -153,6 +153,15 @@ export const taskBudgetSchema = z
   })
   .strict();
 
+// Stored-record schemas (tasks, runs, sessions, artifacts, events, blobs,
+// approvals, hypotheses, experiments, checkpoints, skill frontmatter) are
+// `.loose()`: unknown top-level keys are tolerated and preserved on parse.
+// Records on disk are durable assets that outlive any one wire build — a
+// record written by a newer wire must load in an older one instead of being
+// reported as corrupt, and a re-save must not drop fields it doesn't know.
+// Known fields are still fully validated, so corruption detection keeps its
+// teeth. Nested value schemas stay `.strict()`: new data belongs in new
+// top-level fields, not grafted onto existing shapes.
 export const taskSchema = z
   .object({
     id: taskIdSchema,
@@ -165,13 +174,21 @@ export const taskSchema = z
     budget: taskBudgetSchema.optional(),
     createdAt: isoUtcTimestampSchema,
   })
-  .strict();
+  .loose();
 
 export const runClassificationSchema = z
   .object({
     kind: runClassificationKindSchema,
     confidence: z.number().min(0).max(1),
     notes: z.array(z.string()).optional(),
+  })
+  .strict();
+
+export const resultProvenanceSchema = z
+  .object({
+    url: z.string().min(1).optional(),
+    artifactIds: z.array(artifactIdSchema),
+    sourceEventId: traceEventIdSchema.optional(),
   })
   .strict();
 
@@ -192,10 +209,11 @@ export const runSchema = z
     reviewFailureCount: z.number().int().nonnegative().optional(),
     result: z.string().min(1).optional(),
     resultPayload: jsonValueSchema.optional(),
+    resultProvenance: resultProvenanceSchema.optional(),
     outcomeSummary: z.string().min(1).optional(),
     classification: runClassificationSchema.optional(),
   })
-  .strict();
+  .loose();
 
 export const profileRefSchema = z
   .object({
@@ -219,7 +237,7 @@ export const browserSessionSchema = z
     region: z.string().min(1).optional(),
     proxyCountryCode: z.string().length(2).nullable().optional(),
   })
-  .strict();
+  .loose();
 
 export const hypothesisSchema = z
   .object({
@@ -230,7 +248,7 @@ export const hypothesisSchema = z
     status: hypothesisStatusSchema,
     updatedAt: isoUtcTimestampSchema,
   })
-  .strict();
+  .loose();
 
 export const skillMetadataSchema = z
   .object({
@@ -251,7 +269,7 @@ export const skillFrontmatterSchema = skillMetadataSchema
   .extend({
     title: z.string().min(1).optional(),
   })
-  .strict();
+  .loose();
 
 export const traceEventSchema = z
   .object({
@@ -261,7 +279,7 @@ export const traceEventSchema = z
     kind: traceEventKindSchema,
     payload: z.record(z.string(), jsonValueSchema),
   })
-  .strict();
+  .loose();
 
 export const browserTabSummarySchema = z
   .object({
@@ -398,7 +416,7 @@ export const approvalRequestSchema = z
     status: approvalStatusSchema.optional(),
     proposedAction: proposedActionDetailSchema.optional(),
   })
-  .strict();
+  .loose();
 
 export const artifactSchema = z
   .object({
@@ -410,7 +428,7 @@ export const artifactSchema = z
     createdAt: isoUtcTimestampSchema,
     metadata: z.record(z.string(), jsonValueSchema).optional(),
   })
-  .strict();
+  .loose();
 
 export const traceBlobSchema = z
   .object({
@@ -422,7 +440,7 @@ export const traceBlobSchema = z
     value: jsonValueSchema,
     contentType: z.string().min(1).optional(),
   })
-  .strict() as z.ZodType<TraceBlob>;
+  .loose() as z.ZodType<TraceBlob>;
 
 export const comparisonSpecSchema = z
   .object({
@@ -452,7 +470,7 @@ export const experimentBundleSchema = z
     comparisons: z.array(comparisonSpecSchema),
     summary: experimentSummarySchema.optional(),
   })
-  .strict();
+  .loose();
 
 export const proposedActionSchema = z
   .object({
@@ -478,7 +496,7 @@ export const runCheckpointSchema = z
     approvalRequestId: approvalIdSchema,
     savedAt: isoUtcTimestampSchema,
   })
-  .strict();
+  .loose();
 
 export interface BoundaryParseSuccess<T> {
   success: true;
