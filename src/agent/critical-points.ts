@@ -133,6 +133,9 @@ export function buildCriterionReviewPrompt(
         "data is present, do not fail a point over its exact presentation format.",
         'Return ONLY a JSON array of {"id": string, "met": boolean, "note": string},',
         "one entry per critical point id. Do not wrap it in prose or code fences.",
+        "For every unmet point the note must say what the evidence ACTUALLY contains",
+        "or lacks (the observed value, the missing field, the placeholder found) —",
+        "never restate the requirement itself. The note is the repair instruction.",
       ].join("\n"),
     },
     {
@@ -189,8 +192,16 @@ export function summarizeCriticalPointReview(
   points: CriticalPoint[],
   verdicts: CriterionVerdict[],
 ): CriticalPointReview {
-  const metById = new Map(verdicts.map((v) => [v.id, v.met]));
-  const unmet = points.filter((p) => metById.get(p.id) !== true).map((p) => p.text);
+  const verdictById = new Map(verdicts.map((v) => [v.id, v]));
+  // An unmet entry pairs the expectation (the point text) with the reviewer's
+  // note on what the evidence actually shows. The bare point text alone reads
+  // as a statement, not a problem, and gives the repair loop nothing to aim at.
+  const unmet = points
+    .filter((p) => verdictById.get(p.id)?.met !== true)
+    .map((p) => {
+      const note = verdictById.get(p.id)?.note;
+      return note ? `${p.text} — ${note}` : p.text;
+    });
   // No checklist → nothing to gate on; pass so this never blocks a task that
   // had no verifiable critical points.
   const passed = points.length === 0 ? true : unmet.length === 0;

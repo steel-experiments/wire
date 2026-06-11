@@ -133,6 +133,7 @@ export function artifactReviewPrompt(state: LoopState): string {
     "Review the final artifact against the objective and completion contract.",
     "Return strict JSON only: {\"passed\": boolean, \"problems\": string[]}.",
     "Flag concrete artifact quality problems, wrong-field values, obvious misplaced text, placeholders, missing requested data, or tables that do not answer the task.",
+    "Phrase every problem as expected-versus-observed: what the objective requires, then what the artifact actually contains or lacks. Never restate the requirement alone — each problem is a repair instruction.",
     "Do not require perfection or external browsing. Do not invent facts. Use only the artifact and trace evidence below.",
     "",
     `Objective: ${state.task.objective}`,

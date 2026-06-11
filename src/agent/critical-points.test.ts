@@ -136,7 +136,23 @@ test("summarizeCriticalPointReview passes only when every point is met", () => {
     { id: "cp2", met: false, note: "no netlify evidence" },
   ]);
   assert.equal(oneMissing.passed, false);
-  assert.deepEqual(oneMissing.unmet, ["Visit netlify.com pricing"]);
+  assert.deepEqual(oneMissing.unmet, ["Visit netlify.com pricing — no netlify evidence"]);
+});
+
+test("summarizeCriticalPointReview reports unmet points with the reviewer's note", () => {
+  // A bare checklist text reads as a statement, not a problem ("The main
+  // heading is reported as 'Example Domain'" — so what's wrong?). The unmet
+  // entry must carry the reviewer's note saying what the evidence actually
+  // shows, so the failure is falsifiable and the repair loop gets a target.
+  const unmetWithNote = summarizeCriticalPointReview(points, [
+    { id: "cp1", met: false, note: "result is raw JSON; no artifact reports the price" },
+    { id: "cp2", met: false },
+  ]);
+  assert.equal(unmetWithNote.passed, false);
+  assert.deepEqual(unmetWithNote.unmet, [
+    "Visit vercel.com pricing — result is raw JSON; no artifact reports the price",
+    "Visit netlify.com pricing",
+  ]);
 });
 
 test("summarizeCriticalPointReview with no points does not gate (passes)", () => {
@@ -152,7 +168,7 @@ test("reviewCriticalPoints judges per criterion and degrades to pass on LLM fail
     fakeLlm('[{"id":"cp1","met":true},{"id":"cp2","met":false,"note":"missing"}]'),
   );
   assert.equal(judged.passed, false);
-  assert.deepEqual(judged.unmet, ["Visit netlify.com pricing"]);
+  assert.deepEqual(judged.unmet, ["Visit netlify.com pricing — missing"]);
 
   const degraded = await reviewCriticalPoints(
     makeTask(),
