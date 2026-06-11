@@ -6,13 +6,21 @@ Wire is a zero-weight browser agent. Give it an objective, it drives a real Chro
 wire run --objective "Go to example.com and return the heading text"
 ```
 
-That's the core loop. Everything else — classification, skills, policy, benchmarks — builds on top of it.
+That's the core loop — but the run record is the product. Every run persists its trace, artifacts, policy decisions, and a scored classification, and that record keeps paying after the run ends:
+
+```bash
+wire craft  --run-id run_abc123 --standalone --out replay.mjs   # one LLM exploration → a deterministic script
+node replay.mjs <cdp-websocket-url>                             # replays against any Steel session or local Chrome, no Wire needed
+wire export --format sft --min-score 0.8                        # scored traces → training/eval datasets
+```
+
+Explore expensively once; replay cheaply forever; keep every run as auditable data. Classification, skills, policy, and benchmarks all build on the same records.
 
 ## Quick start
 
 ```bash
 pnpm install
-pnpm test          # 828 tests across 40 files
+pnpm test          # 913 tests across 49 files
 
 # Set up API keys
 export STEEL_API_KEY=...     # browser infrastructure
@@ -31,7 +39,19 @@ wire result  --run-id run_abc123                  # print the final result
 wire list                                         # list tasks and runs
 wire approve --run-id run_abc123                  # approve a pending action
 wire replay  --run-id run_abc123                  # replay a run and show timeline
+wire craft   --run-id run_abc123                  # crystallize a run into a re-runnable script
+wire export  --format trajectory                  # export scored traces for eval/training
 wire bench                                        # run the benchmark suite
+```
+
+### Craft options
+
+```bash
+wire craft --run-id run_abc123                     # Wire exec script to stdout
+wire craft --run-id run_abc123 --out script.js     # write to a file
+wire craft --run-id run_abc123 --standalone        # self-contained Node script:
+                                                   # helpers inlined, drives any CDP
+                                                   # websocket, no Wire runtime
 ```
 
 ### Run options

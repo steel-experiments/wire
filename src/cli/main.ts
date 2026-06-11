@@ -555,6 +555,7 @@ async function handleCraft(args: CliArgs): Promise<void> {
       objective: task.objective,
       runId,
       generatedAt: new Date().toISOString(),
+      ...(args.standalone === true ? { standalone: true } : {}),
     });
 
     if (args.outFile) {

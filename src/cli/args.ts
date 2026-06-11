@@ -24,6 +24,8 @@ export interface CliArgs {
   benchmarksFile?: string;
   exportFormat?: TrajectoryExportFormat;
   outFile?: string;
+  /** craft: emit a self-contained Node script instead of a Wire exec script. */
+  standalone?: boolean;
   minScore?: number;
   minPreferenceDelta?: number;
   minPassRate?: number;
@@ -280,6 +282,12 @@ export function parseArgs(argv: string[]): CliArgs {
       continue;
     }
 
+    if (arg === "--standalone") {
+      result.standalone = true;
+      i++;
+      continue;
+    }
+
     if (arg === "--min-score") {
       i++;
       const val = args[i];
@@ -443,6 +451,8 @@ export function formatHelp(): string {
     "Craft options:",
     "  --run-id <id>            Run to crystallize into a script (required)",
     "  --out <path>             Write the script to a file instead of stdout",
+    "  --standalone             Emit a self-contained Node script (helpers inlined,",
+    "                           runs against any CDP websocket; no Wire runtime)",
     "",
     "List options:",
     "  --mode <mode>            Filter by task mode",

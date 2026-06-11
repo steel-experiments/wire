@@ -99,6 +99,61 @@ test("a run with no successful execs yields zero steps and a self-describing hea
   assert.match(crafted.source, /no successful browser steps/iu);
 });
 
+test("standalone mode emits a self-contained Node script with helpers and CDP runner", () => {
+  const events = [
+    exec('window.location.href = "https://example.com/"; return { navigated: true };'),
+    result(true),
+    exec('await waitForSelector("h1", 5000); return document.querySelector("h1").innerText;'),
+    result(true, { returnValue: "Example Domain" }),
+  ];
+
+  const crafted = crystallizeRunScript(events, {
+    objective: "Read the heading",
+    runId: "run_test",
+    standalone: true,
+  });
+
+  // The steps survive, same as the default mode.
+  assert.equal(crafted.steps.length, 2);
+  // Helpers are inlined, not referenced as sandbox-provided.
+  assert.match(crafted.source, /async function clickVisibleText/u);
+  assert.match(crafted.source, /function waitForSelector/u);
+  assert.ok(!crafted.source.includes("provided by the Wire exec sandbox"));
+  // A minimal CDP runner drives the steps against any websocket endpoint.
+  assert.match(crafted.source, /Runtime\.evaluate/u);
+  assert.match(crafted.source, /new WebSocket\(/u);
+  assert.match(crafted.source, /node .*<cdp-websocket-url>/u);
+  // Step code rides in as data, preserved verbatim.
+  assert.ok(crafted.source.includes(JSON.stringify('window.location.href = "https://example.com/"; return { navigated: true };')));
+});
+
+test("standalone source is syntactically valid javascript", async () => {
+  const { mkdtemp, writeFile: writeTmp, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join: joinPath } = await import("node:path");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+
+  const crafted = crystallizeRunScript(
+    [
+      exec('window.location.href = "https://example.com/`${weird}`"; return { navigated: true };'),
+      result(true),
+    ],
+    { objective: "Backtick `objective` with ${interpolation}", runId: "run_test", standalone: true },
+  );
+
+  const dir = await mkdtemp(joinPath(tmpdir(), "wire-craft-"));
+  const path = joinPath(dir, "crafted.mjs");
+  await writeTmp(path, crafted.source, "utf-8");
+  try {
+    // node --check parses without executing — the artifact must always parse,
+    // including when objectives or step code carry backticks and ${...}.
+    await promisify(execFile)(process.execPath, ["--check", path]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("omits the Generated line when no timestamp is supplied (deterministic output)", () => {
   const a = crystallizeRunScript([exec("return 1;"), result(true)], {});
   const b = crystallizeRunScript([exec("return 1;"), result(true)], {});

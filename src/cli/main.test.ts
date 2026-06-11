@@ -733,6 +733,14 @@ test("parseArgs parses craft command with run-id and out", () => {
   assert.equal(args.command, "craft");
   assert.equal(args.runId, "run_abc");
   assert.equal(args.outFile, "script.js");
+  assert.equal(args.standalone, undefined);
+});
+
+test("parseArgs parses craft --standalone", () => {
+  const args = parseArgs(["node", "wire", "craft", "--run-id", "run_abc", "--standalone"]);
+
+  assert.equal(args.command, "craft");
+  assert.equal(args.standalone, true);
 });
 
 test("main craft crystallizes a run's exec steps into a script", async () => {
