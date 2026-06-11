@@ -11,7 +11,7 @@ import { saveRun } from "../storage/runs.js";
 import { saveTraceEvent } from "../storage/events.js";
 import { saveArtifact } from "../storage/artifacts.js";
 import { main } from "./main.js";
-import { parseArgs } from "./args.js";
+import { likelyCommandTypo, parseArgs } from "./args.js";
 
 test("main list prints stored tasks and runs", async () => {
   const root = await mkdtemp(join(tmpdir(), "wire-cli-"));
@@ -61,6 +61,162 @@ test("main list prints stored tasks and runs", async () => {
 
   assert.ok(lines.some((line) => line.includes(task.id)));
   assert.ok(lines.some((line) => line.includes(run.id)));
+});
+
+test("likelyCommandTypo flags close single-word objectives and nothing else", () => {
+  // A mistyped command must not silently become a task objective and launch a
+  // paid browser session.
+  assert.equal(likelyCommandTypo("lst"), "list");
+  assert.equal(likelyCommandTypo("reviw"), "review");
+  assert.equal(likelyCommandTypo("benhc"), "bench");
+  assert.equal(likelyCommandTypo("aprove"), "approve");
+  // Real objectives pass: sentences, URLs, and words not near any command.
+  assert.equal(likelyCommandTypo("open example.com and report the heading"), undefined);
+  assert.equal(likelyCommandTypo("https://example.com"), undefined);
+  assert.equal(likelyCommandTypo("benchmark"), undefined);
+  // Exact command names never reach the objective path; distance 0 is not a typo.
+  assert.equal(likelyCommandTypo("list"), undefined);
+});
+
+test("main run refuses a likely command typo instead of starting a browser run", async () => {
+  const previousExitCode = process.exitCode;
+  const errors: string[] = [];
+  const originalError = console.error;
+  console.error = (value?: unknown) => {
+    errors.push(String(value ?? ""));
+  };
+
+  try {
+    await main(["node", "wire", "lst"]);
+    assert.equal(process.exitCode, 1);
+    assert.ok(
+      errors.some((line) => line.includes("list")),
+      `error should suggest the intended command; got: ${errors.join(" | ")}`,
+    );
+  } finally {
+    console.error = originalError;
+    process.exitCode = previousExitCode;
+  }
+});
+
+test("main list --mode filters runs to tasks of that mode, not just tasks", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wire-cli-"));
+  const previousRoot = process.env.WIRE_ROOT;
+  const previousExitCode = process.exitCode;
+  process.env.WIRE_ROOT = root;
+
+  const taskTask = {
+    id: createId("task"),
+    title: "Plain task",
+    mode: "task" as const,
+    objective: "Plain objective",
+    constraints: [],
+    successCriteria: ["done"],
+    createdAt: nowIsoUtc(),
+  };
+  const investigateTask = {
+    ...taskTask,
+    id: createId("task"),
+    title: "Investigate task",
+    mode: "investigate" as const,
+  };
+  const taskRun = {
+    id: createId("run"),
+    taskId: taskTask.id,
+    status: "succeeded" as const,
+  };
+  const investigateRun = {
+    id: createId("run"),
+    taskId: investigateTask.id,
+    status: "succeeded" as const,
+  };
+
+  const lines: string[] = [];
+  const originalLog = console.log;
+  console.log = (value?: unknown) => {
+    lines.push(String(value ?? ""));
+  };
+
+  try {
+    await saveTask(root, taskTask);
+    await saveTask(root, investigateTask);
+    await saveRun(root, taskRun);
+    await saveRun(root, investigateRun);
+    await main(["node", "wire", "list", "--mode", "investigate"]);
+  } finally {
+    console.log = originalLog;
+    process.exitCode = previousExitCode;
+    if (previousRoot === undefined) {
+      delete process.env.WIRE_ROOT;
+    } else {
+      process.env.WIRE_ROOT = previousRoot;
+    }
+  }
+
+  assert.ok(lines.some((line) => line.includes(investigateRun.id)));
+  assert.ok(
+    !lines.some((line) => line.includes(taskRun.id)),
+    "runs of other-mode tasks must be filtered out with --mode",
+  );
+});
+
+test("main list orders tasks and runs by time, oldest first", async () => {
+  const root = await mkdtemp(join(tmpdir(), "wire-cli-"));
+  const previousRoot = process.env.WIRE_ROOT;
+  const previousExitCode = process.exitCode;
+  process.env.WIRE_ROOT = root;
+
+  const task = {
+    id: createId("task"),
+    title: "Order test task",
+    mode: "task" as const,
+    objective: "Order objective",
+    constraints: [],
+    successCriteria: ["done"],
+    createdAt: nowIsoUtc(),
+  };
+  const newerRun = {
+    id: createId("run"),
+    taskId: task.id,
+    status: "succeeded" as const,
+    startedAt: "2026-06-10T12:00:00.000Z",
+  };
+  const olderRun = {
+    id: createId("run"),
+    taskId: task.id,
+    status: "failed" as const,
+    startedAt: "2026-06-01T12:00:00.000Z",
+  };
+
+  const lines: string[] = [];
+  const originalLog = console.log;
+  console.log = (value?: unknown) => {
+    lines.push(String(value ?? ""));
+  };
+
+  try {
+    await saveTask(root, task);
+    // Save the newer run first so file order disagrees with time order.
+    await saveRun(root, newerRun);
+    await saveRun(root, olderRun);
+    await main(["node", "wire", "list"]);
+  } finally {
+    console.log = originalLog;
+    process.exitCode = previousExitCode;
+    if (previousRoot === undefined) {
+      delete process.env.WIRE_ROOT;
+    } else {
+      process.env.WIRE_ROOT = previousRoot;
+    }
+  }
+
+  const olderIndex = lines.findIndex((line) => line.includes(olderRun.id));
+  const newerIndex = lines.findIndex((line) => line.includes(newerRun.id));
+  assert.ok(olderIndex >= 0 && newerIndex >= 0);
+  assert.ok(
+    olderIndex < newerIndex,
+    `older run must print before newer run; got older@${olderIndex}, newer@${newerIndex}`,
+  );
 });
 
 test("main result prints recorded run result", async () => {

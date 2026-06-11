@@ -27,6 +27,8 @@ export interface CliArgs {
   minScore?: number;
   minPreferenceDelta?: number;
   minPassRate?: number;
+  /** True when the objective came from bare positional words, not --objective. */
+  objectiveFromPositional?: boolean;
   json?: boolean;
   yes?: boolean;
   strict?: boolean;
@@ -40,6 +42,39 @@ export interface CliArgs {
 }
 
 const VALID_COMMANDS = new Set(["run", "review", "result", "list", "approve", "bench", "replay", "export", "craft"]);
+
+// Levenshtein distance, only ever called on words <= ~10 chars.
+function editDistance(a: string, b: string): number {
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let diagonal = prev[0]!;
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const insertOrDelete = Math.min(prev[j]!, prev[j - 1]!) + 1;
+      const substitute = diagonal + (a[i - 1] === b[j - 1] ? 0 : 1);
+      diagonal = prev[j]!;
+      prev[j] = Math.min(insertOrDelete, substitute);
+    }
+  }
+  return prev[b.length]!;
+}
+
+/**
+ * Detect a positional objective that is almost certainly a mistyped command
+ * ("wire lst"), so the CLI can refuse it instead of silently launching a paid
+ * browser session with "lst" as the task. Only a single bare word close to a
+ * known command trips this; sentences, URLs, and flags never do.
+ */
+export function likelyCommandTypo(objective: string): string | undefined {
+  const word = objective.trim().toLowerCase();
+  if (!/^[a-z]{2,9}$/u.test(word)) return undefined;
+  if (VALID_COMMANDS.has(word)) return undefined;
+  const maxDistance = word.length <= 3 ? 1 : 2;
+  for (const command of VALID_COMMANDS) {
+    if (editDistance(word, command) <= maxDistance) return command;
+  }
+  return undefined;
+}
 
 export function parseArgs(argv: string[]): CliArgs {
   const args = argv.slice(2); // drop node and script path
@@ -353,6 +388,7 @@ export function parseArgs(argv: string[]): CliArgs {
 
   if (!objectiveFromFlag && objectiveParts.length > 0) {
     result.objective = objectiveParts.join(" ");
+    result.objectiveFromPositional = true;
   }
 
   return result;

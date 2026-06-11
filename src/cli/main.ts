@@ -1,4 +1,4 @@
-import { parseArgs, formatHelp, type CliArgs } from "./args.js";
+import { likelyCommandTypo, parseArgs, formatHelp, type CliArgs } from "./args.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { approveRun, runTask, type RunOptions } from "./runner.js";
@@ -87,6 +87,28 @@ export async function main(argv: string[]): Promise<void> {
     }
     process.exitCode = 1;
     return;
+  }
+
+  // A bare positional that is almost certainly a mistyped command must not
+  // silently become an objective and start a real browser session. --yes (or
+  // an explicit --objective) says "no, really, run it as a task".
+  if (args.command === "run" && args.objective && args.objectiveFromPositional && !args.taskFile && !args.yes) {
+    const suggestion = likelyCommandTypo(args.objective);
+    if (suggestion) {
+      const hint = `"${args.objective}" looks like a mistyped command — did you mean 'wire ${suggestion}'? Running it would start a real browser session; pass --objective "${args.objective}" or --yes to run it as a task.`;
+      if (args.json) {
+        console.log(JSON.stringify(failure("run", {
+          error_class: "input",
+          error_code: "LIKELY_COMMAND_TYPO",
+          retryable: false,
+          hint,
+        })));
+      } else {
+        console.error(`Error: ${hint}`);
+      }
+      process.exitCode = 1;
+      return;
+    }
   }
 
   switch (args.command) {
@@ -339,8 +361,13 @@ async function handleList(
 ): Promise<void> {
   const root = defaultStorageRoot();
   const tasks = await listTasks(root);
-  const filteredTasks = args.mode ? tasks.filter((t) => t.mode === args.mode) : tasks;
-  const runs = await listRuns(root);
+  const filteredTasks = (args.mode ? tasks.filter((t) => t.mode === args.mode) : tasks)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  // --mode filters runs through their task, so the two sections agree.
+  const filteredTaskIds = new Set(filteredTasks.map((t) => t.id));
+  const runs = (await listRuns(root))
+    .filter((run) => !args.mode || filteredTaskIds.has(run.taskId))
+    .sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""));
 
   if (args.json) {
     console.log(JSON.stringify(success("list", { tasks: filteredTasks, runs })));
