@@ -46,6 +46,8 @@
     { "runId": "run_ad943319-aa16-424e-b7ac-93e17484ac23", "label": "infra-error", "basis": "Final observation is chrome-error:// 'Connection Error – Steel'; a connection failure, not an auth wall." },
     { "runId": "run_e3708b61-2e41-41f8-affb-ec4c28873877", "label": "infra-error", "basis": "Steel API error 524 before any page loaded." },
     { "runId": "run_a273ca44-240d-4110-bb50-4ba7e116a8db", "label": "uncertain", "basis": "Run ended on about:blank with no executions; cannot distinguish site, infra, or agent fault from the record." },
-    { "runId": "run_6996ff53-566e-4c51-a6ad-fb3c56328bea", "label": "uncertain", "basis": "Homepage text dump with zero of the requested 20 listings; contestable between partial-success, agent-error, and ambiguous." }
+    { "runId": "run_6996ff53-566e-4c51-a6ad-fb3c56328bea", "label": "uncertain", "basis": "Homepage text dump with zero of the requested 20 listings; contestable between partial-success, agent-error, and ambiguous." },
+    { "runId": "run_b3651949-6389-49c4-8a3b-ed956c1d54ae", "label": "task-complete", "basis": "2026-06-11 validation run: heading and link extracted with JSON artifact; contract and review passed on first attempt." },
+    { "runId": "run_b1299cc9-d4bd-4e17-91a7-15807531c0ba", "label": "partial-success", "basis": "2026-06-11 validation run (search-loop guard): result is SERP link material with the query reflected back; no answer extracted, run bounded at 11 execs by nudge + contract-reprompt cap." }
   ]
 }

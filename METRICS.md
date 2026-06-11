@@ -32,3 +32,4 @@ set as new runs accumulate).
 | Date | Agreement | Labeled | Notes |
 | --- | ---: | ---: | --- |
 | 2026-06-11 | 72.5% (29/40) | 40 (+4 uncertain) | 7 of 11 disagreements were one bug: chrome-error pages classified blocked-auth (fixed in detectAuthWall the same day → 87.9% excluding that class). Remaining: 2 over-credited (task-complete without completion evidence), 1 under-credited, 1 partial-vs-agent-error. |
+| 2026-06-11 | 73.8% (31/42) | 42 (+4 uncertain) | Same set + 2 same-day live validation runs (both agreements: a clean task-complete and a guard-bounded search-trap partial). |
