@@ -204,10 +204,22 @@ export async function executeTask(
     if (config.existingSession) {
       session = config.existingSession;
     } else {
+      // Only a session this function created may be stopped on failure — a
+      // caller-supplied existingSession is the caller's to manage.
+      let createdSession: BrowserSession | undefined;
       try {
-        session = await createBrowserSession(config.provider, config.sessionInput);
-        await config.onSessionCreated?.(session);
+        createdSession = await createBrowserSession(config.provider, config.sessionInput);
+        await config.onSessionCreated?.(createdSession);
+        session = createdSession;
       } catch (err) {
+        if (createdSession) {
+          // The hook failed after the session opened; without this stop the
+          // cloud browser stays up until server-side timeout, holding a paid
+          // concurrent-session slot. A stop failure must not mask the cause.
+          try {
+            await stopBrowserSession(config.provider, createdSession.id);
+          } catch { /* best effort */ }
+        }
         return await createStartupFailureResult(task, config, err);
       }
     }

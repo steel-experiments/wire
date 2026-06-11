@@ -17,7 +17,7 @@ codebase is in strong shape and the alignment plan covers the rest.
 |------|-------|----------|--------|------------|--------|
 | 001  | CI enforces `pnpm check` on push and PR | P1 | S | — | DONE (merged to main 2026-06-11) |
 | 002  | Make the finish-error test deterministic under load | P1 | S–M | — | TODO |
-| 003  | Close the browser session when `onSessionCreated` throws | P2 | S | — | TODO |
+| 003  | Close the browser session when `onSessionCreated` throws | P2 | S | — | DONE (2026-06-11) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) | REJECTED (one-line rationale)
 

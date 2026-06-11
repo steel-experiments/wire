@@ -155,6 +155,58 @@ test("executeTask returns a failed run when session startup fails", async () => 
   ));
 });
 
+test("executeTask stops the created session when onSessionCreated throws", async () => {
+  // Regression: a hook failure after createSession returned a startup-failure
+  // result without stopping the session it had just created — the cloud
+  // browser stayed open until server-side timeout, holding a paid slot.
+  const stoppedSessions: string[] = [];
+  let createdSessionId: string | undefined;
+  const base = makeConfig();
+  const config = makeConfig({
+    provider: {
+      ...base.provider,
+      createSession: async () => {
+        const session = makeSession();
+        createdSessionId = session.id;
+        return session;
+      },
+      stopSession: async (sessionId: string) => {
+        stoppedSessions.push(sessionId);
+      },
+    },
+    onSessionCreated: async () => {
+      throw new Error("hook exploded");
+    },
+  });
+
+  const result = await executeTask(makeTask(), config);
+
+  assert.equal(result.run.status, "failed");
+  assert.ok(createdSessionId, "session must have been created before the hook ran");
+  assert.deepEqual(stoppedSessions, [createdSessionId], "the created session must be stopped exactly once");
+});
+
+test("executeTask does not stop anything when createSession itself fails", async () => {
+  const stoppedSessions: string[] = [];
+  const base = makeConfig();
+  const config = makeConfig({
+    provider: {
+      ...base.provider,
+      createSession: async () => {
+        throw new Error("startup unavailable");
+      },
+      stopSession: async (sessionId: string) => {
+        stoppedSessions.push(sessionId);
+      },
+    },
+  });
+
+  const result = await executeTask(makeTask(), config);
+
+  assert.equal(result.run.status, "failed");
+  assert.deepEqual(stoppedSessions, [], "no session exists, so nothing must be stopped");
+});
+
 test("executeTask without cancelSignal behaves normally (fallback to no-op)", async () => {
   const config = makeConfig();
 
