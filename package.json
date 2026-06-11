@@ -36,6 +36,7 @@
     "typecheck": "tsc --noEmit",
     "architecture": "node scripts/architecture-check.mjs",
     "metrics": "node scripts/metrics.mjs",
+    "judge:score": "node scripts/judge-score.mjs",
     "emit-schema": "tsx benchmarks/emit-schema.ts",
     "compare": "tsx benchmarks/compare/run-compare.ts"
   },

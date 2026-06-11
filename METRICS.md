@@ -19,4 +19,16 @@ Command: `find src -type f \( -name '*.ts' -o -name '*.tsx' \) [! -name '*.test.
 | 2026-06-05 | 17270 | 17826 |
 | 2026-06-08 | 17726 | 18339 |
 | 2026-06-10 | 17894 | 19611 |
-| 2026-06-11 | 18058 | 19994 |
+| 2026-06-11 | 18160 | 20106 |
+
+## Judge agreement
+
+How often the run classifier's stored verdict matches hand-labeled ground
+truth (`benchmarks/judge-labels.json`). Measure with `pnpm build && pnpm
+judge:score`; labels are a stratified sample over classification kinds and
+score the judge as it ran (mixed classifier versions — refresh the labeled
+set as new runs accumulate).
+
+| Date | Agreement | Labeled | Notes |
+| --- | ---: | ---: | --- |
+| 2026-06-11 | 72.5% (29/40) | 40 (+4 uncertain) | 7 of 11 disagreements were one bug: chrome-error pages classified blocked-auth (fixed in detectAuthWall the same day → 87.9% excluding that class). Remaining: 2 over-credited (task-complete without completion evidence), 1 under-credited, 1 partial-vs-agent-error. |

@@ -33,6 +33,25 @@ test("detectAuthWall does not treat captcha wording as login auth", () => {
   assert.equal(result.detected, false);
 });
 
+test("detectAuthWall never fires on browser error pages", () => {
+  // Observed live: Steel's "Connection Error" chrome-error page presents a
+  // single bare form, so the login-form heuristic classified six SEC EDGAR
+  // connection failures as blocked-auth instead of infra-error. An
+  // unloadable page can't be an auth wall.
+  const errorPage = detectAuthWall(observation({
+    url: "chrome-error://chromewebdata/",
+    title: "Connection Error – Steel",
+    pageSummary: { forms: 1, buttons: 1, links: 2, inputs: 1, tables: 0, dialogs: 0, headings: ["Connection Error"] },
+  }));
+  assert.equal(errorPage.detected, false);
+
+  const blank = detectAuthWall(observation({
+    url: "about:blank",
+    title: "about:blank",
+  }));
+  assert.equal(blank.detected, false);
+});
+
 test("detectAuthWall still detects login pages", () => {
   const result = detectAuthWall(observation({
     url: "https://example.com/login",

@@ -122,6 +122,14 @@ function pageLooksLikeLoginForm(observation: BrowserObservation): boolean {
  * Any single signal is sufficient to flag the page as an auth wall.
  */
 export function detectAuthWall(observation: BrowserObservation): AuthWallResult {
+  // An unloadable page can't be an auth wall. Browser error surfaces (Steel's
+  // "Connection Error" page, DNS failures) present a single bare form, which
+  // the login-form heuristic otherwise matches — observed misclassifying
+  // connection failures as blocked-auth instead of infra-error.
+  if (observation.url.startsWith("chrome-error://") || observation.url === "about:blank") {
+    return { detected: false };
+  }
+
   // Signal 1: URL pattern match
   const urlMatch = urlMatchesAuthPattern(observation.url);
   if (urlMatch !== null) {
