@@ -26,6 +26,7 @@ import {
 import {
   attachToTarget,
   capRawRuntimeEvaluate,
+  CdpConnection,
   cdpMethodNeedsTargetSession,
   evaluateJson,
   listPageTargets,
@@ -66,6 +67,56 @@ const EXEC_CONTEXT_NAVIGATED = /Inspected target navigated or closed|Execution c
 function execNavigatedAfterWireAction(message: string, wireEvents: JsonObject[]): boolean {
   return EXEC_CONTEXT_NAVIGATED.test(message) &&
     wireEvents.some((event) => event.ok === true);
+}
+
+// Upper bound on how long to wait for a click-triggered navigation to finish
+// loading before observing. Bounded so a hanging page cannot stall the run.
+const NAVIGATION_SETTLE_TIMEOUT_MS = 8_000;
+
+// A navigating click reloads the page; on a server-rendered postback (e.g.
+// ASP.NET WebForms search) the result only exists after the new page loads. We
+// wait for Page.loadEventFired — the new page's load, which is not fooled by
+// the old page's already "complete" readyState. The caller only reaches here
+// after a context-teardown error, so the old document is already gone: a direct
+// document.readyState read here reflects the NEW document, never a stale one.
+// That read covers the race where the new page finishes loading before
+// Page.enable takes effect (so no load event is ever delivered). Resolves on
+// the load event, an already-complete page, or a hard timeout (the click
+// succeeded, so timing out is not a failure). The exec runs on a per-call
+// connection that closes when exec returns, so the listener does not accumulate
+// across execs.
+async function waitForNavigatedPageToLoad(
+  cdp: CdpConnection,
+  sessionId: string,
+  timeoutMs: number,
+): Promise<void> {
+  await new Promise<void>((resolve) => {
+    let done = false;
+    const finish = (): void => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    cdp.on("Page.loadEventFired", (params) => {
+      const sid = (params as { __sessionId?: string } | undefined)?.__sessionId;
+      if (sid === undefined || sid === sessionId) finish();
+    });
+    // Page must be enabled to receive load events; if it is unsupported, fall
+    // through to the timeout. After it is enabled, check whether the new page
+    // already loaded (the load event would have been missed in that race).
+    cdp.send("Page.enable", undefined, sessionId)
+      .then(async () => {
+        try {
+          const readyState = await evaluateJson<string>(cdp, sessionId, "document.readyState");
+          if (readyState === "complete") finish();
+        } catch {
+          // New context not ready yet; the load event will arrive.
+        }
+      })
+      .catch(() => finish());
+  });
 }
 
 export class SteelProvider implements BrowserProvider {
@@ -266,9 +317,10 @@ export class SteelProvider implements BrowserProvider {
       let returnValue: unknown;
 
       for (const target of selected) {
+        let sessionId: string | undefined;
         try {
           validateBrowserCode(input.code);
-          const sessionId = await attachToTarget(cdp, target.targetId);
+          sessionId = await attachToTarget(cdp, target.targetId);
           await installWireClickBinding(cdp, sessionId, wireEvents, this.wireClickPolicy);
           const value = await evaluateJson<unknown>(cdp, sessionId, wrapUserCode(input.code), input.timeoutMs);
           returnValue = value;
@@ -278,9 +330,13 @@ export class SteelProvider implements BrowserProvider {
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           if (returnValue === undefined && execNavigatedAfterWireAction(message, wireEvents)) {
-            // The click landed and navigated the page; report the navigation
-            // instead of the teardown so the agent re-observes the new page
-            // rather than re-clicking the same control.
+            // The click landed and navigated the page. Wait for the new page to
+            // finish loading before reporting, so the next observation reads the
+            // loaded result page rather than the mid-navigation one; then report
+            // the navigation instead of the teardown.
+            if (sessionId !== undefined) {
+              await waitForNavigatedPageToLoad(cdp, sessionId, NAVIGATION_SETTLE_TIMEOUT_MS);
+            }
             returnValue = { navigated: true };
           } else {
             ok = false;

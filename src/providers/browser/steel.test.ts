@@ -705,6 +705,19 @@ test("SteelProvider.exec treats a navigating wire.click as success, not a failur
         this.respond(message.id, {});
         return;
       }
+      if (message.method === "Page.enable") {
+        // Enabling Page lets the provider wait for the postback to settle; a
+        // real postback fires the load event once the new page commits.
+        this.respond(message.id, {});
+        queueMicrotask(() => this.onmessage?.({
+          data: JSON.stringify({
+            method: "Page.loadEventFired",
+            sessionId: "cdp-session-1",
+            params: { timestamp: 1 },
+          }),
+        }));
+        return;
+      }
       if (message.method === "Runtime.evaluate") {
         this.runtimeEvaluateCount++;
         if (this.runtimeEvaluateCount === 1) {
@@ -783,6 +796,276 @@ test("SteelProvider.exec treats a navigating wire.click as success, not a failur
     assert.deepEqual(result.returnValue, { navigated: true });
     assert.equal(result.wireEvents?.[0]?.["action"], "click");
     assert.equal(result.wireEvents?.[0]?.["ok"], true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("SteelProvider.exec waits for the navigated page to load before reporting it", async () => {
+  // After a navigating wire.click tears down the context, the provider must
+  // wait for the postback's new page to finish loading (Page.loadEventFired)
+  // before returning — otherwise the next observation reads the stale,
+  // mid-navigation page and the agent never sees the result of its click.
+  const sent: Array<Record<string, unknown>> = [];
+  let loadEventFiredSent = false;
+  class NavLoadWaitSocket {
+    onopen: ((event: any) => void) | null = null;
+    onmessage: ((event: any) => void) | null = null;
+    onerror: ((event: any) => void) | null = null;
+    onclose: ((event: any) => void) | null = null;
+    private runtimeEvaluateCount = 0;
+    private userEvalId: number | undefined;
+
+    constructor() {
+      queueMicrotask(() => this.onopen?.({}));
+    }
+
+    send(data: string): void {
+      const message = JSON.parse(data) as {
+        id: number;
+        method: string;
+        params?: Record<string, unknown>;
+        sessionId?: string;
+      };
+      sent.push(message as unknown as Record<string, unknown>);
+
+      if (message.method === "Target.getTargets") {
+        this.respond(message.id, {
+          targetInfos: [{ targetId: "tab-1", type: "page", title: "Example", url: "https://example.com" }],
+        });
+        return;
+      }
+      if (message.method === "Target.attachToTarget") {
+        this.respond(message.id, { sessionId: "cdp-session-1" });
+        return;
+      }
+      if (message.method === "Runtime.addBinding" || message.method === "Runtime.removeBinding") {
+        this.respond(message.id, {});
+        return;
+      }
+      if (message.method === "Page.enable") {
+        // The provider must enable Page before it can hear the load event.
+        this.respond(message.id, {});
+        loadEventFiredSent = true;
+        queueMicrotask(() => this.onmessage?.({
+          data: JSON.stringify({
+            method: "Page.loadEventFired",
+            sessionId: "cdp-session-1",
+            params: { timestamp: 1 },
+          }),
+        }));
+        return;
+      }
+      if (message.method === "Runtime.evaluate") {
+        this.runtimeEvaluateCount++;
+        if (this.runtimeEvaluateCount === 1) {
+          this.respond(message.id, { result: { value: undefined } });
+          return;
+        }
+        if (this.runtimeEvaluateCount === 2) {
+          this.userEvalId = message.id;
+          queueMicrotask(() => this.onmessage?.({
+            data: JSON.stringify({
+              method: "Runtime.bindingCalled",
+              sessionId: "cdp-session-1",
+              params: {
+                name: "__wire_action",
+                payload: JSON.stringify({
+                  id: "1",
+                  kind: "click",
+                  x: 100,
+                  y: 200,
+                  target: { tag: "input", selectorHint: "#ctl00_MainContent_btnSearch" },
+                }),
+              },
+            }),
+          }));
+          return;
+        }
+        this.respond(message.id, { result: { value: undefined } });
+        queueMicrotask(() => {
+          if (this.userEvalId !== undefined) {
+            this.onmessage?.({
+              data: JSON.stringify({
+                id: this.userEvalId,
+                error: { message: "Inspected target navigated or closed" },
+              }),
+            });
+          }
+        });
+        return;
+      }
+      if (message.method === "Input.dispatchMouseEvent") {
+        this.respond(message.id, {});
+        return;
+      }
+      this.respond(message.id, {});
+    }
+
+    close(): void {
+      this.onclose?.({});
+    }
+
+    private respond(id: number, result: unknown): void {
+      queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ id, result }) }));
+    }
+  }
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(
+    JSON.stringify(fakeSteelSession({ id: "aaa-bbb-ccc" })),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+
+  try {
+    const provider = new SteelProvider({
+      apiKey: "ste-test-key",
+      webSocketFactory: () => new NavLoadWaitSocket(),
+    });
+    const result = await provider.exec({
+      sessionId: "session_aaa-bbb-ccc" as never,
+      code: "await wire.click('#ctl00_MainContent_btnSearch'); return { searched: true };",
+    });
+
+    assert.equal(
+      sent.some((message) => message["method"] === "Page.enable"),
+      true,
+      "provider must enable Page to wait for the navigation to settle",
+    );
+    assert.equal(loadEventFiredSent, true, "the load event path must be exercised");
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.returnValue, { navigated: true });
+    assert.equal(result.stderr, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("SteelProvider.exec settles via readyState when the load event is missed", async () => {
+  // Race: the navigated page can finish loading before Page.enable takes
+  // effect, so no Page.loadEventFired is ever delivered. The provider must
+  // still settle promptly by reading document.readyState (safe — the old
+  // context is gone post-teardown), not block until the timeout.
+  let readyStateChecked = false;
+  class ReadyStateFallbackSocket {
+    onopen: ((event: any) => void) | null = null;
+    onmessage: ((event: any) => void) | null = null;
+    onerror: ((event: any) => void) | null = null;
+    onclose: ((event: any) => void) | null = null;
+    private runtimeEvaluateCount = 0;
+    private userEvalId: number | undefined;
+
+    constructor() {
+      queueMicrotask(() => this.onopen?.({}));
+    }
+
+    send(data: string): void {
+      const message = JSON.parse(data) as {
+        id: number;
+        method: string;
+        params?: { expression?: string } & Record<string, unknown>;
+        sessionId?: string;
+      };
+
+      if (message.method === "Target.getTargets") {
+        this.respond(message.id, {
+          targetInfos: [{ targetId: "tab-1", type: "page", title: "Example", url: "https://example.com" }],
+        });
+        return;
+      }
+      if (message.method === "Target.attachToTarget") {
+        this.respond(message.id, { sessionId: "cdp-session-1" });
+        return;
+      }
+      if (message.method === "Runtime.addBinding" || message.method === "Runtime.removeBinding") {
+        this.respond(message.id, {});
+        return;
+      }
+      if (message.method === "Page.enable") {
+        // Deliberately do NOT emit Page.loadEventFired — simulate the missed-event race.
+        this.respond(message.id, {});
+        return;
+      }
+      if (message.method === "Runtime.evaluate") {
+        if (message.params?.expression === "document.readyState") {
+          readyStateChecked = true;
+          this.respond(message.id, { result: { value: "complete" } });
+          return;
+        }
+        this.runtimeEvaluateCount++;
+        if (this.runtimeEvaluateCount === 1) {
+          this.respond(message.id, { result: { value: undefined } });
+          return;
+        }
+        if (this.runtimeEvaluateCount === 2) {
+          this.userEvalId = message.id;
+          queueMicrotask(() => this.onmessage?.({
+            data: JSON.stringify({
+              method: "Runtime.bindingCalled",
+              sessionId: "cdp-session-1",
+              params: {
+                name: "__wire_action",
+                payload: JSON.stringify({
+                  id: "1",
+                  kind: "click",
+                  x: 100,
+                  y: 200,
+                  target: { tag: "input", selectorHint: "#ctl00_MainContent_btnSearch" },
+                }),
+              },
+            }),
+          }));
+          return;
+        }
+        this.respond(message.id, { result: { value: undefined } });
+        queueMicrotask(() => {
+          if (this.userEvalId !== undefined) {
+            this.onmessage?.({
+              data: JSON.stringify({
+                id: this.userEvalId,
+                error: { message: "Inspected target navigated or closed" },
+              }),
+            });
+          }
+        });
+        return;
+      }
+      if (message.method === "Input.dispatchMouseEvent") {
+        this.respond(message.id, {});
+        return;
+      }
+      this.respond(message.id, {});
+    }
+
+    close(): void {
+      this.onclose?.({});
+    }
+
+    private respond(id: number, result: unknown): void {
+      queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ id, result }) }));
+    }
+  }
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(
+    JSON.stringify(fakeSteelSession({ id: "aaa-bbb-ccc" })),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+
+  try {
+    const provider = new SteelProvider({
+      apiKey: "ste-test-key",
+      webSocketFactory: () => new ReadyStateFallbackSocket(),
+    });
+    const result = await provider.exec({
+      sessionId: "session_aaa-bbb-ccc" as never,
+      code: "await wire.click('#ctl00_MainContent_btnSearch'); return { searched: true };",
+    });
+
+    assert.equal(readyStateChecked, true, "must fall back to a readyState read when no load event arrives");
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.returnValue, { navigated: true });
+    assert.equal(result.stderr, undefined);
   } finally {
     globalThis.fetch = originalFetch;
   }
