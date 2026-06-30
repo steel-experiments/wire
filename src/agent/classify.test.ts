@@ -78,6 +78,20 @@ describe("classifyRun", () => {
     assert.equal(result.confidence, 0.85);
   });
 
+  it("classifies an LLM-provider 429 (EAGENT) as infra-error, not site-error", () => {
+    // A 429 from our own model provider is a quota/infra failure — the target
+    // site was fine. Blaming the site would skew eval stats.
+    const events = [
+      makeEvent("error", {
+        message: "[anthropic] API error (429): [1302][Rate limit reached for requests]",
+        code: "EAGENT",
+      }),
+    ];
+    const result = classifyRun(makeInput({ events }));
+    assert.equal(result.kind, "infra-error");
+    assert.equal(result.confidence, 0.85);
+  });
+
   it("classifies infra-error on ETIMEDOUT", () => {
     const events = [
       makeEvent("error", { message: "ETIMEDOUT connection timed out", code: "ETIMEDOUT" }),

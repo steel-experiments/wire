@@ -238,13 +238,19 @@ export function classifyRun(input: ClassificationInput): RunClassification {
     }
   }
 
-  // Rate-limited: error events with 429/rate limit indicators
+  // Rate-limited: error events with 429/rate limit indicators. A rate limit
+  // from our own model provider (code EAGENT, raised on LLM calls) is a
+  // quota/infra failure, not the target site's fault — blaming the site would
+  // skew eval stats. A 429 from anywhere else stays a site-error.
   const rateLimitedError = errorEvents.find((e) => {
     const msg = String(e.payload.message ?? "").toLowerCase();
     const code = String(e.payload.code ?? "");
     return msg.includes("429") || msg.includes("rate limit") || msg.includes("too many requests") || code === "429";
   });
   if (rateLimitedError) {
+    if (String(rateLimitedError.payload.code ?? "") === "EAGENT") {
+      return { kind: "infra-error", confidence: 0.85, notes: ["LLM provider rate limit (429)"] };
+    }
     return { kind: "site-error", confidence: 0.85, notes: ["Rate limit or 429 response detected"] };
   }
 
