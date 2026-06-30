@@ -47,6 +47,7 @@ function makeTask(): Task {
 function createMockedProvider() {
   const responses = new Map<string, { ok: boolean; status: number; body: unknown }>();
   const cdpResponses = new Map<string, unknown>();
+  const cdpMessages: Array<{ id: number; method: string; params?: Record<string, unknown>; sessionId?: string }> = [];
 
   class MockSocket {
     onopen: ((event: any) => void) | null = null;
@@ -59,7 +60,8 @@ function createMockedProvider() {
     }
 
     send(data: string): void {
-      const message = JSON.parse(data) as { id: number; method: string };
+      const message = JSON.parse(data) as { id: number; method: string; params?: Record<string, unknown>; sessionId?: string };
+      cdpMessages.push(message);
       const result = cdpResponses.get(message.method);
       queueMicrotask(() => {
         this.onmessage?.({ data: JSON.stringify({ id: message.id, result }) });
@@ -109,7 +111,7 @@ function createMockedProvider() {
     globalThis.fetch = originalFetch;
   };
 
-  return { provider, setNextResponse, setCdpResponse, restore };
+  return { provider, setNextResponse, setCdpResponse, cdpMessages, restore };
 }
 
 // ---------------------------------------------------------------------------
@@ -404,6 +406,60 @@ test("SteelProvider.observe returns page snapshot", async () => {
     assert.equal(observation.url, "https://example.com/dashboard");
     assert.equal(observation.title, "Dashboard");
     assert.equal(observation.tabs.length, 1);
+  } finally {
+    restore();
+  }
+});
+
+test("SteelProvider.observe uses PageSketch script only when requested", async () => {
+  const { provider, setNextResponse, setCdpResponse, cdpMessages, restore } = createMockedProvider();
+  setNextResponse("/sessions/aaa-bbb-ccc", fakeSteelSession({ id: "aaa-bbb-ccc" }));
+  setCdpResponse("Target.getTargets", {
+    targetInfos: [{ targetId: "tab-1", type: "page", title: "Example", url: "https://example.com" }],
+  });
+  setCdpResponse("Target.attachToTarget", { sessionId: "cdp-session-1" });
+  setCdpResponse("Runtime.evaluate", {
+    result: {
+      value: {
+        url: "https://example.com/dashboard",
+        title: "Dashboard",
+      },
+    },
+  });
+
+  try {
+    await provider.observe({ sessionId: "session_aaa-bbb-ccc" as never });
+    const defaultEvaluate = cdpMessages.find((message) => message.method === "Runtime.evaluate");
+    assert.ok(defaultEvaluate);
+    const defaultExpression = String(defaultEvaluate.params?.expression ?? "");
+    assert.doesNotThrow(() => new Function(defaultExpression));
+    assert.ok(!defaultExpression.includes("PAGE_SKETCH_LIMITS"));
+
+    setCdpResponse("Runtime.evaluate", {
+      result: {
+        value: {
+          url: "https://example.com/dashboard",
+          title: "Dashboard",
+          pageSketch: {
+            version: 1,
+            generatedAt: "2026-06-30T00:00:00.000Z",
+            sections: [],
+            truncated: false,
+            limits: { maxSections: 12, maxControlsPerSection: 12, maxTextPreviewChars: 280 },
+          },
+        },
+      },
+    });
+    const observation = await provider.observe({
+      sessionId: "session_aaa-bbb-ccc" as never,
+      includePageSketch: true,
+    });
+    const optInEvaluate = cdpMessages.filter((message) => message.method === "Runtime.evaluate").at(-1);
+    assert.ok(optInEvaluate);
+    const optInExpression = String(optInEvaluate.params?.expression ?? "");
+    assert.doesNotThrow(() => new Function(optInExpression));
+    assert.ok(optInExpression.includes("PAGE_SKETCH_LIMITS"));
+    assert.ok(observation.pageSketch);
   } finally {
     restore();
   }
@@ -1128,12 +1184,45 @@ test("SteelProvider.createSession maps sessionConfig fields to Steel body", asyn
 
     assert.equal(capturedBody.useProxy, true);
     assert.equal(capturedBody.solveCaptcha, true);
-    assert.equal(capturedBody.stealth, true);
+    assert.equal(capturedBody.stealth, undefined);
+    assert.deepEqual(capturedBody.experimentalFeatures, ["useStealthBrowser"]);
     assert.equal(capturedBody.userAgent, "Mozilla/5.0 (custom)");
     assert.equal(capturedBody.region, "iad");
     assert.equal(capturedBody.locale, "en-US");
     assert.equal(capturedBody.timezone, "America/New_York");
     assert.deepEqual(capturedBody.viewport, { width: 1280, height: 720 });
+  } finally {
+    globalThis.fetch = originalFetch;
+    restore();
+  }
+});
+
+test("SteelProvider.createSession appends stealth experimental feature without replacing provider options", async () => {
+  const { provider, restore } = createMockedProvider();
+  let capturedBody: Record<string, unknown> = {};
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url: string | URL | Request, init?: RequestInit) => {
+    if (typeof init?.body === "string") {
+      capturedBody = JSON.parse(init.body);
+    }
+    return new Response(
+      JSON.stringify(fakeSteelSession()),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  };
+
+  try {
+    await provider.createSession({
+      sessionConfig: {
+        stealth: true,
+        providerOptions: {
+          experimentalFeatures: ["otherFeature", "useStealthBrowser"],
+        },
+      },
+    });
+
+    assert.deepEqual(capturedBody.experimentalFeatures, ["otherFeature", "useStealthBrowser"]);
   } finally {
     globalThis.fetch = originalFetch;
     restore();

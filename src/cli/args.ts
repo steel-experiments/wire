@@ -32,6 +32,7 @@ export interface CliArgs {
   /** True when the objective came from bare positional words, not --objective. */
   objectiveFromPositional?: boolean;
   json?: boolean;
+  streamJson?: boolean;
   yes?: boolean;
   strict?: boolean;
   verbose?: boolean;
@@ -39,6 +40,7 @@ export interface CliArgs {
   noColor?: boolean;
   traceLlm?: boolean;
   criticalPoints?: boolean;
+  pageSketch?: boolean;
   help?: boolean;
   version?: boolean;
 }
@@ -226,7 +228,7 @@ export function parseArgs(argv: string[]): CliArgs {
       continue;
     }
 
-    if (arg === "--stealth") {
+    if (arg === "--stealth-browser" || arg === "--stealthBrowser" || arg === "--stealth") {
       result.stealth = true;
       i++;
       continue;
@@ -333,6 +335,12 @@ export function parseArgs(argv: string[]): CliArgs {
       continue;
     }
 
+    if (arg === "--stream-json") {
+      result.streamJson = true;
+      i++;
+      continue;
+    }
+
     if (arg === "--yes" || arg === "--non-interactive") {
       result.yes = true;
       i++;
@@ -375,6 +383,12 @@ export function parseArgs(argv: string[]): CliArgs {
     }
     if (arg === "--trace-llm") {
       result.traceLlm = true;
+      i++;
+      continue;
+    }
+
+    if (arg === "--page-sketch") {
+      result.pageSketch = true;
       i++;
       continue;
     }
@@ -434,9 +448,10 @@ export function formatHelp(): string {
     "  --skill-dir <path>       Directory of skill definitions",
     "  --use-proxy              Start browser with provider proxy enabled",
     "  --solve-captcha          Start browser with provider captcha support enabled",
-    "  --stealth                Request provider stealth mode when supported",
+    "  --stealth-browser        Request Steel stealth browser mode (--stealth also works)",
     "  --region <region>        Provider browser region",
     "  --user-agent <ua>        Browser user agent override",
+    "  --page-sketch            Include opt-in structured page sections in observations",
     "",
     "Review options:",
     "  --run-id <id>            Run to review",
@@ -464,6 +479,7 @@ export function formatHelp(): string {
     "  --benchmarks <path>      Benchmark file (default: benchmarks/default.json)",
     "  --provider <provider>    LLM provider for agent and judge",
     "  --model <model-id>       LLM model for agent and judge",
+    "  --page-sketch            Enable opt-in structured page observations during benchmarks",
     "  --min-pass-rate <n>      Exit non-zero only if pass rate < n (0..1).",
     "                           Variance-tolerant gate; default requires all pass.",
     "",
@@ -477,6 +493,7 @@ export function formatHelp(): string {
     "",
     "General:",
     "  --json                   Output machine-readable JSON",
+    "  --stream-json            Stream trace events as NDJSON to stdout (one event per line)",
     "  --yes, --non-interactive Auto-approve policy actions",
     "  --strict                 Fail on missing config or schema violations",
     "  --verbose, -v            Stream observations, policy checks and full output",

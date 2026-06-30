@@ -16,6 +16,7 @@ export interface ActionExecutionContext {
   onSessionReconfigured?: (
     details: { oldSessionId: SessionId; newSession: BrowserSession; summary: string },
   ) => Promise<void> | void;
+  includePageSketch?: boolean;
 }
 
 // The slice of loop state an action handler may read and mutate. Structurally

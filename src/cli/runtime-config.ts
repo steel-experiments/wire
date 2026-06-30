@@ -9,7 +9,7 @@ import { loadSession, saveSession } from "../storage/sessions.js";
 import { displaySafeUrl } from "../browser/session.js";
 import { saveTraceBlobValue } from "../storage/blobs.js";
 import { defaultSkillDir, defaultStorageRoot } from "../shared/paths.js";
-import { createConsoleTraceSink } from "../ui/stream.js";
+import { buildSessionTraceEvent, createConsoleTraceSink, createJsonlTraceSink } from "../ui/stream.js";
 import type { LlmProvider } from "./config.js";
 
 export interface RunOptions {
@@ -23,6 +23,7 @@ export interface RunOptions {
   skillDir?: string;
   sessionConfig?: SessionConfig;
   json?: boolean;
+  streamJson?: boolean;
   yes?: boolean;
   verbose?: boolean;
   quiet?: boolean;
@@ -30,6 +31,7 @@ export interface RunOptions {
   keepSessionOpen?: boolean;
   traceLlmMessages?: boolean;
   criticalPointReview?: boolean;
+  pageSketch?: boolean;
 }
 
 export function resolveSkillDir(
@@ -103,14 +105,16 @@ export function resolveCriticalPointReview(
 }
 
 export function createRuntimeConfig(
-  options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "sessionConfig" | "provider" | "model" | "baseUrl" | "yes" | "json" | "mode" | "verbose" | "quiet" | "color" | "keepSessionOpen" | "traceLlmMessages" | "criticalPointReview">,
+  options: Pick<RunOptions, "profileId" | "maxSteps" | "skillDir" | "sessionConfig" | "provider" | "model" | "baseUrl" | "yes" | "json" | "streamJson" | "mode" | "verbose" | "quiet" | "color" | "keepSessionOpen" | "traceLlmMessages" | "criticalPointReview" | "pageSketch">,
 ): RuntimeConfig {
   let policyEngine: PolicyEngine = createPolicyEngine();
   if (options.yes) {
     policyEngine = autoApprovingEngine(policyEngine);
   }
 
-  const isJson = options.json === true;
+  // --stream-json owns stdout for NDJSON trace events, so it suppresses the
+  // human-formatted output the same way --json does.
+  const isJson = options.json === true || options.streamJson === true;
   const maxSteps = options.maxSteps ?? defaultMaxSteps(options.mode ?? "task");
   const config: RuntimeConfig = {
     provider: createSteelProvider(),
@@ -124,6 +128,9 @@ export function createRuntimeConfig(
         console.log("");
       }
       await saveSession(defaultStorageRoot(), session);
+      // Announce the live browser viewer to stream consumers (e.g. the console)
+      // as soon as the session opens, before the first step.
+      config.traceSink?.onEvent?.(buildSessionTraceEvent(session));
     },
     async onSessionReconfigured({ oldSessionId, newSession, summary }) {
       const url = displaySafeUrl(newSession.debugUrl ?? newSession.liveUrl);
@@ -147,6 +154,7 @@ export function createRuntimeConfig(
   };
 
   if (options.keepSessionOpen) config.keepSessionOpen = true;
+  if (options.pageSketch === true) config.pageSketch = true;
   if (resolveCriticalPointReview(options.mode, options.criticalPointReview)) {
     config.criticalPointReview = true;
   }
@@ -158,7 +166,10 @@ export function createRuntimeConfig(
     };
   }
 
-  if (!isJson && options.quiet !== true) {
+  if (options.streamJson === true) {
+    const jsonlSink = createJsonlTraceSink();
+    config.traceSink = { onEvent: (event) => jsonlSink.onEvent(event) };
+  } else if (!isJson && options.quiet !== true) {
     const sinkOpts: Parameters<typeof createConsoleTraceSink>[0] = { maxSteps };
     if (options.verbose !== undefined) sinkOpts.verbose = options.verbose;
     if (options.color !== undefined) sinkOpts.color = options.color;

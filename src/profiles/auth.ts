@@ -104,8 +104,13 @@ function pageLooksLikeLoginForm(observation: BrowserObservation): boolean {
     return noTables && fewButtons;
   }
 
-  // Without password evidence, also require few inputs (login ≈ 2-3 fields)
-  return noTables && fewButtons && inputs <= 3;
+  const hasAuthHeading = [...TITLE_KEYWORDS, ...FORM_KEYWORDS].some((keyword) =>
+    combined.includes(keyword)
+  );
+
+  // Without password evidence, require auth-oriented page text too. Many real
+  // content pages have a single compare/search form and very few controls.
+  return hasAuthHeading && noTables && fewButtons && inputs <= 3;
 }
 
 // Public API

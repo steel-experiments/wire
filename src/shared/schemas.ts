@@ -128,6 +128,7 @@ export const traceEventKindSchema = z.enum([
   "llm-call",
   "llm-usage",
   "user-message",
+  "session",
   "error",
 ]);
 export const approvalStatusSchema = z.enum(["pending", "approved", "rejected", "expired"]);
@@ -290,6 +291,71 @@ export const browserTabSummarySchema = z
   })
   .strict();
 
+export const pageSketchBoundsSchema = z
+  .object({
+    x: z.number().finite(),
+    y: z.number().finite(),
+    width: z.number().nonnegative(),
+    height: z.number().nonnegative(),
+  })
+  .strict();
+
+export const pageSketchLimitsSchema = z
+  .object({
+    maxSections: z.number().int().positive(),
+    maxControlsPerSection: z.number().int().positive(),
+    maxTextPreviewChars: z.number().int().positive(),
+  })
+  .strict();
+
+export const pageSketchCountsSchema = z
+  .object({
+    links: z.number().int().nonnegative(),
+    buttons: z.number().int().nonnegative(),
+    inputs: z.number().int().nonnegative(),
+    tables: z.number().int().nonnegative(),
+    lists: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export const pageSketchControlSchema = z
+  .object({
+    label: z.string(),
+    tag: z.string().min(1),
+    role: z.string().min(1).optional(),
+    type: z.string().min(1).optional(),
+    href: z.string().min(1).optional(),
+    selectorHint: z.string().min(1),
+    selectorAlternates: z.array(z.string().min(1)).optional(),
+    disabled: z.boolean().optional(),
+    required: z.boolean().optional(),
+  })
+  .strict();
+
+export const pageSketchSectionSchema = z
+  .object({
+    id: z.string().min(1),
+    kind: z.enum(["nav", "header", "main", "form", "table", "list", "dialog", "footer", "content"]),
+    selectorHint: z.string().min(1),
+    label: z.string().min(1).optional(),
+    heading: z.string().min(1).optional(),
+    textPreview: z.string().optional(),
+    bbox: pageSketchBoundsSchema.optional(),
+    counts: pageSketchCountsSchema,
+    controls: z.array(pageSketchControlSchema),
+  })
+  .strict();
+
+export const pageSketchSchema = z
+  .object({
+    version: z.literal(1),
+    generatedAt: z.string().min(1),
+    sections: z.array(pageSketchSectionSchema),
+    truncated: z.boolean().optional(),
+    limits: pageSketchLimitsSchema,
+  })
+  .strict();
+
 export const browserObservationSchema = z
   .object({
     sessionId: sessionIdSchema,
@@ -322,6 +388,7 @@ export const browserObservationSchema = z
       })
       .strict()
       .optional(),
+    pageSketch: pageSketchSchema.optional(),
   })
   .strict();
 

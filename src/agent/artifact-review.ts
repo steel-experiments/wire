@@ -163,6 +163,21 @@ function parseArtifactReview(content: string): ArtifactReviewResult | undefined 
   return undefined;
 }
 
+function artifactReviewRepairMessages(messages: ChatMessage[], invalidContent: string): ChatMessage[] {
+  return [
+    ...messages,
+    { role: "assistant", content: invalidContent },
+    {
+      role: "user",
+      content: [
+        "Your previous artifact review was not parseable strict JSON.",
+        "Return exactly one JSON object with this schema and no prose:",
+        "{\"passed\": boolean, \"problems\": string[]}",
+      ].join("\n"),
+    },
+  ];
+}
+
 export async function reviewWithCriticalPoints(
   state: LoopState,
   llm: LLMProvider,
@@ -202,7 +217,13 @@ export async function reviewArtifacts(
   ];
   const response = await config.llmProvider.chat(messages, { maxTokens: 700 });
   await recordLlmCall(state, config, "artifact-review", messages, response);
-  return parseArtifactReview(response.content);
+  const parsed = parseArtifactReview(response.content);
+  if (parsed) return parsed;
+
+  const repairMessages = artifactReviewRepairMessages(messages, response.content);
+  const repaired = await config.llmProvider.chat(repairMessages, { maxTokens: 300 });
+  await recordLlmCall(state, config, "artifact-review-parse-retry", repairMessages, repaired);
+  return parseArtifactReview(repaired.content);
 }
 
 export function artifactReviewPayload(
@@ -211,10 +232,9 @@ export function artifactReviewPayload(
 ): JsonObject {
   if (!review) {
     return {
-      passed: true,
-      problems: [],
+      passed: false,
+      problems: ["Artifact review response could not be parsed; final output was not validated against the objective."],
       artifactCount,
-      skipped: true,
       reason: "Artifact review response could not be parsed",
     };
   }

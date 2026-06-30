@@ -104,7 +104,10 @@ export function createSteelActionHandlers(): ActionHandler[] {
       });
 
       // Auto-observe new session so agent sees about:blank
-      const observation = await provider.observe({ sessionId: state.sessionId });
+      const observation = await provider.observe({
+        sessionId: state.sessionId,
+        ...(context?.includePageSketch === true ? { includePageSketch: true } : {}),
+      });
       const { toObservationPayload } = await import("../../../browser/observe.js");
       state.events.push({
         id: createId("event"),

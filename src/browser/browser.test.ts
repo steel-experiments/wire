@@ -135,6 +135,30 @@ test("observeBrowser does not set targetId when omitted", async () => {
   assert.ok(!("targetId" in capturedInput));
 });
 
+test("observeBrowser passes includePageSketch only when requested", async () => {
+  const sessionId = createId("session");
+  const capturedInputs: BrowserObserveInput[] = [];
+
+  const provider = createMockProvider({
+    async observe(input: BrowserObserveInput): Promise<BrowserObservation> {
+      capturedInputs.push(input);
+      return {
+        sessionId: input.sessionId,
+        url: "https://example.com",
+        title: "Example",
+        tabs: [],
+      };
+    },
+  });
+
+  await observeBrowser({ provider, sessionId });
+  await observeBrowser({ provider, sessionId, includePageSketch: true });
+
+  assert.equal(capturedInputs.length, 2);
+  assert.ok(!("includePageSketch" in capturedInputs[0]!));
+  assert.equal(capturedInputs[1]!.includePageSketch, true);
+});
+
 test("observeBrowser returns observation with artifacts", async () => {
   const sessionId = createId("session");
   const screenshotId = createId("artifact");

@@ -104,6 +104,157 @@ test("createTaskContract does not treat filenames as domains", () => {
   assert.equal(contract.mustProduce?.format, "markdown");
 });
 
+test("createTaskContract infers explicit multi-user entity coverage", () => {
+  const contract = createTaskContract(makeTask({
+    objective: "go to https://commit-history.com/ and find stats for users, nibzard, fukouda, danew, junhsss, grahaml, hussufo",
+  }));
+
+  assert.deepEqual(contract.mustVisit, ["commit-history.com"]);
+  assert.deepEqual(contract.mustCoverEntities, ["nibzard", "fukouda", "danew", "junhsss", "grahaml", "hussufo"]);
+  assert.equal(contract.mustProduce?.minItems, 6);
+  assert.ok(contract.mustNotContain.includes("stats not found"));
+  assert.match(contractToPrompt(contract), /every requested entity: nibzard, fukouda, danew, junhsss, grahaml, hussufo/u);
+});
+
+test("validateTaskContract rejects incomplete multi-user extraction runs", () => {
+  const contract = createTaskContract(makeTask({
+    objective: "go to https://commit-history.com/ and find stats for users, nibzard, fukouda, danew, junhsss, grahaml, hussufo",
+  }));
+  const events = [
+    event("observation", { url: "https://commit-history.com/danew", title: "danew's commit history" }),
+    event("progress-ledger", {
+      entries: [
+        { key: "danew", fields: { publicCommits: "7,086" } },
+        { key: "junhsss", fields: { publicCommits: "6,356" } },
+        { key: "grahaml", fields: { publicCommits: "4,346" } },
+        { key: "hussufo", fields: { publicCommits: "53" } },
+      ],
+      count: 4,
+      total: 4,
+    }),
+  ];
+
+  const validation = validateTaskContract(contract, events);
+
+  assert.equal(validation.passed, false);
+  assert.ok(validation.missing.some((item) => item.includes("nibzard")));
+  assert.ok(validation.missing.some((item) => item.includes("fukouda")));
+  assert.ok(validation.missing.some((item) => item.includes("at least 6 items")));
+});
+
+test("validateTaskContract rejects multi-user rows that only contain extraction errors", () => {
+  const contract = createTaskContract(makeTask({
+    objective: "go to https://commit-history.com/ and find stats for users, nibzard, fukouda, danew, junhsss, grahaml, hussufo",
+  }));
+  const events = [
+    event("observation", { url: "https://commit-history.com/hussufo", title: "hussufo's commit history" }),
+    event("progress-ledger", {
+      entries: [
+        { key: "nibzard", fields: { username: "nibzard", error: "Stats not found in body text" } },
+        { key: "fukouda", fields: { username: "fukouda", publicCommits: "7,750" } },
+        { key: "danew", fields: { username: "danew", publicCommits: "7,086" } },
+        { key: "junhsss", fields: { username: "junhsss", publicCommits: "6,356" } },
+        { key: "grahaml", fields: { username: "grahaml", publicCommits: "4,346" } },
+        { key: "hussufo", fields: { username: "hussufo", publicCommits: "53" } },
+      ],
+      count: 6,
+      total: 6,
+    }),
+  ];
+
+  const validation = validateTaskContract(contract, events);
+
+  assert.equal(validation.passed, false);
+  assert.ok(validation.missing.some((item) => item.includes("stats not found")));
+  assert.ok(validation.satisfied.some((item) => item.includes("nibzard")));
+});
+
+test("validateTaskContract rejects required-entity records with only placeholder values", () => {
+  const contract = createTaskContract(makeTask({
+    objective: "go to https://commit-history.com/ and find stats for users, nibzard, fukouda, danew, junhsss, grahaml, hussufo",
+  }));
+  const events = [
+    event("observation", { url: "https://commit-history.com/hussufo", title: "hussufo's commit history" }),
+    event("progress-ledger", {
+      entries: [
+        { key: "nibzard", fields: { rank: "579", public: "5,564" } },
+        { key: "fukouda", fields: { rank: "3,527", public: "499" } },
+        { key: "danew", fields: { rank: "3,882", public: "386" } },
+        { key: "junhsss", fields: { rank: "1,250", public: "6,357" } },
+        { key: "grahaml", fields: { rank: "4,106", public: "322" } },
+        { key: "hussufo", fields: { rank: "N/A", public: "N/A", private: "N/A" }, evidence: "Auth wall - stats not accessible" },
+      ],
+      count: 6,
+      total: 6,
+    }),
+  ];
+
+  const validation = validateTaskContract(contract, events);
+
+  assert.equal(validation.passed, false);
+  assert.ok(validation.satisfied.some((item) => item.includes("substantive values for requested entity nibzard")));
+  assert.ok(validation.missing.some((item) => item.includes("placeholder or failure values for requested entity hussufo")));
+});
+
+test("validateTaskContract applies required-entity value checks to markdown table rows", () => {
+  const contract = {
+    mustVisit: [],
+    mustMention: [],
+    mustCoverEntities: ["alice", "bob"],
+    mustProduce: { table: true, minItems: 2 },
+    mustNotContain: [],
+  };
+  const events = [
+    event("artifact", {
+      filename: "stats.md",
+      kind: "markdown",
+      mimeType: "text/markdown",
+      content: [
+        "| User | Score | Evidence |",
+        "| --- | --- | --- |",
+        "| alice | 42 | extracted |",
+        "| bob | N/A | not available |",
+      ].join("\n"),
+    }),
+  ];
+
+  const validation = validateTaskContract(contract, events);
+
+  assert.equal(validation.passed, false);
+  assert.ok(validation.satisfied.some((item) => item.includes("substantive values for requested entity alice")));
+  assert.ok(validation.missing.some((item) => item.includes("placeholder or failure values for requested entity bob")));
+});
+
+test("validateTaskContract allows field-level placeholders when required records have substantive values", () => {
+  const contract = createTaskContract(makeTask({
+    objective: "find stats for users alice, bob",
+  }));
+  const result = JSON.stringify([
+    { key: "alice", fields: { score: "42", optionalDetail: "not available" } },
+    { key: "bob", fields: { score: "17" } },
+  ]);
+
+  const validation = validateTaskContract(contract, [], result);
+
+  assert.equal(validation.passed, true);
+  assert.ok(validation.satisfied.some((item) => item.includes("substantive values for requested entity alice")));
+  assert.ok(validation.satisfied.some((item) => item.includes("placeholder text: not available")));
+});
+
+test("validateTaskContract does not require structured rows for prose-only entity mentions", () => {
+  const contract = {
+    mustVisit: [],
+    mustMention: [],
+    mustCoverEntities: ["alice", "bob"],
+    mustNotContain: [],
+  };
+
+  const validation = validateTaskContract(contract, [], "Alice and Bob were both present in the source.");
+
+  assert.equal(validation.passed, true);
+  assert.equal(validation.missing.length, 0);
+});
+
 test("validateTaskContract rejects placeholder multi-site extraction artifacts", () => {
   const contract = createTaskContract(makeTask({
     objective: "Open the pricing pages of vercel.com, netlify.com, and railway.app. Extract everything and save as comparison table in md format.",

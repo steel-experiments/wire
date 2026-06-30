@@ -340,6 +340,12 @@ test("parseArgs parses bench command with --json flag", () => {
   assert.equal(args.json, true);
 });
 
+test("parseArgs parses bench command with --page-sketch flag", () => {
+  const args = parseArgs(["node", "wire", "bench", "--page-sketch"]);
+  assert.equal(args.command, "bench");
+  assert.equal(args.pageSketch, true);
+});
+
 // ---------------------------------------------------------------------------
 // Default benchmark file validation
 // ---------------------------------------------------------------------------

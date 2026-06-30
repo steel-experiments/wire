@@ -105,7 +105,7 @@ Session options can be set via CLI flags or config files:
 |---------|----------|------------|-------------|
 | Proxy | `--use-proxy` | `browser.session.useProxy` | Enable provider proxy |
 | Captcha | `--solve-captcha` | `browser.session.solveCaptcha` | Enable captcha solving |
-| Stealth | `--stealth` | `browser.session.stealth` | Stealth mode |
+| Stealth browser | `--stealth-browser` | `browser.session.stealth` | Steel stealth browser mode |
 | Region | `--region` | `browser.session.region` | Browser region |
 | User agent | `--user-agent` | `browser.session.userAgent` | Custom user agent |
 | Viewport | — | `browser.session.viewport` | `{ width, height }` |

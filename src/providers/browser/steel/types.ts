@@ -81,7 +81,7 @@ export interface SteelCreateSessionBody {
   region?: string;
   useProxy?: boolean | Record<string, unknown>;
   solveCaptcha?: boolean;
-  stealth?: boolean;
+  experimentalFeatures?: string[];
   userAgent?: string;
   locale?: string;
   timezone?: string;

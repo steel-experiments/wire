@@ -627,6 +627,13 @@ test("parseArgs parses --critical-points and --no-critical-points", () => {
   assert.equal(parseArgs(["node", "wire", "get title"]).criticalPoints, undefined);
 });
 
+test("parseArgs parses --page-sketch as an opt-in run flag", () => {
+  const args = parseArgs(["node", "wire", "get title", "--page-sketch"]);
+
+  assert.equal(args.command, "run");
+  assert.equal(args.pageSketch, true);
+});
+
 test("parseArgs treats positional arg as objective", () => {
   const args = parseArgs(["node", "wire", "get", "the", "title", "of", "steel.dev"]);
 
@@ -660,7 +667,7 @@ test("parseArgs parses browser session option flags", () => {
     "wire",
     "--use-proxy",
     "--solve-captcha",
-    "--stealth",
+    "--stealth-browser",
     "--region",
     "us-east-1",
     "--user-agent",
@@ -675,6 +682,11 @@ test("parseArgs parses browser session option flags", () => {
   assert.equal(args.stealth, true);
   assert.equal(args.region, "us-east-1");
   assert.equal(args.userAgent, "Mozilla/5.0");
+});
+
+test("parseArgs keeps legacy and camelCase stealth browser aliases", () => {
+  assert.equal(parseArgs(["node", "wire", "--stealth", "get title"]).stealth, true);
+  assert.equal(parseArgs(["node", "wire", "--stealthBrowser", "get title"]).stealth, true);
 });
 
 test("parseArgs positional is not confused by flags or commands", () => {

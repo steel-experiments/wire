@@ -8,6 +8,7 @@ export interface ObserveOptions {
   provider: BrowserProvider;
   sessionId: SessionId;
   targetId?: string;
+  includePageSketch?: boolean;
   artifactDir?: string;
 }
 
@@ -29,6 +30,9 @@ export async function observeBrowser(options: ObserveOptions): Promise<BrowserOb
 
   if (options.targetId) {
     input.targetId = options.targetId;
+  }
+  if (options.includePageSketch !== undefined) {
+    input.includePageSketch = options.includePageSketch;
   }
 
   return options.provider.observe(input);
@@ -57,6 +61,9 @@ export function toObservationPayload(
   }
   if (observation.pageSummary) {
     payload.pageSummary = observation.pageSummary as unknown as JsonObject;
+  }
+  if (observation.pageSketch) {
+    payload.pageSketch = observation.pageSketch as unknown as JsonObject;
   }
   if (options.includeScreenshotArtifactId && observation.screenshotArtifactId) {
     payload.screenshotArtifactId = observation.screenshotArtifactId;

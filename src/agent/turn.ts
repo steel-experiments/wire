@@ -1,7 +1,14 @@
 import type { BrowserProvider } from "../browser/bridge.js";
 import type { LLMProvider, ChatMessage, ContentPart } from "../providers/llm/types.js";
 import type { JsonObject, ProposedAction, TraceEvent } from "../shared/types.js";
-import { assembleSystemPrompt, assembleUserPrompt, buildActionGuidance, type ContextBundle } from "./context.js";
+import {
+  assembleSystemPrompt,
+  assembleUserPrompt,
+  buildActionGuidance,
+  type ContextBundle,
+  type PageSketchReuseSummary,
+  type PageSketchSummary,
+} from "./context.js";
 import { looksLikeQueryEcho } from "./classify.js";
 import { contractToPrompt } from "./contract.js";
 import { latestExtractionsPerUrl } from "./evidence.js";
@@ -168,6 +175,134 @@ function normalizeProposedAction(action: ProposedAction): ProposedAction {
   };
 }
 
+function asRecord(value: unknown): JsonObject | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as JsonObject
+    : undefined;
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function pageSketchFromPayload(payload: JsonObject): PageSketchSummary | undefined {
+  const sketch = asRecord(payload.pageSketch);
+  const rawSections = Array.isArray(sketch?.sections) ? sketch.sections : [];
+  const sections: PageSketchSummary["sections"] = [];
+
+  for (const rawSection of rawSections.slice(0, 12)) {
+    const section = asRecord(rawSection);
+    if (!section) continue;
+    const id = stringValue(section.id);
+    const kind = stringValue(section.kind);
+    const selectorHint = stringValue(section.selectorHint);
+    if (!id || !kind || !selectorHint) continue;
+
+    const summarySection: PageSketchSummary["sections"][number] = {
+      id,
+      kind,
+      selectorHint,
+      controls: [],
+    };
+    const label = stringValue(section.label);
+    const heading = stringValue(section.heading);
+    const textPreview = stringValue(section.textPreview);
+    if (label) summarySection.label = label;
+    if (heading) summarySection.heading = heading;
+    if (textPreview) summarySection.textPreview = textPreview;
+
+    const rawControls = Array.isArray(section.controls) ? section.controls : [];
+    for (const rawControl of rawControls.slice(0, 12)) {
+      const control = asRecord(rawControl);
+      if (!control) continue;
+      const tag = stringValue(control.tag);
+      const controlSelector = stringValue(control.selectorHint);
+      if (!tag || !controlSelector) continue;
+      const controlSummary: PageSketchSummary["sections"][number]["controls"][number] = {
+        label: stringValue(control.label) ?? "",
+        tag,
+        selectorHint: controlSelector,
+      };
+      const role = stringValue(control.role);
+      const type = stringValue(control.type);
+      if (role) controlSummary.role = role;
+      if (type) controlSummary.type = type;
+      summarySection.controls.push(controlSummary);
+    }
+    sections.push(summarySection);
+  }
+
+  if (sections.length === 0) return undefined;
+  const out: PageSketchSummary = { sections };
+  if (sketch?.truncated === true) out.truncated = true;
+  return out;
+}
+
+interface PageSketchRouteShape {
+  host: string;
+  routeShape: string;
+  urlKey: string;
+}
+
+function decodePathSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
+function shapePathSegment(segment: string, index: number, segmentCount: number): string {
+  const decoded = decodePathSegment(segment).replace(/^@/u, "");
+  const lower = decoded.toLowerCase();
+  if (/^\d+$/u.test(lower)) return ":id";
+  if (/^[0-9a-f]{8,}(?:-[0-9a-f]{4,})*$/iu.test(lower)) return ":id";
+  if (index === segmentCount - 1 && /^[a-z0-9][a-z0-9_-]{1,38}$/iu.test(lower)) return ":id";
+  return lower;
+}
+
+function pageSketchRouteShape(rawUrl: unknown): PageSketchRouteShape | undefined {
+  if (typeof rawUrl !== "string" || rawUrl.length === 0) return undefined;
+  try {
+    const url = new URL(rawUrl);
+    if (!/^https?:$/u.test(url.protocol)) return undefined;
+    const host = url.hostname.toLowerCase().replace(/^www\./u, "");
+    const segments = url.pathname.split("/").filter((segment) => segment.length > 0);
+    const routeShape = segments.length === 0
+      ? "/"
+      : `/${segments.map((segment, index) => shapePathSegment(segment, index, segments.length)).join("/")}`;
+    const normalizedPath = url.pathname.replace(/\/+$/u, "") || "/";
+    return { host, routeShape, urlKey: `${host}${normalizedPath}` };
+  } catch {
+    return undefined;
+  }
+}
+
+export function pageSketchReuseFromEvents(events: TraceEvent[]): PageSketchReuseSummary | undefined {
+  const observations = events.filter((event) => event.kind === "observation");
+  const latest = observations.at(-1);
+  if (!latest || !pageSketchFromPayload(latest.payload)) return undefined;
+
+  const latestShape = pageSketchRouteShape(latest.payload.url);
+  if (!latestShape) return undefined;
+
+  const matchingUrls = new Set<string>();
+  for (const event of observations) {
+    if (!pageSketchFromPayload(event.payload)) continue;
+    const shape = pageSketchRouteShape(event.payload.url);
+    if (!shape) continue;
+    if (shape.host !== latestShape.host || shape.routeShape !== latestShape.routeShape) continue;
+    matchingUrls.add(shape.urlKey);
+  }
+
+  if (matchingUrls.size < 2) return undefined;
+  return {
+    host: latestShape.host,
+    routeShape: latestShape.routeShape,
+    similarPages: matchingUrls.size,
+  };
+}
+
 export function defaultAgentTurn(
   llmProvider?: LLMProvider,
   maxSteps?: number,
@@ -300,6 +435,19 @@ export function defaultAgentTurn(
       plan: planToContext(taskPlan),
       contract: contractToPrompt(state.contract),
     };
+
+    const latestObservationEvent = [...state.events].reverse().find((event) => event.kind === "observation");
+    if (latestObservationEvent) {
+      const pageSketch = pageSketchFromPayload(latestObservationEvent.payload);
+      if (pageSketch) {
+        context.pageSketch = pageSketch;
+      }
+    }
+
+    const pageSketchReuse = pageSketchReuseFromEvents(state.events);
+    if (pageSketchReuse) {
+      context.pageSketchReuse = pageSketchReuse;
+    }
 
     if (state.progressLedger.length > 0) {
       context.progressLedger = state.progressLedger;

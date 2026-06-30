@@ -79,6 +79,37 @@ test("progressEntriesFromValue extracts known envelope keys", () => {
   assert.equal(fromProgress[0]!.key, "x");
 });
 
+test("progressEntriesFromValue extracts a single keyed data object", () => {
+  const entries = progressEntriesFromValue({
+    data: {
+      username: "fukouda",
+      rank: "499",
+      publicCommits: "7,750",
+    },
+  });
+
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0]!.key, "fukouda");
+  const fields = entries[0]!.fields as Record<string, unknown>;
+  assert.equal(fields.username, "fukouda");
+  assert.equal(fields.publicCommits, "7,750");
+});
+
+test("progressEntriesFromValue extracts keyed data maps", () => {
+  const entries = progressEntriesFromValue({
+    data: {
+      fukouda: { rank: "499", publicCommits: "7,750" },
+      nibzard: { error: "Stats not found in body text" },
+    },
+  });
+
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0]!.key, "fukouda");
+  assert.deepEqual(entries[0]!.fields, { rank: "499", publicCommits: "7,750" });
+  assert.equal(entries[1]!.key, "nibzard");
+  assert.deepEqual(entries[1]!.fields, { error: "Stats not found in body text" });
+});
+
 test("progressEntriesFromValue auto-extracts array-of-objects properties", () => {
   // LLM returns {units:[{unit:1,score:100},{unit:2,score:200}]} — no envelope key
   const entries = progressEntriesFromValue({

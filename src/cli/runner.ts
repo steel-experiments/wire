@@ -142,7 +142,9 @@ export async function runTask(options: RunOptions): Promise<RunResult> {
     createdAt: nowIsoUtc(),
   };
 
-  const isJson = options.json === true;
+  // --stream-json reserves stdout for the NDJSON trace stream, so it suppresses
+  // the human-readable run summary just like --json does.
+  const isJson = options.json === true || options.streamJson === true;
   const config = createRuntimeConfig(options);
 
   await reapExpiredApprovals(
@@ -309,12 +311,15 @@ function renderProposedAction(request: import("../shared/types.js").ApprovalRequ
 
 // approveRun — returns ApproveResult
 
-export async function approveRun(runId: RunId, jsonOutput?: boolean): Promise<ApproveResult> {
+export async function approveRun(runId: RunId, jsonOutput?: boolean, streamJson?: boolean): Promise<ApproveResult> {
   const root = defaultStorageRoot();
+  // Both --json and --stream-json suppress the human-readable approval output;
+  // --stream-json additionally streams the resumed run's trace as NDJSON.
+  const machine = jsonOutput === true || streamJson === true;
   const pending = (await listApprovalRequests(root, runId)).filter((request) => request.status === "pending");
 
   if (pending.length === 0) {
-    if (!jsonOutput) {
+    if (!machine) {
       console.log(`No pending approvals found for ${runId}.`);
     }
     return { approved: false, approvalId: "", runId, status: "no-pending" };
@@ -323,7 +328,7 @@ export async function approveRun(runId: RunId, jsonOutput?: boolean): Promise<Ap
   // Check if any approval has expired
   for (const request of pending) {
     if (request.expiresAt && new Date(request.expiresAt) < new Date()) {
-      if (!jsonOutput) {
+      if (!machine) {
         console.error(`Approval ${request.id} has expired.`);
       }
       process.exitCode = 1;
@@ -331,7 +336,7 @@ export async function approveRun(runId: RunId, jsonOutput?: boolean): Promise<Ap
     }
   }
 
-  if (!jsonOutput) {
+  if (!machine) {
     for (const request of pending) {
       renderProposedAction(request);
     }
@@ -345,7 +350,7 @@ export async function approveRun(runId: RunId, jsonOutput?: boolean): Promise<Ap
 
   // Validate the checkpoint still exists and is for the correct run
   if (checkpoint.runId !== runId) {
-    if (!jsonOutput) {
+    if (!machine) {
       console.error(`Checkpoint run ID mismatch: expected ${runId}, got ${checkpoint.runId}.`);
     }
     process.exitCode = 1;
@@ -356,7 +361,7 @@ export async function approveRun(runId: RunId, jsonOutput?: boolean): Promise<Ap
   const approvedRequest = await loadApprovalRequest(root, checkpoint.approvalRequestId);
 
   if (approvedRequest.status === "expired") {
-    if (!jsonOutput) {
+    if (!machine) {
       console.error(`Approval ${approvedRequest.id} has expired.`);
     }
     process.exitCode = 1;
@@ -365,13 +370,18 @@ export async function approveRun(runId: RunId, jsonOutput?: boolean): Promise<Ap
 
   const resumed = await resumeTask(
     checkpoint,
-    createRuntimeConfig({ maxSteps: 15, mode: checkpoint.task.mode }),
+    createRuntimeConfig({
+      maxSteps: 15,
+      mode: checkpoint.task.mode,
+      ...(streamJson ? { streamJson: true } : {}),
+      ...(jsonOutput ? { json: true } : {}),
+    }),
     undefined,
   );
 
   const artifacts = await persistExecutionArtifacts(root, task, resumed);
 
-  if (!jsonOutput) {
+  if (!machine) {
     console.log(`Approved:     ${approvedRequest.id}`);
     console.log(`Run resumed:  ${runId}`);
     console.log(`Task:         ${task.title}`);

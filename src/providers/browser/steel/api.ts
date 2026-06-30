@@ -14,6 +14,17 @@ export const GET_SESSION_MAX_ATTEMPTS = 3;
 export const DEFAULT_GET_SESSION_RETRY_DELAY_MS = 200;
 
 const STEEL_REGION_CODES = new Set(["lax", "iad"]);
+const STEEL_STEALTH_EXPERIMENTAL_FEATURE = "useStealthBrowser";
+
+function addExperimentalFeature(body: SteelCreateSessionBody, feature: string): void {
+  const existing = Array.isArray(body.experimentalFeatures)
+    ? body.experimentalFeatures.filter((value): value is string => typeof value === "string" && value.length > 0)
+    : [];
+  if (!existing.includes(feature)) {
+    existing.push(feature);
+  }
+  body.experimentalFeatures = existing;
+}
 
 function mapStatus(steelStatus: string): SessionStatus {
   switch (steelStatus) {
@@ -126,6 +137,7 @@ export async function steelFetch<T>(
 
 export function buildCreateSessionBody(input: CreateSessionInput): SteelCreateSessionBody {
   const body: SteelCreateSessionBody = {};
+  let useStealthBrowser = false;
 
   if (input.profileId) {
     body.profileId = input.profileId.replace(/^profile_/u, "");
@@ -146,9 +158,7 @@ export function buildCreateSessionBody(input: CreateSessionInput): SteelCreateSe
     if (cfg.solveCaptcha !== undefined) {
       body.solveCaptcha = cfg.solveCaptcha;
     }
-    if (cfg.stealth !== undefined) {
-      body.stealth = cfg.stealth;
-    }
+    useStealthBrowser = cfg.stealth === true;
     if (typeof cfg.userAgent === "string") {
       body.userAgent = cfg.userAgent;
     }
@@ -180,6 +190,10 @@ export function buildCreateSessionBody(input: CreateSessionInput): SteelCreateSe
 
   if (input.metadata) {
     Object.assign(body, input.metadata);
+  }
+
+  if (useStealthBrowser) {
+    addExperimentalFeature(body, STEEL_STEALTH_EXPERIMENTAL_FEATURE);
   }
 
   return body;

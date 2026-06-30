@@ -792,7 +792,7 @@ function makeSkill(overrides: Partial<LoadedSkill> & { sections: Record<string, 
     scope: "domain",
     tags: ["test"],
     updatedAt: new Date().toISOString(),
-    source: "generated",
+    source: "team",
     path: "/fake/skill.md",
     body: "",
     sections,
@@ -900,6 +900,20 @@ test("skillGuidance labels proposed skills as provisional", () => {
   assert.match(guidance, /PROVISIONAL learned proposal/u);
   assert.match(guidance, /Verify before relying/u);
   assert.match(guidance, /Start Bot/u);
+});
+
+test("skillGuidance labels generated active skills as learned guidance", () => {
+  const skill = makeSkill({
+    source: "generated",
+    status: "active",
+    sections: {
+      "Facts": "Some pages may require a custom wait.",
+    },
+  });
+  const guidance = skillGuidance(skill);
+  assert.match(guidance, /GENERATED learned guidance/u);
+  assert.match(guidance, /Prefer current page evidence/u);
+  assert.match(guidance, /custom wait/u);
 });
 
 // ---------------------------------------------------------------------------
@@ -1696,7 +1710,14 @@ test("skillPromotion 'off' suppresses skill-proposal writes but leaves the run i
   let calls = 0;
   const mockLlm: LLMProvider = {
     model: "test-model",
-    async chat(): Promise<ChatResponse> {
+    async chat(messages: ChatMessage[]): Promise<ChatResponse> {
+      const isReviewer = messages.some((message) =>
+        typeof message.content === "string" &&
+        message.content.includes("terse artifact reviewer")
+      );
+      if (isReviewer) {
+        return { content: JSON.stringify({ passed: true, problems: [] }), model: "test-model" };
+      }
       calls++;
       const action = calls === 1
         ? { kind: "exec", summary: "Extract", payload: { code: "wire:extract\nreturn {answer: 'forty-two'}" } }
@@ -1737,7 +1758,15 @@ function structuredExtractConfig(overrides: Partial<RuntimeConfig> = {}): Runtim
   let calls = 0;
   const mockLlm: LLMProvider = {
     model: "test-model",
-    async chat(): Promise<ChatResponse> {
+    async chat(messages: ChatMessage[]): Promise<ChatResponse> {
+      const isReviewer = messages.some((message) =>
+        message.role === "system" &&
+        typeof message.content === "string" &&
+        message.content.includes("terse artifact reviewer")
+      );
+      if (isReviewer) {
+        return { content: JSON.stringify({ passed: true, problems: [] }), model: "test-model" };
+      }
       calls++;
       const action = calls === 1
         ? { kind: "exec", summary: "Extract", payload: { code: "wire:extract\nreturn {answer: 'forty-two'}" } }

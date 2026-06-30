@@ -15,6 +15,7 @@ import type {
 export interface BrowserObserveInput {
   sessionId: SessionId;
   targetId?: string;
+  includePageSketch?: boolean;
 }
 
 // Browser provider contract

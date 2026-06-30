@@ -131,7 +131,7 @@ wire export --run-id run_abc123 --format trajectory --out traces.jsonl
 | `--skill-dir <path>` | string | Skills directory |
 | `--use-proxy` | flag | Start browser with proxy |
 | `--solve-captcha` | flag | Start browser with captcha support |
-| `--stealth` | flag | Request stealth mode |
+| `--stealth-browser` | flag | Request Steel stealth browser mode (`--stealth` remains an alias) |
 | `--region <code>` | string | Browser region |
 | `--user-agent <ua>` | string | Browser user agent override |
 | `--critical-points` | flag | Judge completion against an LLM-authored critical-point checklist (per-criterion review) instead of one all-or-nothing artifact verdict; falls back to the default reviewer when the objective yields no verifiable points |

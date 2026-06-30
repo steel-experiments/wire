@@ -78,7 +78,7 @@ The run resumes from the checkpoint and continues to completion.
 wire run --objective "..." --mode task --max-steps 20
 wire run --objective "..." --provider openai --model gpt-5.4-mini
 wire run --objective "..." --skill-dir ./skills
-wire run --objective "..." --use-proxy --solve-captcha --stealth
+wire run --objective "..." --use-proxy --solve-captcha --stealth-browser
 wire run --objective "..." --json --yes    # CI-friendly, auto-approve
 wire run --objective "..." --verbose       # stream every trace event
 ```

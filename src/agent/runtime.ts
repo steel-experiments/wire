@@ -149,6 +149,8 @@ export interface RuntimeConfig {
   // observe-producing steps only; use "every-step" for full audit trails or
   // "off" for high-volume embedded runs.
   screenshotCapture?: ScreenshotCapturePolicy;
+  // Opt-in structured page-region sketches for observations; disabled by default.
+  pageSketch?: boolean;
   pauseToken?: PauseToken;
   userMessageInbox?: UserMessageInbox;
   existingSession?: BrowserSession;
@@ -327,6 +329,22 @@ function loopOptionsForConfig(config: RuntimeConfig, session?: BrowserSession): 
   return loopOptions;
 }
 
+type StepOptions = NonNullable<Parameters<typeof executeStep>[4]>;
+
+function stepOptionsForConfig(config: RuntimeConfig, actionRegistry?: ActionRegistry, base: StepOptions = {}): StepOptions {
+  const options: StepOptions = { ...base };
+  if (config.screenshotCapture !== undefined) options.screenshotCapture = config.screenshotCapture;
+  if (actionRegistry) options.actionRegistry = actionRegistry;
+  if (config.pageSketch === true) {
+    options.pageSketch = true;
+    options.actionContext = { ...options.actionContext, includePageSketch: true };
+  }
+  if (config.onSessionReconfigured) {
+    options.actionContext = { ...options.actionContext, onSessionReconfigured: config.onSessionReconfigured };
+  }
+  return options;
+}
+
 async function flushTraceSink(
   state: LoopState,
   config: RuntimeConfig,
@@ -371,25 +389,12 @@ async function initializeState(
   }
 
   if (approvedPendingAction) {
-    const resumeOpts: {
-      skipPolicyCheck: boolean;
-      actionRegistry?: ActionRegistry;
-      actionContext?: { onSessionReconfigured: NonNullable<RuntimeConfig["onSessionReconfigured"]> };
-      screenshotCapture?: ScreenshotCapturePolicy;
-    } = { skipPolicyCheck: true };
-    if (config.screenshotCapture !== undefined) {
-      resumeOpts.screenshotCapture = config.screenshotCapture;
-    }
-    if (actionRegistry) resumeOpts.actionRegistry = actionRegistry;
-    if (config.onSessionReconfigured) {
-      resumeOpts.actionContext = { onSessionReconfigured: config.onSessionReconfigured };
-    }
     const resumedStep = await executeStep(
       state,
       approvedPendingAction,
       config.provider,
       config.policyEngine,
-      resumeOpts,
+      stepOptionsForConfig(config, actionRegistry, { skipPolicyCheck: true }),
     );
     Object.assign(state, resumedStep.state);
     signals.policyDenied = resumedStep.policyDenied;
@@ -416,6 +421,7 @@ async function initializeState(
     const observation = await observeBrowser({
       provider: config.provider,
       sessionId: state.sessionId,
+      ...(config.pageSketch === true ? { includePageSketch: true } : {}),
     });
     const obsPayload = redactJsonObject(toObservationPayload(observation));
 
@@ -619,19 +625,7 @@ async function runMainLoop(
 
     // Execute the step
     try {
-      const stepOpts: {
-        actionRegistry?: ActionRegistry;
-        actionContext?: { onSessionReconfigured: NonNullable<RuntimeConfig["onSessionReconfigured"]> };
-        screenshotCapture?: ScreenshotCapturePolicy;
-      } = {};
-      if (config.screenshotCapture !== undefined) {
-        stepOpts.screenshotCapture = config.screenshotCapture;
-      }
-      if (actionRegistry) stepOpts.actionRegistry = actionRegistry;
-      if (config.onSessionReconfigured) {
-        stepOpts.actionContext = { onSessionReconfigured: config.onSessionReconfigured };
-      }
-      const stepResult = await executeStep(state, action, config.provider, config.policyEngine, stepOpts);
+      const stepResult = await executeStep(state, action, config.provider, config.policyEngine, stepOptionsForConfig(config, actionRegistry));
       Object.assign(state, stepResult.state);
       signals.policyDenied = stepResult.policyDenied;
       applyAuthWallSignal(state, signals, stepResult.authWallHit);
@@ -862,7 +856,11 @@ async function runMainLoop(
         const budgetRemaining = state.stepCount < config.maxSteps;
         if (budgetRemaining && consecutiveRecoverableErrors < 5) {
           try {
-            const observation = await observeBrowser({ provider: config.provider, sessionId: state.sessionId });
+            const observation = await observeBrowser({
+              provider: config.provider,
+              sessionId: state.sessionId,
+              ...(config.pageSketch === true ? { includePageSketch: true } : {}),
+            });
             state.events.push({
               id: createId("event"),
               runId: state.run.id,

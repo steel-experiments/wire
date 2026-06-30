@@ -149,6 +149,13 @@ test("executeTask proposes domain skill updates from reusable trace evidence", a
   const mockLlmProvider = {
     model: "test-model",
     async chat(messages: { content: string | import("../providers/llm/openai.js").ContentPart[] }[]) {
+      const isReviewer = messages.some((m) =>
+        typeof m.content === "string" &&
+        m.content.includes("terse artifact reviewer")
+      );
+      if (isReviewer) {
+        return { content: JSON.stringify({ passed: true, problems: [] }), model: "test-model" };
+      }
       const userMsg = messages.find((m) => typeof m.content === "string" && m.content.includes("[observation]"));
       if (userMsg) {
         return {

@@ -1637,6 +1637,72 @@ test("updateSkillStatsFromRun retires a generated skill after repeated failures"
   assert.match(raw, /^status: rejected$/mu, "an ineffective generated skill is retired");
 });
 
+test("updateSkillStatsFromRun retires generated skills after a recent failure streak", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  await mkdir(dir, { recursive: true });
+  const skillId = createId("skill");
+  await writeFile(join(dir, "streaky_example_com-skill.md"), [
+    "---",
+    `id: ${skillId}`,
+    "scope: domain",
+    "status: active",
+    "source: generated",
+    "confidence: 0.9",
+    "tags:",
+    "  - streaky.example.com",
+    "updatedAt: 2026-06-01",
+    "hostnamePatterns:",
+    '  - "streaky.example.com"',
+    "---",
+    "# Skill",
+    "## Facts",
+    "- Prior guidance that keeps failing.",
+  ].join("\n"), "utf-8");
+
+  await writeSkillStats(dir, skillId, {
+    ...DEFAULT_STATS,
+    loadedCount: 2,
+    successCount: 0,
+    outcomeCounts: { "partial-success": 2 },
+    totalSteps: 20,
+    totalTokens: 2000,
+    lastLoadedAt: "2026-06-09T00:00:00.000Z",
+    recentRuns: [
+      {
+        runId: createId("run"),
+        loadedAt: "2026-06-08T00:00:00.000Z",
+        outcome: "partial-success",
+        stepCount: 10,
+        totalTokens: 1000,
+        loadedWithSkillIds: [],
+      },
+      {
+        runId: createId("run"),
+        loadedAt: "2026-06-09T00:00:00.000Z",
+        outcome: "agent-error",
+        stepCount: 10,
+        totalTokens: 1000,
+        loadedWithSkillIds: [],
+      },
+    ],
+  });
+
+  const runId = createId("run");
+  await updateSkillStatsFromRun(dir, {
+    run: { id: runId } as any,
+    events: [
+      { id: createId("event"), runId, ts: "2026-06-10T00:00:00.000Z", kind: "skill-load", payload: { skills: [skillId] } },
+    ],
+    classification: { kind: "partial-success", confidence: 0.55 },
+    stepCount: 12,
+    startedAt: "2026-06-10T00:00:00.000Z",
+  } as any);
+
+  const raw = await readFile(join(dir, "streaky_example_com-skill.md"), "utf-8");
+  assert.match(raw, /^status: rejected$/mu, "three recent non-complete runs retire generated guidance");
+});
+
 test("updateSkillStatsFromRun never retires authored skills", async () => {
   testRoot = makeRoot();
   const dir = join(testRoot, "skills");

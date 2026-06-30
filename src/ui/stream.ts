@@ -1,4 +1,5 @@
 import type { TraceEvent, TraceEventKind } from "../shared/types.js";
+import { createId, nowIsoUtc } from "../shared/ids.js";
 import { createPalette, isColorSupported, type Palette } from "./colors.js";
 
 export interface StreamRendererOptions { verbose?: boolean; color?: boolean; maxSteps?: number; out?: (line: string) => void; }
@@ -13,6 +14,39 @@ const VERBOSE_ONLY: ReadonlySet<TraceEventKind> = new Set<TraceEventKind>(["poli
 const REPEAT_SIGNATURE_LEN = 80;
 
 export interface ConsoleSink { onEvent(event: TraceEvent): void; }
+
+// Builds a `session` trace event announcing the live browser viewer. Emitted to
+// the stream the moment a session opens so consumers can embed it before step 1.
+export function buildSessionTraceEvent(session: {
+  id: string;
+  liveUrl?: string;
+  debugUrl?: string;
+}): TraceEvent {
+  return {
+    id: createId("event"),
+    runId: "" as TraceEvent["runId"],
+    ts: nowIsoUtc(),
+    kind: "session",
+    payload: {
+      sessionId: session.id,
+      liveUrl: session.liveUrl ?? null,
+      debugUrl: session.debugUrl ?? null,
+    },
+  };
+}
+
+// Machine-readable counterpart to the console renderer: emits each trace event
+// as a single line of JSON (NDJSON) so an external process can consume the live
+// stream over stdout without parsing the human-formatted output.
+export function createJsonlTraceSink(
+  out: (line: string) => void = (line: string) => process.stdout.write(`${line}\n`),
+): ConsoleSink {
+  return {
+    onEvent(event: TraceEvent): void {
+      out(JSON.stringify(event));
+    },
+  };
+}
 
 export function createConsoleTraceSink(options: StreamRendererOptions = {}): ConsoleSink {
   const verbose = options.verbose === true;

@@ -60,3 +60,39 @@ test("detectAuthWall still detects login pages", () => {
 
   assert.equal(result.detected, true);
 });
+
+test("detectAuthWall does not treat single-form content pages as auth walls", () => {
+  const result = detectAuthWall(observation({
+    url: "https://commit-history.com/hussufo",
+    title: "hussufo's commit history",
+    pageSummary: {
+      forms: 1,
+      buttons: 2,
+      links: 6,
+      inputs: 1,
+      tables: 0,
+      dialogs: 0,
+      headings: ["huss", "Embed in your GitHub profile"],
+    },
+  }));
+
+  assert.equal(result.detected, false);
+});
+
+test("detectAuthWall still detects auth-shaped one-form pages without auth URLs", () => {
+  const result = detectAuthWall(observation({
+    url: "https://example.com/account",
+    title: "Example",
+    pageSummary: {
+      forms: 1,
+      buttons: 1,
+      links: 2,
+      inputs: 2,
+      tables: 0,
+      dialogs: 0,
+      headings: ["Login"],
+    },
+  }));
+
+  assert.equal(result.detected, true);
+});

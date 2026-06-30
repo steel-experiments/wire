@@ -168,7 +168,8 @@ export class SteelProvider implements BrowserProvider {
       const targets = await listPageTargets(cdp);
       const target = pickTarget(targets, input.targetId);
       const sessionId = await attachToTarget(cdp, target.targetId);
-      const snapshot = await evaluateJson<Record<string, unknown>>(cdp, sessionId, OBSERVE_SCRIPT);
+      const script = input.includePageSketch === true ? OBSERVE_WITH_PAGE_SKETCH_SCRIPT : OBSERVE_SCRIPT;
+      const snapshot = await evaluateJson<Record<string, unknown>>(cdp, sessionId, script);
 
       // Capture screenshot via CDP for multimodal LLM context
       let screenshotBase64: string | undefined;
@@ -207,6 +208,10 @@ export class SteelProvider implements BrowserProvider {
       const pageSummary = asRecord(snapshot.pageSummary);
       if (pageSummary) {
         observation.pageSummary = pageSummary as NonNullable<BrowserObservation["pageSummary"]>;
+      }
+      const pageSketch = asRecord(snapshot.pageSketch);
+      if (pageSketch) {
+        observation.pageSketch = pageSketch as unknown as NonNullable<BrowserObservation["pageSketch"]>;
       }
 
       return observation;
@@ -357,6 +362,292 @@ const OBSERVE_SCRIPT = `(() => {
       tables: document.querySelectorAll("table").length,
       links: document.querySelectorAll("a[href]").length,
       inputs: document.querySelectorAll("input,textarea,select").length,
+    },
+  };
+})()`;
+
+const OBSERVE_WITH_PAGE_SKETCH_SCRIPT = `(() => {
+  const PAGE_SKETCH_LIMITS = {
+    maxSections: 12,
+    maxControlsPerSection: 12,
+    maxTextPreviewChars: 280,
+  };
+  const MAX_LABEL_CHARS = 120;
+  const MAX_SELECTOR_ALTERNATES = 3;
+
+  function normalizeText(value) {
+    return String(value || "").replace(/\\s+/g, " ").trim();
+  }
+
+  function cap(value, max) {
+    const text = normalizeText(value);
+    return text.length > max ? text.slice(0, max - 3).trimEnd() + "..." : text;
+  }
+
+  function cssEscape(value) {
+    if (window.CSS && typeof window.CSS.escape === "function") {
+      return window.CSS.escape(String(value));
+    }
+    return String(value).replace(/[^a-zA-Z0-9_-]/g, "\\\\$&");
+  }
+
+  function quoteAttr(value) {
+    return JSON.stringify(String(value)).slice(1, -1);
+  }
+
+  function isLikelyGeneratedId(id) {
+    if (!id || id.length > 48) return true;
+    if (/^[a-f0-9-]{16,}$/iu.test(id)) return true;
+    if ((id.match(/\\d/g) || []).length > Math.max(3, id.length / 2)) return true;
+    return false;
+  }
+
+  function isVisible(el) {
+    if (!(el instanceof Element)) return false;
+    if (el.getAttribute("aria-hidden") === "true") return false;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    const style = window.getComputedStyle(el);
+    return style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || 1) !== 0;
+  }
+
+  function stableAttrSelector(el, tag) {
+    const attrs = ["data-testid", "data-test", "data-qa", "data-cy"];
+    for (const attr of attrs) {
+      const value = el.getAttribute(attr);
+      if (value) return tag + "[" + attr + "=\\"" + quoteAttr(value) + "\\"]";
+    }
+    const aria = el.getAttribute("aria-label");
+    if (aria && aria.length <= 80) return tag + "[aria-label=\\"" + quoteAttr(aria) + "\\"]";
+    if (/^(input|textarea|select|button|form)$/u.test(tag)) {
+      const name = el.getAttribute("name");
+      if (name) return tag + "[name=\\"" + quoteAttr(name) + "\\"]";
+      const type = el.getAttribute("type");
+      if (type && tag !== "input") return tag + "[type=\\"" + quoteAttr(type) + "\\"]";
+    }
+    return "";
+  }
+
+  function firstStableClass(el) {
+    for (const cls of Array.from(el.classList || [])) {
+      if (cls.length > 0 && cls.length <= 40 && !/^[a-f0-9_-]{12,}$/iu.test(cls)) return cls;
+    }
+    return "";
+  }
+
+  function selectorFor(el, depth = 0) {
+    const tag = el.tagName.toLowerCase();
+    const id = el.getAttribute("id");
+    if (id && !isLikelyGeneratedId(id)) return "#" + cssEscape(id);
+    const attrSelector = stableAttrSelector(el, tag);
+    if (attrSelector) return attrSelector;
+    const cls = firstStableClass(el);
+    if (cls) return tag + "." + cssEscape(cls);
+    if (depth < 1 && el.parentElement && el.parentElement !== document.body) {
+      const siblings = Array.from(el.parentElement.children).filter((child) => child.tagName === el.tagName);
+      if (siblings.length > 1) {
+        return selectorFor(el.parentElement, depth + 1) + " > " + tag + ":nth-of-type(" + (siblings.indexOf(el) + 1) + ")";
+      }
+    }
+    return tag;
+  }
+
+  function elementText(el) {
+    return normalizeText(el.innerText || el.textContent || "");
+  }
+
+  function controlLabel(el) {
+    const aria = el.getAttribute("aria-label");
+    if (aria) return cap(aria, MAX_LABEL_CHARS);
+    const title = el.getAttribute("title");
+    if (title) return cap(title, MAX_LABEL_CHARS);
+    const placeholder = el.getAttribute("placeholder");
+    if (placeholder) return cap(placeholder, MAX_LABEL_CHARS);
+    if (el.labels && el.labels.length > 0) {
+      const label = Array.from(el.labels).map((labelEl) => elementText(labelEl)).filter(Boolean).join(" ");
+      if (label) return cap(label, MAX_LABEL_CHARS);
+    }
+    const alt = el.getAttribute("alt");
+    if (alt) return cap(alt, MAX_LABEL_CHARS);
+    const value = el.getAttribute("value");
+    if (value && /^(button|submit|reset)$/iu.test(el.getAttribute("type") || "")) return cap(value, MAX_LABEL_CHARS);
+    return cap(elementText(el), MAX_LABEL_CHARS);
+  }
+
+  function selectorAlternates(el, primary) {
+    const tag = el.tagName.toLowerCase();
+    const alternates = [];
+    const role = el.getAttribute("role");
+    if (role) alternates.push(tag + "[role=\\"" + quoteAttr(role) + "\\"]");
+    const href = el.getAttribute("href");
+    if (href && href.length <= 120) alternates.push("a[href=\\"" + quoteAttr(href) + "\\"]");
+    return alternates.filter((item, index, all) => item !== primary && all.indexOf(item) === index).slice(0, MAX_SELECTOR_ALTERNATES);
+  }
+
+  function controlFrom(el) {
+    if (!isVisible(el)) return null;
+    const tag = el.tagName.toLowerCase();
+    const selectorHint = selectorFor(el);
+    const label = controlLabel(el);
+    const control = { label, tag, selectorHint };
+    const role = el.getAttribute("role");
+    const type = el.getAttribute("type");
+    const href = el.getAttribute("href");
+    const alternates = selectorAlternates(el, selectorHint);
+    if (role) control.role = role;
+    if (type) control.type = type;
+    if (href) control.href = href;
+    if (alternates.length > 0) control.selectorAlternates = alternates;
+    if (el.disabled === true || el.getAttribute("aria-disabled") === "true") control.disabled = true;
+    if (el.required === true || el.getAttribute("aria-required") === "true") control.required = true;
+    return control;
+  }
+
+  function countsFor(el) {
+    return {
+      links: el.querySelectorAll("a[href]").length,
+      buttons: el.querySelectorAll("button,input[type=button],input[type=submit],[role=\\"button\\"]").length,
+      inputs: el.querySelectorAll("input,textarea,select,[contenteditable=\\"true\\"],[role=\\"combobox\\"]").length,
+      tables: el.querySelectorAll("table").length + (el.tagName.toLowerCase() === "table" ? 1 : 0),
+      lists: el.querySelectorAll("ul,ol,[role=\\"list\\"],[role=\\"grid\\"]").length,
+    };
+  }
+
+  function kindFor(el) {
+    const tag = el.tagName.toLowerCase();
+    const role = el.getAttribute("role") || "";
+    if (tag === "dialog" || role === "dialog") return "dialog";
+    if (tag === "nav" || role === "navigation") return "nav";
+    if (tag === "header") return "header";
+    if (tag === "main" || role === "main") return "main";
+    if (tag === "form") return "form";
+    if (tag === "table" || role === "table" || role === "grid") return "table";
+    if (tag === "ul" || tag === "ol" || role === "list") return "list";
+    if (tag === "footer") return "footer";
+    return "content";
+  }
+
+  function headingFor(el) {
+    if (/^h[1-6]$/iu.test(el.tagName)) return cap(elementText(el), 120);
+    const heading = el.querySelector("h1,h2,h3,[role=\\"heading\\"]");
+    return heading ? cap(elementText(heading), 120) : "";
+  }
+
+  function labelForSection(el, heading) {
+    const aria = el.getAttribute("aria-label");
+    if (aria) return cap(aria, 120);
+    const labelledBy = el.getAttribute("aria-labelledby");
+    if (labelledBy) {
+      const labelEl = document.getElementById(labelledBy);
+      if (labelEl) return cap(elementText(labelEl), 120);
+    }
+    return heading || "";
+  }
+
+  function makeSection(el, index) {
+    const kind = kindFor(el);
+    const heading = headingFor(el);
+    const label = labelForSection(el, heading);
+    const rect = el.getBoundingClientRect();
+    const controls = [];
+    const seenControls = new Set();
+    const controlEls = Array.from(el.querySelectorAll("a[href],button,input,textarea,select,[role=\\"button\\"],[role=\\"link\\"],[role=\\"combobox\\"],[role=\\"tab\\"],[contenteditable=\\"true\\"]"));
+    for (const controlEl of controlEls) {
+      if (controls.length >= PAGE_SKETCH_LIMITS.maxControlsPerSection) break;
+      const control = controlFrom(controlEl);
+      if (!control) continue;
+      const key = control.selectorHint + "|" + control.label;
+      if (seenControls.has(key)) continue;
+      seenControls.add(key);
+      controls.push(control);
+    }
+    const section = {
+      id: "section-" + (index + 1),
+      kind,
+      selectorHint: selectorFor(el),
+      bbox: {
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      },
+      counts: countsFor(el),
+      controls,
+    };
+    if (label) section.label = label;
+    if (heading) section.heading = heading;
+    const preview = cap(elementText(el), PAGE_SKETCH_LIMITS.maxTextPreviewChars);
+    if (preview) section.textPreview = preview;
+    return section;
+  }
+
+  const headings = [];
+  for (const h of document.querySelectorAll("h1,h2,h3")) {
+    const t = normalizeText(h.textContent);
+    if (t && headings.length < 5) headings.push(t.slice(0, 120));
+  }
+  const active = document.activeElement;
+  const pageSummary = {
+    headings,
+    forms: document.forms.length,
+    buttons: document.querySelectorAll("button, input[type=button], input[type=submit]").length,
+    dialogs: document.querySelectorAll("dialog, [role=\\"dialog\\"]").length,
+    tables: document.querySelectorAll("table").length,
+    links: document.querySelectorAll("a[href]").length,
+    inputs: document.querySelectorAll("input,textarea,select").length,
+  };
+
+  const priority = {
+    dialog: 0,
+    header: 1,
+    nav: 1,
+    form: 2,
+    table: 2,
+    main: 3,
+    list: 4,
+    content: 6,
+    footer: 9,
+  };
+  const sectionSelector = "dialog,[role=\\"dialog\\"],header,nav,main,[role=\\"main\\"],form,table,[role=\\"table\\"],[role=\\"grid\\"],ul,ol,[role=\\"list\\"],section,article,footer";
+  const candidates = Array.from(document.querySelectorAll(sectionSelector))
+    .filter(isVisible)
+    .map((el) => {
+      const rect = el.getBoundingClientRect();
+      const kind = kindFor(el);
+      const inViewport = rect.bottom >= 0 && rect.top <= window.innerHeight;
+      return { el, kind, rect, inViewport };
+    })
+    .sort((a, b) => {
+      const pa = priority[a.kind] ?? 6;
+      const pb = priority[b.kind] ?? 6;
+      if (pa !== pb) return pa - pb;
+      if (a.inViewport !== b.inViewport) return a.inViewport ? -1 : 1;
+      return a.rect.top - b.rect.top;
+    });
+
+  const chosen = [];
+  for (const candidate of candidates) {
+    if (chosen.length >= PAGE_SKETCH_LIMITS.maxSections) break;
+    if (chosen.some((existing) => existing.el.contains(candidate.el) && existing.kind === candidate.kind)) continue;
+    chosen.push(candidate);
+  }
+
+  return {
+    url: window.location.href,
+    title: document.title,
+    focusedElement: active ? {
+      tag: active.tagName?.toLowerCase?.(),
+      role: active.getAttribute?.("role") ?? undefined,
+      label: active.getAttribute?.("aria-label") ?? undefined,
+      selectorHint: active.id ? "#" + active.id : undefined,
+    } : undefined,
+    pageSummary,
+    pageSketch: {
+      version: 1,
+      generatedAt: new Date().toISOString(),
+      sections: chosen.map((item, index) => makeSection(item.el, index)),
+      truncated: candidates.length > chosen.length,
+      limits: PAGE_SKETCH_LIMITS,
     },
   };
 })()`;

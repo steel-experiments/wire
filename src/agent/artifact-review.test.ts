@@ -8,7 +8,7 @@ import type { SessionId, Task, TraceEvent } from "../shared/types.js";
 import type { LLMProvider } from "../providers/llm/openai.js";
 
 import { createLoopState, type LoopState } from "./loop.js";
-import { shouldReviewArtifacts } from "./artifact-review.js";
+import { artifactReviewPayload, reviewArtifacts, shouldReviewArtifacts } from "./artifact-review.js";
 
 function makeSessionId(): SessionId {
   return createId("session");
@@ -83,4 +83,39 @@ test("shouldReviewArtifacts skips outside task mode", () => {
   const state = createLoopState(makeTask({ mode: "investigate" }), makeSessionId());
   pushArtifact(state, "some content");
   assert.equal(shouldReviewArtifacts(state, { llmProvider: stubLlm }), false);
+});
+
+test("artifactReviewPayload fails closed when review output cannot be parsed", () => {
+  const payload = artifactReviewPayload(undefined, 2);
+
+  assert.equal(payload.passed, false);
+  assert.equal(payload.artifactCount, 2);
+  assert.equal(payload.skipped, undefined);
+  assert.match(String(payload.reason), /could not be parsed/u);
+  assert.ok(
+    Array.isArray(payload.problems) &&
+    payload.problems.some((problem) => String(problem).includes("not validated")),
+  );
+});
+
+test("reviewArtifacts retries once when reviewer output is not parseable JSON", async () => {
+  const state = createLoopState(makeTask(), makeSessionId());
+  pushArtifact(state, "final answer");
+  const calls: string[] = [];
+  const llm: LLMProvider = {
+    model: "test-model",
+    async chat(messages) {
+      calls.push(String(messages.at(-1)?.content ?? ""));
+      if (calls.length === 1) {
+        return { content: "The artifact looks fine, so passed true.", model: "test-model" };
+      }
+      return { content: "{\"passed\":true,\"problems\":[]}", model: "test-model" };
+    },
+  };
+
+  const review = await reviewArtifacts(state, { llmProvider: llm });
+
+  assert.deepEqual(review, { passed: true, problems: [] });
+  assert.equal(calls.length, 2);
+  assert.match(calls[1]!, /previous artifact review was not parseable/u);
 });

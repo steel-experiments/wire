@@ -342,6 +342,7 @@ export async function executeStep(
     actionRegistry?: import("./actions.js").ActionRegistry;
     actionContext?: ActionExecutionContext;
     screenshotCapture?: ScreenshotCapturePolicy;
+    pageSketch?: boolean;
   } = {},
 ): Promise<{
   state: LoopState;
@@ -480,6 +481,7 @@ export async function executeStep(
       const tid = action.payload?.targetId as string | undefined;
       const obs = await observeAndRecord(state, provider, {
         includeScreenshotArtifactId: true,
+        ...(options.pageSketch === true ? { includePageSketch: true } : {}),
         ...(tid ? { targetId: tid } : {}),
       });
       authWallHit = obs.authWallHit;
@@ -550,7 +552,9 @@ export async function executeStep(
         const hasWireActionsSignal = result.ok && wireActionsSignal(result.returnValue);
         const wireBindingSignal = result.ok && result.wireEvents?.some((event) => event.action === "click");
         if (isLikelyNavigationCode(code) || hasWireActionsSignal || wireBindingSignal || (result.ok && isLikelyInteractionCode(code))) {
-          const obs = await observeAndRecord(state, provider);
+          const obs = await observeAndRecord(state, provider, {
+            ...(options.pageSketch === true ? { includePageSketch: true } : {}),
+          });
           if (obs.authWallHit) authWallHit = true;
         }
       }
@@ -622,7 +626,9 @@ export async function executeStep(
       if (commands.length > 0) {
         const { ok, commandsToRun } = await executeRawActionCommands(state, provider, commands);
         if (ok && (commandsIncludeNavigation(commandsToRun) || commandsIncludeInput(commandsToRun))) {
-          const obs = await observeAndRecord(state, provider);
+          const obs = await observeAndRecord(state, provider, {
+            ...(options.pageSketch === true ? { includePageSketch: true } : {}),
+          });
           if (obs.authWallHit) authWallHit = true;
         }
       }

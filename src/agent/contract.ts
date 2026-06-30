@@ -7,6 +7,8 @@ export type ContractArtifactFormat = "markdown" | "json" | "csv" | "text" | "fil
 export interface TaskContract {
   mustVisit: string[];
   mustMention: string[];
+  /** Explicit entities named by the user that must appear in the final evidence. */
+  mustCoverEntities?: string[];
   /** Question-shaped objectives must end with a stated answer, not page material. */
   mustAnswer?: boolean;
   mustProduce?: {
@@ -34,9 +36,87 @@ const PLACEHOLDER_PHRASES = [
   "not preserved",
   "extracted below",
   "content was included",
+  "stats not found",
+  "not found in body text",
+  "auth wall or stats not found",
+  "auth wall",
+  "not accessible",
+  "not available",
+  "unavailable",
+  "could not extract",
+  "could not find",
+  "unable to extract",
+  "unable to find",
 ];
 
+const ENTITY_ID_FIELDS = new Set([
+  "account",
+  "handle",
+  "id",
+  "key",
+  "name",
+  "profile",
+  "user",
+  "username",
+]);
+const ENTITY_VALUE_METADATA_FIELDS = new Set([
+  "artifact",
+  "currentuser",
+  "error",
+  "errors",
+  "evidence",
+  "href",
+  "nextpage",
+  "nextuser",
+  "ok",
+  "page",
+  "raw",
+  "rawhtml",
+  "rawtext",
+  "reason",
+  "source",
+  "target",
+  "url",
+]);
+const STRUCTURED_PLACEHOLDER_VALUE_PATTERN =
+  /^(?:n\/?a|na|none|null|unknown|unavailable|not\s+(?:available|found|accessible)|auth\s+wall|blocked|error|failed)$/iu;
+const STRUCTURED_FAILURE_TEXT_PATTERN =
+  /\b(?:auth\s+wall|sign[-\s]?in\s+required|login\s+required|not\s+(?:available|found|accessible)|could\s+not|unable\s+to|cannot\s+(?:extract|find|access)|blocked|forbidden|failed|error)\b/iu;
+const FIELD_LEVEL_PLACEHOLDER_PHRASES = new Set([
+  "not accessible",
+  "not available",
+  "unavailable",
+]);
+
 const DOMAIN_PATTERN = /\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b/giu;
+const ENTITY_LIST_PATTERNS = [
+  /\b(?:users?|accounts?|profiles?|usernames?)\s*[:,]?\s*([^.;\n]+)/iu,
+  /\bfor\s+(?:users?|accounts?|profiles?|usernames?)\s*[:,]?\s*([^.;\n]+)/iu,
+];
+const ENTITY_STOP_WORDS = new Set([
+  "and",
+  "or",
+  "with",
+  "from",
+  "stats",
+  "statistics",
+  "data",
+  "the",
+  "these",
+  "those",
+  "find",
+  "return",
+  "extract",
+  "collect",
+  "go",
+  "to",
+  "for",
+  "users",
+  "user",
+  "accounts",
+  "profiles",
+  "usernames",
+]);
 const FILE_EXTENSION_DOMAIN_SUFFIXES = new Set([
   "csv",
   "css",
@@ -108,14 +188,42 @@ function inferMinItems(text: string): number | undefined {
   return Number.isFinite(count) && count > 0 ? count : undefined;
 }
 
+function normalizeEntity(value: string): string {
+  return value.trim().replace(/^@/u, "").toLowerCase();
+}
+
+function inferRequiredEntities(text: string): string[] {
+  for (const pattern of ENTITY_LIST_PATTERNS) {
+    const match = text.match(pattern);
+    if (!match?.[1]) continue;
+    const listText = match[1]
+      .replace(/\band\b/giu, ",")
+      .replace(/\s+/gu, " ");
+    const entities = unique(
+      listText
+        .split(/[,，]/u)
+        .map((part) => part.trim().replace(/^["'`@]+|["'`.]+$/gu, ""))
+        .map(normalizeEntity)
+        .filter((part) =>
+          /^[a-z0-9][a-z0-9_-]{1,38}$/u.test(part) &&
+          !ENTITY_STOP_WORDS.has(part) &&
+          !part.includes(".")
+        ),
+    );
+    if (entities.length >= 2) return entities;
+  }
+  return [];
+}
+
 export function createTaskContract(task: Task): TaskContract {
   const text = objectiveText(task);
-  const lower = text.toLowerCase();
   const mustVisit = unique((text.match(DOMAIN_PATTERN) ?? []).filter(isLikelyVisitDomain).map(normalizeDomain));
   const format = inferFormat(text);
+  const requiredEntities = inferRequiredEntities(text);
   const wantsArtifact = /\b(?:save|write|export|download|artifact|file|md|markdown|json|csv|txt|text)\b/iu.test(text);
   const wantsTable = /\btable\b|comparison table/iu.test(text);
-  const minItems = inferMinItems(text);
+  const wantsExtraction = /\b(?:extract|find|return|collect|list|save|compare)\b/iu.test(text);
+  const minItems = Math.max(inferMinItems(text) ?? 0, requiredEntities.length || 0) || undefined;
 
   const mustProduce = wantsArtifact || wantsTable || format || minItems !== undefined
     ? {
@@ -138,9 +246,10 @@ export function createTaskContract(task: Task): TaskContract {
     // final result falsely fails extraction tasks whose output is data from
     // the site rather than its name. mustMention stays settable via task-file.
     mustMention: [],
+    ...(requiredEntities.length > 0 ? { mustCoverEntities: requiredEntities } : {}),
     ...(mustAnswer ? { mustAnswer: true } : {}),
     ...(mustProduce ? { mustProduce } : {}),
-    mustNotContain: lower.includes("extract") || lower.includes("save") || lower.includes("compare")
+    mustNotContain: wantsExtraction
       ? PLACEHOLDER_PHRASES
       : [],
   };
@@ -150,6 +259,9 @@ export function contractToPrompt(contract: TaskContract): string {
   const lines: string[] = [];
   if (contract.mustVisit.length > 0) lines.push(`- Must visit: ${contract.mustVisit.join(", ")}`);
   if (contract.mustMention.length > 0) lines.push(`- Final result must mention: ${contract.mustMention.join(", ")}`);
+  if (contract.mustCoverEntities && contract.mustCoverEntities.length > 0) {
+    lines.push(`- Final result must include every requested entity: ${contract.mustCoverEntities.join(", ")}`);
+  }
   if (contract.mustAnswer) {
     lines.push("- Final result must state a direct answer to the question, extracted from a source — not raw page text or search-results text.");
   }
@@ -180,6 +292,7 @@ export function contractSummary(contract: TaskContract): string {
     if (produce.length > 0) parts.push(produce.join(" "));
   }
   if (contract.mustMention.length > 0) parts.push(`mention: ${contract.mustMention.join(", ")}`);
+  if (contract.mustCoverEntities && contract.mustCoverEntities.length > 0) parts.push(`entities: ${contract.mustCoverEntities.join(", ")}`);
   if (contract.mustNotContain.length > 0) parts.push("no placeholders");
   return parts.length > 0 ? parts.join(" · ") : "no extra completion contract";
 }
@@ -190,6 +303,9 @@ function contractToJson(contract: TaskContract): JsonObject {
     mustMention: contract.mustMention,
     mustNotContain: contract.mustNotContain,
   };
+  if (contract.mustCoverEntities) {
+    value.mustCoverEntities = contract.mustCoverEntities;
+  }
   if (contract.mustAnswer) {
     value.mustAnswer = true;
   }
@@ -325,6 +441,14 @@ function jsonItemCount(parsed: unknown): number {
 // part is enough to satisfy a "produce at least N items" requirement.
 function countJsonItems(text: string): number {
   let max = 0;
+  for (const parsed of parseJsonSpans(text)) {
+    max = Math.max(max, jsonItemCount(parsed));
+  }
+  return max;
+}
+
+function parseJsonSpans(text: string): unknown[] {
+  const parsed: unknown[] = [];
   let rest = text;
   while (rest.length > 0) {
     const objStart = rest.indexOf("{");
@@ -338,13 +462,178 @@ function countJsonItems(text: string): number {
       continue;
     }
     try {
-      max = Math.max(max, jsonItemCount(JSON.parse(span) as unknown));
+      parsed.push(JSON.parse(span) as unknown);
     } catch {
       // Not valid JSON despite balanced brackets; skip this span.
     }
     rest = rest.slice(start + span.length);
   }
-  return max;
+  return parsed;
+}
+
+function normalizeRecordFieldName(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/gu, "");
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function primitiveText(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return undefined;
+}
+
+function normalizedEntityValue(value: unknown): string | undefined {
+  const text = primitiveText(value);
+  if (!text) return undefined;
+  const normalized = normalizeEntity(text);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function recordEntityValues(record: Record<string, unknown>): string[] {
+  const values: string[] = [];
+  const collectFrom = (source: Record<string, unknown>): void => {
+    for (const [key, value] of Object.entries(source)) {
+      if (!ENTITY_ID_FIELDS.has(normalizeRecordFieldName(key))) continue;
+      const normalized = normalizedEntityValue(value);
+      if (normalized) values.push(normalized);
+    }
+  };
+  collectFrom(record);
+  if (isPlainObject(record.fields)) collectFrom(record.fields);
+  if (isPlainObject(record.data)) collectFrom(record.data);
+  return unique(values);
+}
+
+function looksLikeEntityRecord(record: Record<string, unknown>): boolean {
+  return recordEntityValues(record).length > 0;
+}
+
+function collectEntityRecords(value: unknown, out: Record<string, unknown>[]): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectEntityRecords(item, out);
+    return;
+  }
+  if (!isPlainObject(value)) return;
+
+  if (looksLikeEntityRecord(value)) out.push(value);
+
+  for (const key of ["entries", "progress", "ledger", "records", "results", "items", "rows", "users", "profiles", "data"]) {
+    if (key in value) collectEntityRecords(value[key], out);
+  }
+}
+
+function markdownTableRecords(text: string): Record<string, unknown>[] {
+  const lines = text.split(/\r?\n/u);
+  const records: Record<string, unknown>[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    if (!/^\s*\|.+\|\s*$/u.test(lines[index]!)) {
+      index++;
+      continue;
+    }
+    const block: string[] = [];
+    while (index < lines.length && /^\s*\|.+\|\s*$/u.test(lines[index]!)) {
+      block.push(lines[index]!);
+      index++;
+    }
+    if (block.length < 3 || !/^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/u.test(block[1]!)) {
+      continue;
+    }
+    const headers = splitMarkdownRow(block[0]!).map(normalizeRecordFieldName);
+    for (const row of block.slice(2)) {
+      const cells = splitMarkdownRow(row);
+      const record: Record<string, unknown> = {};
+      headers.forEach((header, cellIndex) => {
+        if (header.length > 0) record[header] = cells[cellIndex] ?? "";
+      });
+      if (looksLikeEntityRecord(record)) records.push(record);
+    }
+  }
+  return records;
+}
+
+function splitMarkdownRow(row: string): string[] {
+  return row
+    .trim()
+    .replace(/^\|/u, "")
+    .replace(/\|$/u, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function recordsByEntityFromText(text: string): Map<string, Record<string, unknown>[]> {
+  const records: Record<string, unknown>[] = [];
+  for (const parsed of parseJsonSpans(text)) collectEntityRecords(parsed, records);
+  records.push(...markdownTableRecords(text));
+
+  const byEntity = new Map<string, Record<string, unknown>[]>();
+  for (const record of records) {
+    for (const entity of recordEntityValues(record)) {
+      const bucket = byEntity.get(entity) ?? [];
+      bucket.push(record);
+      byEntity.set(entity, bucket);
+    }
+  }
+  return byEntity;
+}
+
+function isStructuredPlaceholderValue(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return true;
+  return STRUCTURED_PLACEHOLDER_VALUE_PATTERN.test(trimmed) ||
+    STRUCTURED_FAILURE_TEXT_PATTERN.test(trimmed);
+}
+
+function countSubstantiveRecordValues(value: unknown, entity: string, keyPath: string[] = []): number {
+  if (Array.isArray(value)) {
+    return value.reduce((total, item) => total + countSubstantiveRecordValues(item, entity, keyPath), 0);
+  }
+  if (isPlainObject(value)) {
+    let total = 0;
+    for (const [key, child] of Object.entries(value)) {
+      const normalizedKey = normalizeRecordFieldName(key);
+      if (ENTITY_ID_FIELDS.has(normalizedKey) || ENTITY_VALUE_METADATA_FIELDS.has(normalizedKey)) continue;
+      total += countSubstantiveRecordValues(child, entity, [...keyPath, normalizedKey]);
+    }
+    return total;
+  }
+
+  const text = primitiveText(value);
+  if (text === undefined) return 0;
+  const key = keyPath.at(-1) ?? "";
+  if (ENTITY_ID_FIELDS.has(key) || ENTITY_VALUE_METADATA_FIELDS.has(key)) return 0;
+  if (isStructuredPlaceholderValue(text)) return 0;
+  if (normalizeEntity(text) === normalizeEntity(entity)) return 0;
+  return 1;
+}
+
+function hasSubstantiveRecordValue(record: Record<string, unknown>, entity: string): boolean {
+  return countSubstantiveRecordValues(record, entity) > 0;
+}
+
+function entityHasSubstantiveRecord(recordsByEntity: Map<string, Record<string, unknown>[]>, entity: string): boolean {
+  const records = recordsByEntity.get(normalizeEntity(entity)) ?? [];
+  return records.some((record) => hasSubstantiveRecordValue(record, entity));
+}
+
+function allRequiredEntitiesHaveSubstantiveRecords(
+  recordsByEntity: Map<string, Record<string, unknown>[]>,
+  entities: string[] | undefined,
+): boolean {
+  return (entities ?? []).length > 0 &&
+    (entities ?? []).every((entity) => entityHasSubstantiveRecord(recordsByEntity, entity));
+}
+
+function shouldIgnoreFieldLevelPlaceholder(
+  phrase: string,
+  contract: TaskContract,
+  recordsByEntity: Map<string, Record<string, unknown>[]>,
+): boolean {
+  return FIELD_LEVEL_PLACEHOLDER_PHRASES.has(phrase) &&
+    allRequiredEntitiesHaveSubstantiveRecords(recordsByEntity, contract.mustCoverEntities);
 }
 
 export function validateTaskContract(
@@ -372,6 +661,29 @@ export function validateTaskContract(
       missing.push(`Final result does not mention ${label}`);
     } else {
       satisfied.push(`Final result mentions ${label}`);
+    }
+  }
+
+  const structuredRecordsByEntity = recordsByEntityFromText(answerText);
+  const hasStructuredEntityRecords = structuredRecordsByEntity.size > 0;
+  for (const entity of contract.mustCoverEntities ?? []) {
+    const escaped = entity.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    const pattern = new RegExp(`(?:^|[^a-z0-9_-])@?${escaped}(?:$|[^a-z0-9_-])`, "iu");
+    if (!pattern.test(answerText)) {
+      missing.push(`Final result is missing requested entity ${entity}`);
+    } else {
+      satisfied.push(`Final result includes requested entity ${entity}`);
+    }
+
+    if (hasStructuredEntityRecords) {
+      const records = structuredRecordsByEntity.get(normalizeEntity(entity)) ?? [];
+      if (records.length === 0) {
+        missing.push(`Final result has no structured record for requested entity ${entity}`);
+      } else if (!entityHasSubstantiveRecord(structuredRecordsByEntity, entity)) {
+        missing.push(`Final result has only placeholder or failure values for requested entity ${entity}`);
+      } else {
+        satisfied.push(`Final result has substantive values for requested entity ${entity}`);
+      }
     }
   }
 
@@ -415,7 +727,7 @@ export function validateTaskContract(
   }
 
   for (const phrase of contract.mustNotContain) {
-    if (answerLower.includes(phrase)) {
+    if (answerLower.includes(phrase) && !shouldIgnoreFieldLevelPlaceholder(phrase, contract, structuredRecordsByEntity)) {
       missing.push(`Final result contains placeholder text: ${phrase}`);
     } else {
       satisfied.push(`Final result avoids placeholder text: ${phrase}`);

@@ -74,13 +74,16 @@ export function withTabDrift(state: LoopState, payload: JsonObject): JsonObject 
 export async function observeAndRecord(
   state: LoopState,
   provider: BrowserProvider,
-  options: { targetId?: string; includeScreenshotArtifactId?: boolean } = {},
+  options: { targetId?: string; includeScreenshotArtifactId?: boolean; includePageSketch?: boolean } = {},
 ): Promise<{ authWallHit: boolean }> {
-  const observeOptions: { provider: BrowserProvider; sessionId: SessionId; targetId?: string } = {
+  const observeOptions: { provider: BrowserProvider; sessionId: SessionId; targetId?: string; includePageSketch?: boolean } = {
     provider,
     sessionId: state.sessionId,
   };
   if (options.targetId) observeOptions.targetId = options.targetId;
+  if (options.includePageSketch !== undefined) {
+    observeOptions.includePageSketch = options.includePageSketch;
+  }
   const observation = await observeBrowser(observeOptions);
   const payloadOptions: { includeScreenshotArtifactId?: boolean } = {};
   if (options.includeScreenshotArtifactId !== undefined) {

@@ -153,10 +153,23 @@ export async function updateSkillStatsFromRun(skillDir: string, result: SkillRun
 // it ride along forever at a score penalty.
 const RETIRE_MIN_LOADS = 5;
 const RETIRE_MAX_SUCCESS_RATE = 0.25;
+const RETIRE_RECENT_FAILURE_STREAK = 3;
+
+function hasRecentFailureStreak(stats: SkillStats): boolean {
+  if (stats.recentRuns.length < RETIRE_RECENT_FAILURE_STREAK) return false;
+  return stats.recentRuns
+    .slice(-RETIRE_RECENT_FAILURE_STREAK)
+    .every((sample) => sample.outcome !== "task-complete");
+}
+
+function shouldRetireIneffectiveSkill(stats: SkillStats): boolean {
+  const poorLifetimeRate = stats.loadedCount >= RETIRE_MIN_LOADS &&
+    skillSuccessRate(stats) <= RETIRE_MAX_SUCCESS_RATE;
+  return poorLifetimeRate || hasRecentFailureStreak(stats);
+}
 
 async function retireIfIneffective(skillDir: string, skillId: SkillId, stats: SkillStats): Promise<void> {
-  if (stats.loadedCount < RETIRE_MIN_LOADS) return;
-  if (skillSuccessRate(stats) > RETIRE_MAX_SUCCESS_RATE) return;
+  if (!shouldRetireIneffectiveSkill(stats)) return;
   try {
     for (const name of await readdir(skillDir)) {
       if (!name.endsWith(".md")) continue;

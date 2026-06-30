@@ -54,6 +54,35 @@ export interface UrlEvidence {
   content: string;
 }
 
+export interface PageSketchControlSummary {
+  label: string;
+  tag: string;
+  role?: string;
+  type?: string;
+  selectorHint: string;
+}
+
+export interface PageSketchSectionSummary {
+  id: string;
+  kind: string;
+  label?: string;
+  heading?: string;
+  textPreview?: string;
+  selectorHint: string;
+  controls: PageSketchControlSummary[];
+}
+
+export interface PageSketchSummary {
+  sections: PageSketchSectionSummary[];
+  truncated?: boolean;
+}
+
+export interface PageSketchReuseSummary {
+  host: string;
+  routeShape: string;
+  similarPages: number;
+}
+
 export interface ContextBundle {
   task: TaskObjective;
   skills: SkillSummary[];
@@ -71,6 +100,10 @@ export interface ContextBundle {
   userMessages?: string[];
   /** When set, the user has redirected the task to a new objective. */
   objectiveOverride?: ObjectiveOverride;
+  /** Optional opt-in structured visible page regions and controls. */
+  pageSketch?: PageSketchSummary;
+  /** Repeated PageSketch template observed across similar entity/detail pages. */
+  pageSketchReuse?: PageSketchReuseSummary;
   /** Latest substantive extraction per URL visited this run. Lets the agent
    *  reuse what it has already pulled instead of re-navigating to re-extract. */
   evidence?: UrlEvidence[];
@@ -99,6 +132,51 @@ import {
 // without importing agent code; re-exported here for agent-side importers.
 export { sanitizeSkillContent, stripInjectionPatterns } from "../shared/sanitize.js";
 import { stripInjectionPatterns } from "../shared/sanitize.js";
+
+const PAGE_SKETCH_PROMPT_CAP = 3000;
+
+function cleanPromptText(value: string): string {
+  return stripInjectionPatterns(redactSecrets(value));
+}
+
+function renderPageSketch(sketch: PageSketchSummary): string {
+  const lines = ["Page sketch:"];
+  for (const section of sketch.sections) {
+    const label = section.heading || section.label || section.textPreview || "";
+    const title = label ? `: ${cleanPromptText(label)}` : "";
+    lines.push(`- ${section.kind} ${cleanPromptText(section.selectorHint)}${title}`);
+    if (section.controls.length > 0) {
+      const controls = section.controls
+        .map((control) => {
+          const bits = [
+            control.label ? `"${cleanPromptText(control.label)}"` : control.tag,
+            control.role ? `role=${cleanPromptText(control.role)}` : "",
+            control.type ? `type=${cleanPromptText(control.type)}` : "",
+            cleanPromptText(control.selectorHint),
+          ].filter(Boolean);
+          return bits.join(" ");
+        })
+        .join(", ");
+      lines.push(`  Controls: ${controls}`);
+    }
+  }
+  if (sketch.truncated) {
+    lines.push("(Page sketch truncated.)");
+  }
+  const rendered = lines.join("\n");
+  if (rendered.length <= PAGE_SKETCH_PROMPT_CAP) return rendered;
+  return `${rendered.slice(0, PAGE_SKETCH_PROMPT_CAP - 40).trimEnd()}\n...(Page sketch truncated.)`;
+}
+
+function renderPageSketchReuse(reuse: PageSketchReuseSummary): string {
+  const template = `${reuse.host}${reuse.routeShape}`;
+  const pageCount = reuse.similarPages === 1 ? "1 page" : `${reuse.similarPages} pages`;
+  return [
+    "Page sketch reuse:",
+    `- Similar page template: ${cleanPromptText(template)} seen on ${pageCount} in this run.`,
+    "- Reuse the same selectors and value/label interpretation from prior pages with this layout; for repeated-entity tasks, preserve one keyed progress entry per entity before navigating away.",
+  ].join("\n");
+}
 
 /**
  * Build a compact system prompt from the context bundle.
@@ -234,6 +312,14 @@ export function assembleUserPrompt(context: ContextBundle): string {
       "Evidence already extracted this run (do not re-navigate to re-fetch):\n\n" +
         blocks.join("\n\n"),
     );
+  }
+
+  if (context.pageSketch && context.pageSketch.sections.length > 0) {
+    sections.push(renderPageSketch(context.pageSketch));
+  }
+
+  if (context.pageSketchReuse) {
+    sections.push(renderPageSketchReuse(context.pageSketchReuse));
   }
 
   if (context.progressLedger && context.progressLedger.length > 0) {

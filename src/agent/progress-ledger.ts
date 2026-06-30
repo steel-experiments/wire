@@ -21,6 +21,22 @@ function entriesFromCandidate(value: unknown): ProgressLedgerEntry[] {
   return entry ? [entry] : [];
 }
 
+function keyedDataEntries(value: unknown): ProgressLedgerEntry[] {
+  if (!isJsonObject(value)) return [];
+
+  const directKey = value["key"] ?? value["id"] ?? value["username"] ?? value["user"] ?? value["name"];
+  if (typeof directKey === "string" && directKey.trim().length > 0) {
+    return [{ key: directKey.trim(), fields: { ...value } }];
+  }
+
+  const entries: ProgressLedgerEntry[] = [];
+  for (const [key, item] of Object.entries(value)) {
+    if (!isJsonObject(item)) continue;
+    entries.push({ key, fields: { ...item } });
+  }
+  return entries;
+}
+
 // Return-value properties that carry actions or browser state rather than
 // task progress; the generic fallback must never ingest them.
 const NON_PROGRESS_ENVELOPE_KEYS = new Set(["wireActions", "tabs", "links"]);
@@ -37,6 +53,10 @@ export function progressEntriesFromValue(value: unknown): ProgressLedgerEntry[] 
     const entries = entriesFromCandidate(candidate);
     if (entries.length > 0) return entries;
   }
+
+  const dataEntries = keyedDataEntries(value["data"]);
+  if (dataEntries.length > 0) return dataEntries;
+
   // Generic fallback: find first array-of-objects property in the return
   // value. Captures LLM natural output like {units:[{...},{...}]} without
   // requiring specific envelope names. Excludes artifact-shaped arrays,

@@ -1,0 +1,34 @@
+{
+  "name": "wire-console",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Observable web console for Wire: launch and watch real-browser agents in parallel.",
+  "scripts": {
+    "dev": "bun run server/dev.ts",
+    "dev:web": "vite",
+    "dev:server": "bun run --watch server/index.ts",
+    "build": "vite build",
+    "start": "bun run server/index.ts",
+    "test": "bun test server/",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.9.0",
+    "lucide-react": "^0.460.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.5.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/bun": "^1.1.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  }
+}

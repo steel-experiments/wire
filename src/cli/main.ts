@@ -247,12 +247,14 @@ async function handleRun(
     if (args.region) opts.sessionConfig = { ...(opts.sessionConfig ?? {}), region: args.region };
     if (args.userAgent) opts.sessionConfig = { ...(opts.sessionConfig ?? {}), userAgent: args.userAgent };
     if (args.json) opts.json = args.json;
+    if (args.streamJson) opts.streamJson = args.streamJson;
     if (args.yes) opts.yes = args.yes;
     if (args.verbose) opts.verbose = args.verbose;
     if (args.quiet) opts.quiet = args.quiet;
     if (args.noColor) opts.color = false;
     if (args.traceLlm) opts.traceLlmMessages = true;
     if (args.criticalPoints !== undefined) opts.criticalPointReview = args.criticalPoints;
+    if (args.pageSketch) opts.pageSketch = true;
 
     const result = await runTask(opts);
 
@@ -480,7 +482,7 @@ async function handleApprove(
   }
 
   try {
-    const result = await approveRun(args.runId as `run_${string}`, args.json);
+    const result = await approveRun(args.runId as `run_${string}`, args.json, args.streamJson);
     if (args.json) {
       console.log(JSON.stringify(success("approve", result, args.runId)));
     }
@@ -589,6 +591,7 @@ async function handleBench(
       provider: args.provider,
       model: args.model,
       json: args.json,
+      pageSketch: args.pageSketch,
     });
 
     if (args.json) {

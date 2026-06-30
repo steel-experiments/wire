@@ -71,8 +71,13 @@ export function skillGuidance(skill: LoadedSkill): string {
 }
 
 function provisionalPrefix(skill: LoadedSkill, guidance: string): string {
-  if (skill.status !== "proposed") return guidance;
-  return `PROVISIONAL learned proposal from prior run. Verify before relying on it; use durable facts, selectors, waits, and traps, not unproven end-to-end workflow. ${guidance}`;
+  if (skill.status === "proposed") {
+    return `PROVISIONAL learned proposal from prior run. Verify before relying on it; use durable facts, selectors, waits, and traps, not unproven end-to-end workflow. ${guidance}`;
+  }
+  if (skill.source === "generated") {
+    return `GENERATED learned guidance from prior runs. Prefer current page evidence over this skill; verify blockers, missing data, selectors, and waits before relying on them. ${guidance}`;
+  }
+  return guidance;
 }
 
 export async function syncMatchedSkills(state: LoopState, skillDir?: string): Promise<void> {

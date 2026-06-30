@@ -4,7 +4,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import type { TraceEvent } from "../shared/types.js";
-import { createConsoleTraceSink } from "./stream.js";
+import { buildSessionTraceEvent, createConsoleTraceSink, createJsonlTraceSink } from "./stream.js";
 import { createPalette, isColorSupported } from "./colors.js";
 
 function ev(kind: TraceEvent["kind"], payload: Record<string, unknown>): TraceEvent {
@@ -28,6 +28,42 @@ function captureSink(opts: { verbose?: boolean; maxSteps?: number; color?: boole
   const sink = createConsoleTraceSink(sinkOpts);
   return { lines, sink };
 }
+
+test("buildSessionTraceEvent carries the live viewer url in a session-kind event", () => {
+  const event = buildSessionTraceEvent({ id: "session_1", liveUrl: "https://app.steel.dev/v/abc", debugUrl: "https://dbg" });
+  assert.equal(event.kind, "session");
+  assert.equal(event.payload["sessionId"], "session_1");
+  assert.equal(event.payload["liveUrl"], "https://app.steel.dev/v/abc");
+  assert.equal(event.payload["debugUrl"], "https://dbg");
+  assert.equal(typeof event.id, "string");
+  assert.equal(typeof event.ts, "string");
+});
+
+test("buildSessionTraceEvent tolerates a session with no urls", () => {
+  const event = buildSessionTraceEvent({ id: "session_2" });
+  assert.equal(event.payload["liveUrl"], null);
+  assert.equal(event.payload["debugUrl"], null);
+});
+
+test("jsonl sink emits one line of valid JSON per event, round-tripping the event", () => {
+  const lines: string[] = [];
+  const sink = createJsonlTraceSink((l) => lines.push(l));
+  const event = ev("code-exec", { code: "document.title" });
+  sink.onEvent(event);
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0]!.includes("\n"), false);
+  assert.deepEqual(JSON.parse(lines[0]!), event);
+});
+
+test("jsonl sink keeps each event on its own line for NDJSON parsing", () => {
+  const lines: string[] = [];
+  const sink = createJsonlTraceSink((l) => lines.push(l));
+  sink.onEvent(ev("observation", { url: "https://a.com", title: "A" }));
+  sink.onEvent(ev("code-result", { ok: true, durationMs: 1 }));
+  assert.equal(lines.length, 2);
+  assert.equal((JSON.parse(lines[0]!) as TraceEvent).kind, "observation");
+  assert.equal((JSON.parse(lines[1]!) as TraceEvent).kind, "code-result");
+});
 
 test("stream renders first observation with [init] prefix", () => {
   const { lines, sink } = captureSink({ maxSteps: 30 });

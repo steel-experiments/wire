@@ -43,6 +43,7 @@ export type TraceEventKind =
   | "llm-call"
   | "llm-usage"
   | "user-message"
+  | "session"
   | "error";
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired";
 export type PolicyDecisionResult = "allow" | "deny" | "require-approval";
@@ -267,6 +268,70 @@ export interface BrowserPageSummary {
   inputs?: number;
 }
 
+export type PageSketchSectionKind =
+  | "nav"
+  | "header"
+  | "main"
+  | "form"
+  | "table"
+  | "list"
+  | "dialog"
+  | "footer"
+  | "content";
+
+export interface PageSketchBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface PageSketchLimits {
+  maxSections: number;
+  maxControlsPerSection: number;
+  maxTextPreviewChars: number;
+}
+
+export interface PageSketchCounts {
+  links: number;
+  buttons: number;
+  inputs: number;
+  tables: number;
+  lists: number;
+}
+
+export interface PageSketchControl {
+  label: string;
+  tag: string;
+  role?: string;
+  type?: string;
+  href?: string;
+  selectorHint: string;
+  selectorAlternates?: string[];
+  disabled?: boolean;
+  required?: boolean;
+}
+
+export interface PageSketchSection {
+  id: string;
+  kind: PageSketchSectionKind;
+  selectorHint: string;
+  label?: string;
+  heading?: string;
+  textPreview?: string;
+  bbox?: PageSketchBounds;
+  counts: PageSketchCounts;
+  controls: PageSketchControl[];
+}
+
+export interface PageSketch {
+  version: 1;
+  generatedAt: string;
+  sections: PageSketchSection[];
+  truncated?: boolean;
+  limits: PageSketchLimits;
+}
+
 export interface BrowserObservation {
   sessionId: SessionId;
   targetId?: string;
@@ -279,6 +344,7 @@ export interface BrowserObservation {
   markdownArtifactId?: ArtifactId;
   focusedElement?: BrowserFocusContext;
   pageSummary?: BrowserPageSummary;
+  pageSketch?: PageSketch;
 }
 
 export interface BrowserExecRequest {

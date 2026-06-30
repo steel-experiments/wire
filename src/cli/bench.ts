@@ -67,6 +67,7 @@ export interface BenchOptions {
   provider?: LlmProvider | undefined;
   model?: string | undefined;
   json?: boolean | undefined;
+  pageSketch?: boolean | undefined;
 }
 
 const JUDGE_PASS_THRESHOLD = 0.8;
@@ -151,6 +152,7 @@ async function runBenchmark(
   if (options.provider) runOpts.provider = options.provider;
   if (options.model) runOpts.model = options.model;
   if (bm.sessionConfig) runOpts.sessionConfig = bm.sessionConfig;
+  if (options.pageSketch) runOpts.pageSketch = true;
 
   // Suppress per-task output while collecting the runId
   const origLog = console.log;

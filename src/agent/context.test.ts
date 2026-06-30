@@ -250,6 +250,47 @@ test("assembleUserPrompt includes current observation", () => {
   assert.ok(prompt.includes("1 forms, 3 buttons, 0 dialogs"));
 });
 
+test("assembleUserPrompt includes opt-in page sketch when present", () => {
+  const context = makeContext({
+    pageSketch: {
+      sections: [
+        {
+          id: "section-1",
+          kind: "form",
+          label: "Sign in",
+          selectorHint: "form#login",
+          controls: [
+            { label: "Email", tag: "input", type: "email", selectorHint: "input[name=\"email\"]" },
+            { label: "Continue", tag: "button", selectorHint: "button#continue" },
+          ],
+        },
+      ],
+    },
+  });
+  const prompt = assembleUserPrompt(context);
+
+  assert.ok(prompt.includes("Page sketch:"));
+  assert.ok(prompt.includes("- form form#login: Sign in"));
+  assert.ok(prompt.includes("\"Email\" type=email input[name=\"email\"]"));
+  assert.ok(prompt.includes("\"Continue\" button#continue"));
+});
+
+test("assembleUserPrompt includes PageSketch reuse guidance when repeated templates are detected", () => {
+  const context = makeContext({
+    pageSketchReuse: {
+      host: "commit-history.com",
+      routeShape: "/:id",
+      similarPages: 4,
+    },
+  });
+  const prompt = assembleUserPrompt(context);
+
+  assert.ok(prompt.includes("Page sketch reuse:"));
+  assert.ok(prompt.includes("commit-history.com/:id"));
+  assert.ok(prompt.includes("seen on 4 pages"));
+  assert.ok(prompt.includes("preserve one keyed progress entry per entity"));
+});
+
 test("assembleUserPrompt uses the latest observation as the current page", () => {
   const observations: ObservationSummary[] = [
     { url: "https://example.com/old", title: "Old", forms: 0, buttons: 1, dialogs: 0 },
