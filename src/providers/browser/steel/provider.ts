@@ -57,6 +57,17 @@ export type {
 // GET /sessions/{id} 404s for ~1-2s after the session is created. Retry on
 // 404 with a short bounded budget so observe()'s first read doesn't crash.
 
+// A wire.click on a submit/postback control or a navigating link tears down the
+// JS execution context before the user code can `return`, so CDP rejects the
+// user eval with one of these. When a wire action already succeeded this run,
+// the teardown means the click navigated — a success, not a failure.
+const EXEC_CONTEXT_NAVIGATED = /Inspected target navigated or closed|Execution context was destroyed|Cannot find context with specified id/iu;
+
+function execNavigatedAfterWireAction(message: string, wireEvents: JsonObject[]): boolean {
+  return EXEC_CONTEXT_NAVIGATED.test(message) &&
+    wireEvents.some((event) => event.ok === true);
+}
+
 export class SteelProvider implements BrowserProvider {
   private readonly apiKey: string;
   private readonly baseUrl: string;
@@ -265,8 +276,16 @@ export class SteelProvider implements BrowserProvider {
             stdout.push(typeof value === "string" ? value : JSON.stringify(value));
           }
         } catch (err) {
-          ok = false;
-          stderr.push(err instanceof Error ? err.message : String(err));
+          const message = err instanceof Error ? err.message : String(err);
+          if (returnValue === undefined && execNavigatedAfterWireAction(message, wireEvents)) {
+            // The click landed and navigated the page; report the navigation
+            // instead of the teardown so the agent re-observes the new page
+            // rather than re-clicking the same control.
+            returnValue = { navigated: true };
+          } else {
+            ok = false;
+            stderr.push(message);
+          }
         }
       }
 

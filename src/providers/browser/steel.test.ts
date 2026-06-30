@@ -662,6 +662,132 @@ test("SteelProvider.exec exposes wire.click as trusted CDP mouse input", async (
   }
 });
 
+test("SteelProvider.exec treats a navigating wire.click as success, not a failure", async () => {
+  // Regression: clicking a submit/postback control or a link navigates the page,
+  // which destroys the JS execution context before the user code can `return`.
+  // CDP then rejects the user eval with "Inspected target navigated or closed".
+  // The click itself succeeded (recorded in wireEvents), so this is a successful
+  // navigation, not a failure — reporting ok:false made the agent re-click the
+  // same control in a loop until the stuck-loop guard aborted the run.
+  const sent: Array<Record<string, unknown>> = [];
+  class NavigatingClickSocket {
+    onopen: ((event: any) => void) | null = null;
+    onmessage: ((event: any) => void) | null = null;
+    onerror: ((event: any) => void) | null = null;
+    onclose: ((event: any) => void) | null = null;
+    private runtimeEvaluateCount = 0;
+    private userEvalId: number | undefined;
+
+    constructor() {
+      queueMicrotask(() => this.onopen?.({}));
+    }
+
+    send(data: string): void {
+      const message = JSON.parse(data) as {
+        id: number;
+        method: string;
+        params?: Record<string, unknown>;
+        sessionId?: string;
+      };
+      sent.push(message as unknown as Record<string, unknown>);
+
+      if (message.method === "Target.getTargets") {
+        this.respond(message.id, {
+          targetInfos: [{ targetId: "tab-1", type: "page", title: "Example", url: "https://example.com" }],
+        });
+        return;
+      }
+      if (message.method === "Target.attachToTarget") {
+        this.respond(message.id, { sessionId: "cdp-session-1" });
+        return;
+      }
+      if (message.method === "Runtime.addBinding" || message.method === "Runtime.removeBinding") {
+        this.respond(message.id, {});
+        return;
+      }
+      if (message.method === "Runtime.evaluate") {
+        this.runtimeEvaluateCount++;
+        if (this.runtimeEvaluateCount === 1) {
+          this.respond(message.id, { result: { value: undefined } });
+          return;
+        }
+        if (this.runtimeEvaluateCount === 2) {
+          this.userEvalId = message.id;
+          queueMicrotask(() => this.onmessage?.({
+            data: JSON.stringify({
+              method: "Runtime.bindingCalled",
+              sessionId: "cdp-session-1",
+              params: {
+                name: "__wire_action",
+                payload: JSON.stringify({
+                  id: "1",
+                  kind: "click",
+                  x: 100,
+                  y: 200,
+                  target: { tag: "input", selectorHint: "#ctl00_ContentPlaceHolder1_btnSubmit" },
+                }),
+              },
+            }),
+          }));
+          return;
+        }
+        // The resolveWireAction eval runs, then the navigation tears down the
+        // context: the user eval rejects with a CDP command error.
+        this.respond(message.id, { result: { value: undefined } });
+        queueMicrotask(() => {
+          if (this.userEvalId !== undefined) {
+            this.onmessage?.({
+              data: JSON.stringify({
+                id: this.userEvalId,
+                error: { message: "Inspected target navigated or closed" },
+              }),
+            });
+          }
+        });
+        return;
+      }
+      if (message.method === "Input.dispatchMouseEvent") {
+        this.respond(message.id, {});
+        return;
+      }
+      this.respond(message.id, {});
+    }
+
+    close(): void {
+      this.onclose?.({});
+    }
+
+    private respond(id: number, result: unknown): void {
+      queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ id, result }) }));
+    }
+  }
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(
+    JSON.stringify(fakeSteelSession({ id: "aaa-bbb-ccc" })),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+
+  try {
+    const provider = new SteelProvider({
+      apiKey: "ste-test-key",
+      webSocketFactory: () => new NavigatingClickSocket(),
+    });
+    const result = await provider.exec({
+      sessionId: "session_aaa-bbb-ccc" as never,
+      code: "await wire.click('#ctl00_ContentPlaceHolder1_btnSubmit'); return { searched: true };",
+    });
+
+    assert.equal(result.ok, true, "a click that navigates the page is a success");
+    assert.equal(result.stderr, undefined, "navigation teardown should not surface as an error");
+    assert.deepEqual(result.returnValue, { navigated: true });
+    assert.equal(result.wireEvents?.[0]?.["action"], "click");
+    assert.equal(result.wireEvents?.[0]?.["ok"], true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("SteelProvider.exec blocks sensitive wire.click target before CDP input", async () => {
   const sent: Array<Record<string, unknown>> = [];
   class BlockedWireClickSocket {
