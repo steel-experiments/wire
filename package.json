@@ -41,7 +41,6 @@
     "compare": "tsx benchmarks/compare/run-compare.ts"
   },
   "dependencies": {
-    "hls.js": "^1.6.16",
     "zod": "^4.1.12"
   },
   "devDependencies": {
