@@ -49,6 +49,16 @@ bun run start      # serve the built SPA + API from Hono on :3000
 bun run typecheck  # tsc --noEmit
 ```
 
+## Network exposure
+
+The server has no authentication, so it binds `127.0.0.1` by default — only
+processes on the same machine can reach it. Set `HOST=0.0.0.0` to expose it on
+the network, but only behind your own reverse proxy and auth; nothing in the
+console itself gates who can read runs or launch/approve them once it's
+network-reachable. Cross-origin `POST`s (e.g. from a browser tab on another
+site) are rejected regardless of bind address — only requests with no `Origin`
+header or a `localhost`/`127.0.0.1`/`::1` origin are allowed to mutate state.
+
 ## Build order
 
 1. **Skeleton + theme** ✅ — server, SPA, theming, health probe.

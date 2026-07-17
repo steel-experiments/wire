@@ -12,11 +12,14 @@ import { streamSSE } from "hono/streaming";
 import type { LaunchRequest, ServerEvent } from "../src/lib/protocol";
 import { EventBus } from "./bus";
 import { approveLaunch, launchRun, listRuns } from "./orchestrator";
+import { rejectCrossOriginWrites } from "./security";
 import { listRunEvents } from "./state";
 import { runRecordingPlaylist } from "./recording";
 
 const app = new Hono();
 const bus = new EventBus();
+
+app.use("/api/*", rejectCrossOriginWrites);
 
 app.get("/api/health", (c) => c.json({ ok: true, name: "wire-console" }));
 
@@ -111,6 +114,11 @@ app.get("/*", serveStatic({ path: "./dist/index.html" }));
 
 const port = Number(process.env.PORT ?? 3000);
 
+// Binds loopback only by default — the console has no auth, so this is the
+// read-protection story. Set HOST=0.0.0.0 to opt into network exposure (and
+// put a real reverse proxy/auth in front of it).
+const hostname = process.env.HOST ?? "127.0.0.1";
+
 // SSE connections are long-lived; the default 10s idle timeout would sever the
 // /api/events stream before the 15s heartbeat. 255 is Bun's max (0 = disabled).
-export default { port, fetch: app.fetch, idleTimeout: 255 };
+export default { port, hostname, fetch: app.fetch, idleTimeout: 255 };
