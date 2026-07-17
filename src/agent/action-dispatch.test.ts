@@ -540,3 +540,121 @@ test("executeStep falls back to sequential execRaw when rawBatch unavailable", a
   assert.equal(codeResults[1]!.payload.source, "wireActions");
   assert.equal(codeResults[1]!.payload.commandsExecuted, 2);
 });
+
+// ---------------------------------------------------------------------------
+// redaction — code-result payloads carry whatever the page code returned, so
+// they must pass through secret redaction before being stored or streamed.
+// ---------------------------------------------------------------------------
+
+const FAKE_SECRET = "sk-1234567890abcdef1234567890";
+
+test("executeStep redacts secrets in the wireActions code-result returnValue", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  const provider = createMockProvider({
+    async exec() {
+      return {
+        ok: true,
+        durationMs: 10,
+        returnValue: {
+          wireActions: [{ method: "Page.navigate", params: { url: "https://example.com" } }],
+        },
+      };
+    },
+  } as Partial<BrowserProvider>);
+  (provider as unknown as Record<string, unknown>).rawBatch = async () => ({
+    token: `bearer ${FAKE_SECRET}`,
+  });
+
+  const result = await executeStep(
+    state,
+    { kind: "exec", summary: "Navigate via wireActions", payload: { code: "return {wireActions}" } },
+    provider,
+    createMockPolicyEngine(),
+  );
+
+  const waEvent = result.state.events.filter((e) => e.kind === "code-result").at(-1)!;
+  assert.equal(waEvent.payload.source, "wireActions");
+  const returnValue = JSON.stringify(waEvent.payload.returnValue);
+  assert.ok(!returnValue.includes(FAKE_SECRET), "raw secret must not appear in returnValue");
+  assert.ok(returnValue.includes("[REDACTED]"));
+});
+
+test("executeStep redacts secrets in the raw code-result returnValue", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  const provider = createMockProvider();
+  (provider as unknown as Record<string, unknown>).rawBatch = async () => ({
+    token: `bearer ${FAKE_SECRET}`,
+  });
+
+  const result = await executeStep(
+    state,
+    {
+      kind: "raw",
+      summary: "Batch raw CDP commands",
+      payload: { commands: [{ method: "Network.getAllCookies" }, { method: "Page.reload" }] },
+    },
+    provider,
+    createMockPolicyEngine(),
+  );
+
+  const rawEvent = result.state.events.filter((e) => e.kind === "code-result").at(-1)!;
+  assert.equal(rawEvent.payload.source, "raw");
+  const returnValue = JSON.stringify(rawEvent.payload.returnValue);
+  assert.ok(!returnValue.includes(FAKE_SECRET), "raw secret must not appear in returnValue");
+  assert.ok(returnValue.includes("[REDACTED]"));
+});
+
+test("executeStep redacts secrets in the raw code-result failure path", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  const provider = createMockProvider();
+  (provider as unknown as Record<string, unknown>).rawBatch = async () => {
+    throw new Error(`upstream failed: bearer ${FAKE_SECRET}`);
+  };
+
+  const result = await executeStep(
+    state,
+    {
+      kind: "raw",
+      summary: "Batch raw CDP commands that fail",
+      payload: { commands: [{ method: "Network.getAllCookies" }, { method: "Page.reload" }] },
+    },
+    provider,
+    createMockPolicyEngine(),
+  );
+
+  const rawEvent = result.state.events.filter((e) => e.kind === "code-result").at(-1)!;
+  assert.equal(rawEvent.payload.ok, false);
+  const returnValue = JSON.stringify(rawEvent.payload.returnValue);
+  assert.ok(!returnValue.includes(FAKE_SECRET), "raw secret must not appear in returnValue");
+  assert.ok(returnValue.includes("[REDACTED]"));
+});
+
+test("executeStep leaves non-secret wireActions returnValue unchanged", async () => {
+  const task = makeTask();
+  const state = createLoopState(task, makeSessionId());
+  const provider = createMockProvider({
+    async exec() {
+      return {
+        ok: true,
+        durationMs: 10,
+        returnValue: {
+          wireActions: [{ method: "Page.navigate", params: { url: "https://example.com" } }],
+        },
+      };
+    },
+  } as Partial<BrowserProvider>);
+  (provider as unknown as Record<string, unknown>).rawBatch = async () => ({ title: "hello" });
+
+  const result = await executeStep(
+    state,
+    { kind: "exec", summary: "Navigate via wireActions", payload: { code: "return {wireActions}" } },
+    provider,
+    createMockPolicyEngine(),
+  );
+
+  const waEvent = result.state.events.filter((e) => e.kind === "code-result").at(-1)!;
+  assert.deepEqual(waEvent.payload.returnValue, { title: "hello" });
+});
