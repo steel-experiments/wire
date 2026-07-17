@@ -153,7 +153,7 @@ export async function executeWireActionsEnvelope(
     runId: state.run.id,
     ts: nowIsoUtc(),
     kind: "code-result",
-    payload: {
+    payload: redactJsonObject({
       ok: result.ok,
       durationMs: Date.now() - cdpStart,
       source: "wireActions",
@@ -161,7 +161,7 @@ export async function executeWireActionsEnvelope(
       commandsRequested: envelope.requested,
       truncated: envelope.requested > envelope.commands.length,
       returnValue: result.returnValue as JsonValue,
-    },
+    }),
   });
 }
 
@@ -191,7 +191,7 @@ export async function executeRawActionCommands(
     runId: state.run.id,
     ts: nowIsoUtc(),
     kind: "code-result",
-    payload: {
+    payload: redactJsonObject({
       ok: result.ok,
       durationMs: Date.now() - startedAt,
       source: "raw",
@@ -199,7 +199,7 @@ export async function executeRawActionCommands(
       truncated: commandsRequested > commandsToRun.length,
       ...(result.ok ? { commandsExecuted: commandsToRun.length } : {}),
       returnValue: result.returnValue as JsonValue,
-    },
+    }),
   });
 
   return { ok: result.ok, commandsToRun };
