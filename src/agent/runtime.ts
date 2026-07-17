@@ -48,7 +48,7 @@ import {
   execActionSignature,
   codeResultDigest,
   codeResultShape,
-  isNoProgressResult,
+  isNoProgressResultWithRecovery,
 } from "./state-helpers.js";
 import { ActionRegistry, type ActionHandler } from "./actions.js";
 import {
@@ -643,13 +643,14 @@ async function runMainLoop(
 
       // Cross-signature no-progress stall — fires regardless of action sig.
       // Counts consecutive successful execs that produced nothing usable
-      // (empty/nav-only/error-shaped). Resets on any meaningful result.
+      // (empty/nav-only/error-shaped). Resets on meaningful results or when an
+      // observation shows that navigation recovered from a not-found page.
       // Only a NEW code-result may count: non-exec steps (observe, refused
       // reconfigure) re-surface the same stale result and must not double it.
       const lastResultForProgress = latestCodeResult(state);
       if (lastResultForProgress && lastResultForProgress.id !== lastProgressResultId) {
         lastProgressResultId = lastResultForProgress.id;
-        if (lastResultForProgress.payload.ok === true && isNoProgressResult(lastResultForProgress)) {
+        if (lastResultForProgress.payload.ok === true && isNoProgressResultWithRecovery(lastResultForProgress, state.events)) {
           noProgressCount += 1;
           if (noProgressCount > NO_PROGRESS_THRESHOLD) {
             const reason = `${noProgressCount} consecutive no-progress results — aborting to force re-plan`;

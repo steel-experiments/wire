@@ -50,9 +50,24 @@ interface BrowserObservation {
 }
 ```
 
-Observation is **orientation-only** — URL, title, headings, element counts. It answers "where am I?" and "did my action work?". Content extraction is the agent's job via `exec()`.
+Observation is **orientation-only** — URL, title, headings, element counts, and a bounded sample of links that the agent can actually follow. It answers "where am I?", "did my action work?", and "which compact interaction affordances are available?". Content extraction is the agent's job via `exec()`.
 
-The page summary includes counts of: headings, forms, buttons, dialogs, tables, links, and inputs.
+```ts
+interface BrowserPageSummary {
+  headings?: string[];
+  forms?: number;
+  buttons?: number;
+  dialogs?: number;
+  tables?: number;
+  links?: number;
+  inputs?: number;
+  linkSamples?: Array<{ label: string; href: string }>;
+}
+```
+
+The page summary includes counts of headings, forms, buttons, dialogs, tables, links, and inputs. `linkSamples` contains at most 30 visible, unique HTTP(S) links. It prioritizes navigation and sidebar affordances, applies per-field and aggregate character caps, and passes labels and hrefs through observation redaction before they enter traces or model context. Empty labels, non-web schemes, duplicates, and excess entries are omitted.
+
+These samples make obvious on-page routes available to the reasoning loop; they are not a content-extraction shortcut. Use `exec()` for body copy, complete link enumeration, DOM inspection, or task-specific structured data.
 
 ### 2. exec()
 

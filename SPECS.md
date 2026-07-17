@@ -136,7 +136,7 @@ That means:
    A failed run that reveals the causal bottleneck can be more valuable than a lucky success.
 
 2. **Prefer the cheapest reliable path.**  
-   Use direct URL patterns, browser-side JS, network/API observations, exports, and structured extraction before expensive UI thrashing.
+   Use grounded direct URLs, browser-side JS, network/API observations, exports, and structured extraction before expensive UI thrashing. A direct URL is grounded when it comes from the user, a loaded skill, observed page evidence such as an `href`, or a previously verified pattern on that site. A plausible-looking slug is not evidence; after a not-found landing, return to the last useful page and use observed links or site search instead of guessing another URL.
 
 3. **Every run should leave evidence behind.**  
    No silent retries that erase what actually happened.
@@ -536,13 +536,25 @@ Purpose:
 - cheap state inspection,
 - context compaction,
 - compare-friendly snapshots,
+- compact interaction affordances,
 - planning without massive DOM dumps.
 
-Observation is **orientation-only**: URL, title, headings, and element counts.
+Observation is **orientation-only**: URL, title, headings, element counts, and a bounded sample of links that the agent can actually follow.
 It answers "where am I?" and "did my action work?" — not "what does the page say?"
 Content extraction is the agent's job via `exec`.
 
 ```ts
+export interface BrowserPageSummary {
+  headings?: string[];
+  forms?: number;
+  buttons?: number;
+  dialogs?: number;
+  tables?: number;
+  links?: number;
+  inputs?: number;
+  linkSamples?: Array<{ label: string; href: string }>;
+}
+
 export interface BrowserObservation {
   sessionId: string;
   targetId?: string;
@@ -558,17 +570,11 @@ export interface BrowserObservation {
     label?: string;
     selectorHint?: string;
   };
-  pageSummary?: {
-    headings?: string[];
-    forms?: number;
-    buttons?: number;
-    dialogs?: number;
-    tables?: number;
-    links?: number;
-    inputs?: number;
-  };
+  pageSummary?: BrowserPageSummary;
 }
 ```
+
+`linkSamples` is an interaction aid, not page-content extraction. It contains at most 30 visible, unique HTTP(S) links. Navigation and sidebar affordances are prioritized, then the remaining budget is filled from other visible links. Labels and hrefs have per-field caps, the sample has an aggregate character budget, and both fields pass through observation redaction before they reach traces or model context. Empty labels, non-web schemes, duplicates, and excess entries are omitted. Agents still use `exec` when they need complete link sets, page copy, DOM structure, or exact extraction.
 
 ### 10.2 `browser.exec()`
 Executes TypeScript/JavaScript against the current browser session.
@@ -1168,7 +1174,7 @@ export interface ProposedAction {
 }
 ```
 
-- **observe**: request page orientation (URL, title, headings, element counts)
+- **observe**: request page orientation (URL, title, headings, element counts, bounded link samples)
 - **exec**: run JavaScript in the browser. Navigation, extraction, interaction — the agent writes whatever code the task requires
 - **raw**: send CDP commands directly. Escape hatch when exec is insufficient
 - **finish**: end the run. Only accepted after code evidence exists in a successful exec result
@@ -1438,8 +1444,9 @@ A user can give the system a web task or vague hunch, attach a profile, and rece
 - experiment branch creation requires explicit rationale
 
 ### Agent behavior defaults
-- prefer direct routes over UI wandering
-- observation is orientation — use exec to read page content
+- prefer grounded direct routes over UI wandering; use URLs supplied by the user, loaded skills, observed hrefs/evidence, or previously verified site patterns
+- after a not-found navigation, return to the last useful page and use an observed link or site search rather than guessing another URL
+- observation is orientation and compact interaction affordance — use exec to read page content or enumerate complete link sets
 - prefer verification after visible actions
 - stop at auth walls
 - search skills before inventing new hacks

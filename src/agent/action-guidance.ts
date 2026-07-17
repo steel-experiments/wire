@@ -4,7 +4,7 @@ export interface ActionGuidanceItem {
   id: string;
   home: ActionGuidanceHome;
   /** Ships only when the named runtime signal is active; absent = always. */
-  when?: "query-echo";
+  when?: "query-echo" | "nav-404";
   text: string;
 }
 
@@ -27,7 +27,7 @@ export const ACTION_GUIDANCE_ITEMS: ActionGuidanceItem[] = [
   {
     id: "page-summary-is-orientation",
     home: "core",
-    text: "The page-summary fields (URL, title, headings, element counts) are orientation only. To read the page's actual text content, use exec (e.g. `return document.body.innerText`).",
+    text: "The page-summary fields (URL, title, headings, element counts, bounded link samples) are orientation and compact interaction affordances only. To read the page's actual text content, use exec (e.g. `return document.body.innerText`).",
   },
   {
     id: "observe-payload",
@@ -87,7 +87,13 @@ export const ACTION_GUIDANCE_ITEMS: ActionGuidanceItem[] = [
   {
     id: "direct-url-patterns",
     home: "core",
-    text: "Prefer direct URL patterns before brittle DOM hunting when the destination is obvious.",
+    text: "Use direct navigation only when the URL is grounded in the user's request, a loaded skill, an observed or extracted href, or a route pattern already verified on this site. Do not synthesize a route merely because its slug seems obvious.",
+  },
+  {
+    id: "nav-404-recovery",
+    home: "core",
+    when: "nav-404",
+    text: "The current observation is a not-found landing. Do not guess or synthesize another URL. Return to the last working page (for example with `history.back()`), then enumerate or click a visible on-page link, use a loaded skill, or use the site's own search/navigation. Navigate directly only to a target grounded in an observed href or loaded skill.",
   },
   {
     id: "direct-navigation-exec",
@@ -204,9 +210,14 @@ export const BASE_ACTION_GUIDANCE = ACTION_GUIDANCE_ITEMS.map((item) => item.tex
 // items ship only when skills are actually loaded — guidance about skills a
 // run doesn't have is prompt soup. `when`-tagged items ship only while their
 // runtime signal is active, for the same reason.
-export function actionGuidanceTexts(options: { skillsLoaded: boolean; queryEchoDetected?: boolean }): string[] {
+export function actionGuidanceTexts(options: {
+  skillsLoaded: boolean;
+  queryEchoDetected?: boolean;
+  nav404Detected?: boolean;
+}): string[] {
   return ACTION_GUIDANCE_ITEMS
     .filter((item) => item.home !== "skill" || options.skillsLoaded)
     .filter((item) => item.when !== "query-echo" || options.queryEchoDetected === true)
+    .filter((item) => item.when !== "nav-404" || options.nav404Detected === true)
     .map((item) => item.text);
 }

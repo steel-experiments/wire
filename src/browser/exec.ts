@@ -47,6 +47,7 @@ const NAVIGATION_PATTERNS = [
   /\bwindow\s*\.\s*location\s*(?:=|\.href\s*=|\.assign\s*\(|\.replace\s*\(|\.reload\s*\(|\[)/u,
   /\blocation\s*(?:=|\.href\s*=|\.assign\s*\(|\.replace\s*\(|\.reload\s*\()/u,
   /\bdocument\s*\.\s*location\s*(?:=|\.href\s*=|\.assign\s*\(|\.replace\s*\(|\.reload\s*\(|\[)/u,
+  /\b(?:window\s*\.\s*)?history\s*\.\s*(?:back|forward|go)\s*\(/u,
 ];
 
 export function isLikelyNavigationCode(code: string): boolean {

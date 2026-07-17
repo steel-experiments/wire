@@ -8,6 +8,7 @@ import {
   nowIsoUtc,
   stableJsonStringify,
 } from "./ids.js";
+import { BROWSER_LINK_SAMPLE_LIMITS, normalizeBrowserLinkSamples } from "./link-samples.js";
 import {
   redactJsonObject,
   redactSecrets,
@@ -161,6 +162,9 @@ test("provider input and output schemas validate browser boundaries", () => {
       pageSummary: {
         buttons: 4,
         forms: 1,
+        linkSamples: [
+          { label: "Invoices", href: "https://example.com/invoices" },
+        ],
       },
     },
     "browser-observation",
@@ -171,6 +175,100 @@ test("provider input and output schemas validate browser boundaries", () => {
   assert.deepEqual(execRequest.target, { tabId: "tab-1" });
   assert.equal(execResult.ok, true);
   assert.equal(observation.tabs.length, 1);
+  assert.deepEqual(observation.pageSummary?.linkSamples, [
+    { label: "Invoices", href: "https://example.com/invoices" },
+  ]);
+});
+
+test("browserObservationSchema strictly bounds HTTP(S) link samples", () => {
+  const base = {
+    sessionId: createId("session"),
+    url: "https://example.com/",
+    title: "Example",
+    tabs: [],
+  };
+
+  assert.equal(browserObservationSchema.safeParse({
+    ...base,
+    pageSummary: {
+      linkSamples: [{ label: "Mail", href: "mailto:hello@example.com" }],
+    },
+  }).success, false);
+  assert.equal(browserObservationSchema.safeParse({
+    ...base,
+    pageSummary: {
+      linkSamples: [{ label: "Home", href: "https://example.com/", extra: true }],
+    },
+  }).success, false);
+  assert.equal(browserObservationSchema.safeParse({
+    ...base,
+    pageSummary: {
+      linkSamples: Array.from({ length: 31 }, (_, index) => ({
+        label: `Link ${index}`,
+        href: `https://example.com/${index}`,
+      })),
+    },
+  }).success, false);
+  assert.equal(browserObservationSchema.safeParse({
+    ...base,
+    pageSummary: {
+      linkSamples: Array.from({ length: 30 }, (_, index) => ({
+        label: "x".repeat(120),
+        href: `https://example.com/${index}`,
+      })),
+    },
+  }).success, false);
+});
+
+test("normalizeBrowserLinkSamples bounds and rejects unsafe provider targets", () => {
+  const samples = normalizeBrowserLinkSamples([
+    null,
+    { label: "Relative", href: "/relative" },
+    { label: "Script", href: "javascript:alert(1)" },
+    { label: "Redacted", href: "https://example.com/private?apiKey=[REDACTED]" },
+    { label: "Secret", href: "https://example.com/private?apiKey=top-secret-value" },
+    { label: "  Documentation  ", href: "https://example.com/docs" },
+    { label: "Duplicate", href: "https://example.com/docs" },
+    { label: `Long ${"x".repeat(140)}`, href: "https://example.com/long" },
+  ]);
+
+  assert.deepEqual(samples, [
+    { label: "Documentation", href: "https://example.com/docs" },
+    { label: `Long ${"x".repeat(115)}`, href: "https://example.com/long" },
+  ]);
+});
+
+test("normalizeBrowserLinkSamples scans past invalid entries and enforces aggregate bounds", () => {
+  const samples = normalizeBrowserLinkSamples([
+    ...Array.from({ length: 35 }, () => ({ label: "Bad", href: "ftp://example.com/file" })),
+    { label: "Valid after invalid entries", href: "https://example.com/valid" },
+    ...Array.from({ length: 40 }, (_, index) => ({
+      label: "x".repeat(120),
+      href: `https://example.com/${index}`,
+    })),
+  ]);
+
+  assert.deepEqual(samples[0], {
+    label: "Valid after invalid entries",
+    href: "https://example.com/valid",
+  });
+  assert.ok(samples.length <= 30);
+  assert.ok(samples.reduce(
+    (total, sample) => total + sample.label.length + sample.href.length,
+    0,
+  ) <= 4000);
+});
+
+test("normalizeBrowserLinkSamples bounds untrusted candidate scanning", () => {
+  const samples = normalizeBrowserLinkSamples([
+    ...Array.from({ length: BROWSER_LINK_SAMPLE_LIMITS.maxCandidates }, () => ({
+      label: "Invalid",
+      href: "ftp://example.com/file",
+    })),
+    { label: "Past bound", href: "https://example.com/too-late" },
+  ]);
+
+  assert.deepEqual(samples, []);
 });
 
 test("safeParseBoundary reports invalid payloads without throwing", () => {

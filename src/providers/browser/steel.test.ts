@@ -114,6 +114,78 @@ function createMockedProvider() {
   return { provider, setNextResponse, setCdpResponse, cdpMessages, restore };
 }
 
+interface FakeLink {
+  href: string;
+  hrefValue?: unknown;
+  text?: string;
+  ariaLabel?: string;
+  title?: string;
+  hidden?: boolean;
+}
+
+function evaluateObservationScript(
+  expression: string,
+  input: { priorityLinks: FakeLink[]; links: FakeLink[] },
+): Record<string, unknown> {
+  class FakeElement {
+    readonly tagName = "A";
+    readonly id = "";
+    readonly href: unknown;
+    readonly innerText: string | undefined;
+    readonly textContent: string;
+    readonly attributes: Record<string, string>;
+    readonly hidden: boolean;
+
+    constructor(link: FakeLink) {
+      this.href = link.hrefValue ?? link.href;
+      this.innerText = link.hrefValue === undefined ? link.text ?? "" : undefined;
+      this.textContent = link.text ?? "";
+      this.hidden = link.hidden === true;
+      this.attributes = {};
+      this.attributes.href = link.href;
+      if (link.ariaLabel) this.attributes["aria-label"] = link.ariaLabel;
+      if (link.title) this.attributes.title = link.title;
+    }
+
+    closest(): FakeElement | null {
+      return this.hidden ? this : null;
+    }
+
+    getBoundingClientRect(): { width: number; height: number } {
+      return this.hidden ? { width: 0, height: 0 } : { width: 100, height: 20 };
+    }
+
+    getAttribute(name: string): string | null {
+      return this.attributes[name] ?? null;
+    }
+  }
+
+  const priorityElements = input.priorityLinks.map((link) => new FakeElement(link));
+  const elements = input.links.map((link) => new FakeElement(link));
+  const document = {
+    title: "Links",
+    baseURI: "https://assets.example.com/docs/nested/",
+    activeElement: null,
+    forms: [],
+    getElementById: () => null,
+    querySelectorAll(selector: string): FakeElement[] {
+      if (selector === 'nav a[href],aside a[href],[role="navigation"] a[href]') {
+        return priorityElements;
+      }
+      if (selector === "a[href]") return elements;
+      return [];
+    },
+  };
+  const window = {
+    location: { href: "https://example.com/base/" },
+    innerHeight: 800,
+    CSS: { escape: (value: string) => value },
+    getComputedStyle: () => ({ display: "block", visibility: "visible", opacity: "1" }),
+  };
+  const evaluate = new Function("window", "document", "Element", `return ${expression};`);
+  return evaluate(window, document, FakeElement) as Record<string, unknown>;
+}
+
 // ---------------------------------------------------------------------------
 // createSession
 // ---------------------------------------------------------------------------
@@ -460,6 +532,77 @@ test("SteelProvider.observe uses PageSketch script only when requested", async (
     assert.doesNotThrow(() => new Function(optInExpression));
     assert.ok(optInExpression.includes("PAGE_SKETCH_LIMITS"));
     assert.ok(observation.pageSketch);
+  } finally {
+    restore();
+  }
+});
+
+test("SteelProvider observation scripts collect bounded prioritized HTTP(S) link samples", async () => {
+  const { provider, setNextResponse, setCdpResponse, cdpMessages, restore } = createMockedProvider();
+  setNextResponse("/sessions/aaa-bbb-ccc", fakeSteelSession({ id: "aaa-bbb-ccc" }));
+  setCdpResponse("Target.getTargets", {
+    targetInfos: [{ targetId: "tab-1", type: "page", title: "Links", url: "https://example.com/base/" }],
+  });
+  setCdpResponse("Target.attachToTarget", { sessionId: "cdp-session-1" });
+  setCdpResponse("Runtime.evaluate", {
+    result: { value: { url: "https://example.com/base/", title: "Links" } },
+  });
+
+  const longLabels = Array.from({ length: 35 }, (_, index) => ({
+    href: `/article-${index}`,
+    text: `Article ${index} ${"x".repeat(150)}`,
+  }));
+  const priorityLink = { href: "/docs", text: "Documentation" };
+  const links: FakeLink[] = [
+    { href: "/about", text: "About" },
+    priorityLink,
+    { href: "/pricing", ariaLabel: "Pricing" },
+    { href: "https://example.com/contact", title: "Contact" },
+    { href: "mailto:hello@example.com", text: "Email" },
+    { href: "/hidden", text: "Hidden", hidden: true },
+    { href: "../svg-guide", hrefValue: { baseVal: "wrong-object-value" }, text: "SVG Guide" },
+    ...longLabels,
+  ];
+
+  try {
+    await provider.observe({ sessionId: "session_aaa-bbb-ccc" as never });
+    await provider.observe({
+      sessionId: "session_aaa-bbb-ccc" as never,
+      includePageSketch: true,
+    });
+    const expressions = cdpMessages
+      .filter((message) => message.method === "Runtime.evaluate")
+      .map((message) => String(message.params?.expression ?? ""));
+    assert.equal(expressions.length, 2);
+
+    for (const expression of expressions) {
+      assert.doesNotThrow(() => new Function(expression));
+      assert.ok(expression.includes("collectLinkSamples"));
+      const snapshot = evaluateObservationScript(expression, {
+        priorityLinks: [priorityLink],
+        links,
+      });
+      const pageSummary = snapshot.pageSummary as {
+        linkSamples: Array<{ label: string; href: string }>;
+      };
+      const samples = pageSummary.linkSamples;
+
+      assert.deepEqual(samples.slice(0, 4), [
+        { label: "Documentation", href: "https://assets.example.com/docs" },
+        { label: "About", href: "https://assets.example.com/about" },
+        { label: "Pricing", href: "https://assets.example.com/pricing" },
+        { label: "Contact", href: "https://example.com/contact" },
+      ]);
+      assert.ok(samples.some((sample) =>
+        sample.label === "SVG Guide" && sample.href === "https://assets.example.com/docs/svg-guide"
+      ));
+      assert.ok(samples.length <= 30);
+      assert.equal(new Set(samples.map((sample) => sample.href)).size, samples.length);
+      assert.ok(samples.every((sample) => /^https?:\/\//u.test(sample.href)));
+      assert.ok(samples.every((sample) => sample.label.length <= 120 && sample.href.length <= 500));
+      assert.ok(samples.reduce((total, sample) => total + sample.label.length + sample.href.length, 0) <= 4000);
+      assert.ok(!samples.some((sample) => sample.label === "Email" || sample.label === "Hidden"));
+    }
   } finally {
     restore();
   }

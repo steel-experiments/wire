@@ -1,6 +1,7 @@
 import type { BrowserProvider } from "../browser/bridge.js";
 import type { LLMProvider, ChatMessage, ContentPart } from "../providers/llm/types.js";
-import type { JsonObject, ProposedAction, TraceEvent } from "../shared/types.js";
+import { normalizeBrowserLinkSamples } from "../shared/link-samples.js";
+import type { BrowserLinkSample, JsonObject, ProposedAction, TraceEvent } from "../shared/types.js";
 import {
   assembleSystemPrompt,
   assembleUserPrompt,
@@ -22,6 +23,7 @@ import {
   computeObservationDiff,
   computeRepeatStreak,
   countConsecutiveUnchanged,
+  isNotFoundObservation,
 } from "./state-helpers.js";
 import { ActionRegistry } from "./actions.js";
 
@@ -55,6 +57,10 @@ function observationDriftMessage(payload: TraceEvent["payload"]): string | undef
   if (!drift || typeof drift !== "object" || Array.isArray(drift)) return undefined;
   const message = (drift as JsonObject).message;
   return typeof message === "string" ? message : undefined;
+}
+
+function observationLinkSamples(pageSummary: Record<string, unknown> | undefined): BrowserLinkSample[] {
+  return normalizeBrowserLinkSamples(pageSummary?.linkSamples);
 }
 
 export type UserIntent = "assist" | "redirect" | "cancel";
@@ -325,6 +331,7 @@ export function defaultAgentTurn(
           buttons: number;
           dialogs: number;
           headings?: string[];
+          linkSamples?: BrowserLinkSample[];
           targetId?: string;
           tabs?: Array<{ id: string; url: string; title: string }>;
           tabDrift?: string;
@@ -342,6 +349,10 @@ export function defaultAgentTurn(
         if (tabDrift) obs.tabDrift = tabDrift;
         if (headings) {
           obs.headings = headings;
+        }
+        const linkSamples = observationLinkSamples(ps);
+        if (linkSamples.length > 0) {
+          obs.linkSamples = linkSamples;
         }
         return obs;
       });
@@ -486,6 +497,10 @@ export function defaultAgentTurn(
       if (looksLikeQueryEcho(text)) {
         context.queryEchoDetected = true;
       }
+    }
+
+    if (isNotFoundObservation(latestObservationEvent)) {
+      context.nav404Detected = true;
     }
 
     if (state.sessionConfig) {

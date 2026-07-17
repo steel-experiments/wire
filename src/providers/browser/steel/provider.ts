@@ -10,6 +10,7 @@ import type {
   JsonObject,
   SessionId,
 } from "../../../shared/types.js";
+import { BROWSER_LINK_SAMPLE_LIMITS } from "../../../shared/link-samples.js";
 import type { BrowserObserveInput, BrowserProvider } from "../../../browser/bridge.js";
 import { validateBrowserCode } from "./code-validation.js";
 import {
@@ -411,7 +412,71 @@ export class SteelProvider implements BrowserProvider {
   }
 }
 
+const LINK_SAMPLE_HELPERS = `
+  const LINK_SAMPLE_LIMITS = {
+    maxItems: ${BROWSER_LINK_SAMPLE_LIMITS.maxItems},
+    maxLabelChars: ${BROWSER_LINK_SAMPLE_LIMITS.maxLabelChars},
+    maxHrefChars: ${BROWSER_LINK_SAMPLE_LIMITS.maxHrefChars},
+    maxTotalChars: ${BROWSER_LINK_SAMPLE_LIMITS.maxTotalChars},
+  };
+
+  function normalizeLinkSampleText(value) {
+    return String(value || "").replace(/\\s+/g, " ").trim();
+  }
+
+  function isVisibleLinkSample(anchor) {
+    if (!(anchor instanceof Element)) return false;
+    if (anchor.closest("[hidden],[aria-hidden=\\"true\\"]")) return false;
+    const rect = anchor.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    const style = window.getComputedStyle(anchor);
+    return style.display !== "none"
+      && style.visibility !== "hidden"
+      && style.visibility !== "collapse"
+      && Number(style.opacity || 1) !== 0;
+  }
+
+  function collectLinkSamples() {
+    const priorityAnchors = Array.from(document.querySelectorAll("nav a[href],aside a[href],[role=\\"navigation\\"] a[href]"));
+    const anchors = priorityAnchors.concat(Array.from(document.querySelectorAll("a[href]")));
+    const samples = [];
+    const seenHrefs = new Set();
+    let totalChars = 0;
+
+    for (const anchor of anchors) {
+      if (samples.length >= LINK_SAMPLE_LIMITS.maxItems) break;
+      if (!isVisibleLinkSample(anchor)) continue;
+
+      let href;
+      try {
+        const rawHref = anchor.getAttribute("href");
+        if (!rawHref) continue;
+        const url = new URL(rawHref, document.baseURI);
+        if (url.protocol !== "http:" && url.protocol !== "https:") continue;
+        href = url.href;
+      } catch {
+        continue;
+      }
+      if (href.length > LINK_SAMPLE_LIMITS.maxHrefChars || seenHrefs.has(href)) continue;
+
+      const visibleText = normalizeLinkSampleText(anchor.innerText || anchor.textContent);
+      const fallback = normalizeLinkSampleText(anchor.getAttribute("aria-label") || anchor.getAttribute("title"));
+      const label = (visibleText || fallback).slice(0, LINK_SAMPLE_LIMITS.maxLabelChars);
+      if (!label) continue;
+
+      const itemChars = label.length + href.length;
+      if (totalChars + itemChars > LINK_SAMPLE_LIMITS.maxTotalChars) continue;
+      seenHrefs.add(href);
+      samples.push({ label, href });
+      totalChars += itemChars;
+    }
+
+    return samples;
+  }
+`;
+
 const OBSERVE_SCRIPT = `(() => {
+${LINK_SAMPLE_HELPERS}
   // Orientation-only: where am I, what's on the page, what can I interact with.
   // Content extraction is the agent's job via exec — not the observer's.
   const headings = [];
@@ -437,11 +502,13 @@ const OBSERVE_SCRIPT = `(() => {
       tables: document.querySelectorAll("table").length,
       links: document.querySelectorAll("a[href]").length,
       inputs: document.querySelectorAll("input,textarea,select").length,
+      linkSamples: collectLinkSamples(),
     },
   };
 })()`;
 
 const OBSERVE_WITH_PAGE_SKETCH_SCRIPT = `(() => {
+${LINK_SAMPLE_HELPERS}
   const PAGE_SKETCH_LIMITS = {
     maxSections: 12,
     maxControlsPerSection: 12,
@@ -670,6 +737,7 @@ const OBSERVE_WITH_PAGE_SKETCH_SCRIPT = `(() => {
     tables: document.querySelectorAll("table").length,
     links: document.querySelectorAll("a[href]").length,
     inputs: document.querySelectorAll("input,textarea,select").length,
+    linkSamples: collectLinkSamples(),
   };
 
   const priority = {

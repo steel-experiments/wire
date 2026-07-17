@@ -42,7 +42,7 @@ Both return a `LoopResult` containing the final run state, trace events, artifac
 
 The turn function builds a context bundle from the current loop state and sends it to the LLM:
 
-1. **Observations** — last 3 page observations (URL, title, headings, element counts)
+1. **Observations** — last 3 page observations (URL, title, headings, element counts, bounded link samples)
 2. **Recent traces** — last 5 trace events (summarized, capped at 1.5KB each)
 3. **Metacognition** — stuck-loop warnings, timeout constraints, truncated batch alerts
 4. **Skills** — guidance from matched skills (capped at 1KB per skill)
@@ -63,6 +63,12 @@ The LLM returns a `ProposedAction` with one of four core kinds:
 | `finish` | End the run |
 
 Provider-specific actions (e.g., `reconfigure`) can be registered via the `ActionRegistry`.
+
+### Navigation grounding
+
+Direct navigation should use a target grounded in the user request, a loaded skill, an observed `href` or other page evidence, or a pattern already verified on the same site. A URL that merely looks plausible is not grounded. If navigation lands on a not-found page, the next attempt should return to the last useful page and follow an observed link or use site navigation/search; it should not synthesize a second URL.
+
+The observation context exposes up to 30 sanitized `{ label, href }` samples from visible, unique HTTP(S) links, prioritizing navigation and sidebar affordances. This is enough to make cheap interaction choices without turning observations into page extraction. The agent uses `exec` when it needs the complete link set or page content.
 
 ### Step 7: Policy check
 

@@ -1,4 +1,4 @@
-import type { JsonObject } from "../shared/types.js";
+import type { BrowserLinkSample, JsonObject } from "../shared/types.js";
 
 export interface TaskObjective {
   mode: string;
@@ -26,6 +26,7 @@ export interface ObservationSummary {
   buttons: number;
   dialogs: number;
   headings?: string[];
+  linkSamples?: BrowserLinkSample[];
 }
 
 export interface TraceSummary {
@@ -113,8 +114,14 @@ export interface ContextBundle {
   repairInstructions?: string[];
   /** Latest result reflects the search query back — surface the SERP-trap warning. */
   queryEchoDetected?: boolean;
+  /** Current observation is a not-found landing — surface grounded recovery guidance. */
+  nav404Detected?: boolean;
 }
 
+import {
+  BROWSER_LINK_SAMPLE_LIMITS,
+  normalizeBrowserLinkSamples,
+} from "../shared/link-samples.js";
 import { redactSecrets } from "../shared/redact.js";
 import {
   ACTIVE_BROWSER_SYSTEM_GUIDANCE,
@@ -134,6 +141,7 @@ export { sanitizeSkillContent, stripInjectionPatterns } from "../shared/sanitize
 import { stripInjectionPatterns } from "../shared/sanitize.js";
 
 const PAGE_SKETCH_PROMPT_CAP = 3000;
+const LINK_SAMPLES_TRUNCATED = "...(links truncated)";
 
 function cleanPromptText(value: string): string {
   return stripInjectionPatterns(redactSecrets(value));
@@ -297,6 +305,32 @@ export function assembleUserPrompt(context: ContextBundle): string {
         obsParts.push(`Headings: ${headings.join(" | ")}`);
       }
     }
+    const linkSamples = normalizeBrowserLinkSamples(obs.linkSamples);
+    if (linkSamples.length > 0) {
+      const linkLines = linkSamples.flatMap((sample) => {
+        const label = cleanPromptText(sample.label).trim();
+        if (!label) return [];
+        return [`- ${label}: ${sample.href}`];
+      });
+      if (linkLines.length > 0) {
+        let boundedLines = linkLines;
+        if (linkLines.join("\n").length > BROWSER_LINK_SAMPLE_LIMITS.maxTotalChars) {
+          boundedLines = [];
+          let renderedLength = 0;
+          const lineBudget = BROWSER_LINK_SAMPLE_LIMITS.maxTotalChars - LINK_SAMPLES_TRUNCATED.length - 1;
+          for (const line of linkLines) {
+            const addedLength = line.length + (boundedLines.length > 0 ? 1 : 0);
+            if (renderedLength + addedLength > lineBudget) break;
+            boundedLines.push(line);
+            renderedLength += addedLength;
+          }
+          boundedLines.push(LINK_SAMPLES_TRUNCATED);
+        }
+        obsParts.push(
+          "Visible link samples (grounded navigation targets; do not invent routes):\n" + boundedLines.join("\n"),
+        );
+      }
+    }
     sections.push(obsParts.join("\n"));
   }
 
@@ -386,6 +420,7 @@ export function buildActionGuidance(context: ContextBundle): string {
     ...actionGuidanceTexts({
       skillsLoaded: context.skills.length > 0,
       ...(context.queryEchoDetected === true ? { queryEchoDetected: true } : {}),
+      ...(context.nav404Detected === true ? { nav404Detected: true } : {}),
     }),
   ];
 

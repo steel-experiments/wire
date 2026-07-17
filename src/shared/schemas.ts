@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { isIsoUtcTimestamp } from "./ids.js";
+import { BROWSER_LINK_SAMPLE_LIMITS } from "./link-samples.js";
 import type {
   ActionId,
   ApprovalId,
@@ -385,6 +386,31 @@ export const browserObservationSchema = z
         tables: z.number().int().nonnegative().optional(),
         links: z.number().int().nonnegative().optional(),
         inputs: z.number().int().nonnegative().optional(),
+        linkSamples: z
+          .array(
+            z
+              .object({
+                label: z.string().min(1).max(BROWSER_LINK_SAMPLE_LIMITS.maxLabelChars),
+                href: z.url().max(BROWSER_LINK_SAMPLE_LIMITS.maxHrefChars).refine((href) => /^https?:\/\//u.test(href), {
+                  message: "Link sample href must use HTTP(S)",
+                }),
+              })
+              .strict(),
+          )
+          .max(BROWSER_LINK_SAMPLE_LIMITS.maxItems)
+          .superRefine((samples, context) => {
+            const totalChars = samples.reduce(
+              (total, sample) => total + sample.label.length + sample.href.length,
+              0,
+            );
+            if (totalChars > BROWSER_LINK_SAMPLE_LIMITS.maxTotalChars) {
+              context.addIssue({
+                code: "custom",
+                message: `Link samples must not exceed ${BROWSER_LINK_SAMPLE_LIMITS.maxTotalChars} total characters`,
+              });
+            }
+          })
+          .optional(),
       })
       .strict()
       .optional(),

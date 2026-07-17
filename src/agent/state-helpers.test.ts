@@ -6,7 +6,7 @@ import { test } from "node:test";
 
 import { createId, nowIsoUtc } from "../shared/ids.js";
 import type { JsonObject, TraceEvent } from "../shared/types.js";
-import { reconfigureJustified } from "./state-helpers.js";
+import { isNotFoundObservation, reconfigureJustified } from "./state-helpers.js";
 
 function observation(payload: JsonObject): TraceEvent {
   return {
@@ -26,10 +26,9 @@ test("no observation yet is not a justified reconfigure", () => {
 });
 
 test("pre-navigation about:blank is never a block", () => {
-  assert.equal(
-    reconfigureJustified(observation({ url: "about:blank", title: "about:blank", pageSummary: emptySummary })),
-    false,
-  );
+  const event = observation({ url: "about:blank", title: "Page not found", pageSummary: emptySummary });
+  assert.equal(isNotFoundObservation(event), false);
+  assert.equal(reconfigureJustified(event), false);
 });
 
 test("empty url is not navigated, so not justified", () => {
@@ -52,10 +51,116 @@ test("a loaded content page with no block signal is working — do not proxy it"
 });
 
 test("a navigated http(s) page that rendered nothing is a plausible block", () => {
-  assert.equal(
-    reconfigureJustified(observation({ url: "https://example.com/", title: "", pageSummary: emptySummary })),
-    true,
-  );
+  const event = observation({ url: "https://example.com/", title: "", pageSummary: emptySummary });
+  assert.equal(isNotFoundObservation(event), false);
+  assert.equal(reconfigureJustified(event), true);
+});
+
+test("a sparse Steel Docs page-not-found landing is detected and not reconfigured", () => {
+  const event = observation({
+    url: "https://docs.steel.dev/integrations/stripe-projects",
+    title: "Page not found | Steel Docs",
+    pageSummary: emptySummary,
+  });
+  assert.equal(isNotFoundObservation(event), true);
+  assert.equal(reconfigureJustified(event), false);
+});
+
+test("an exact page-not-found title is detected when site navigation remains", () => {
+  const event = observation({
+    url: "https://docs.example.com/missing",
+    title: "Page Not Found | Example Docs",
+    pageSummary: { ...emptySummary, headings: ["Page Not Found"], links: 12 },
+  });
+  assert.equal(isNotFoundObservation(event), true);
+  assert.equal(reconfigureJustified(event), false);
+});
+
+test("a conventional 404 Not Found title is detected", () => {
+  const event = observation({
+    url: "https://example.com/missing",
+    title: "404 Not Found",
+    pageSummary: emptySummary,
+  });
+  assert.equal(isNotFoundObservation(event), true);
+  assert.equal(reconfigureJustified(event), false);
+});
+
+test("branded not-found title variants are detected", () => {
+  for (const title of ["Page Not Found - Example", "Example — Oops! Page Not Found", "404 Error | Example"]) {
+    const event = observation({
+      url: "https://example.com/missing",
+      title,
+      pageSummary: emptySummary,
+    });
+    assert.equal(isNotFoundObservation(event), true, title);
+    assert.equal(reconfigureJustified(event), false, title);
+  }
+});
+
+test("a CDN-branded 404 is not mistaken for a challenge", () => {
+  const event = observation({
+    url: "https://example.com/missing",
+    title: "404 Not Found | Cloudflare",
+    pageSummary: emptySummary,
+  });
+  assert.equal(isNotFoundObservation(event), true);
+  assert.equal(reconfigureJustified(event), false);
+});
+
+test("an exact not-found title or heading suppresses CDN-brand reconfigure without sparse evidence", () => {
+  const titledLanding = observation({
+    url: "https://example.com/missing",
+    title: "Page Not Found | Cloudflare",
+  });
+  assert.equal(isNotFoundObservation(titledLanding), true);
+  assert.equal(reconfigureJustified(titledLanding), false);
+
+  const referenceHeading = observation({
+    url: "https://example.com/http/status/404",
+    title: "Cloudflare HTTP reference",
+    pageSummary: { ...contentSummary, headings: ["404 Not Found"] },
+  });
+  assert.equal(isNotFoundObservation(referenceHeading), false, "ambiguous 404 headings still require sparse evidence");
+  assert.equal(reconfigureJustified(referenceHeading), false, "not-found labels suppress a brand-only session swap");
+});
+
+test("a sparse bare 404 is detected", () => {
+  const event = observation({
+    url: "https://example.com/missing",
+    title: "404",
+    pageSummary: emptySummary,
+  });
+  assert.equal(isNotFoundObservation(event), true);
+  assert.equal(reconfigureJustified(event), false);
+});
+
+test("an article discussing HTTP 404 is not detected as a not-found landing", () => {
+  const event = observation({
+    url: "https://example.com/blog/http-404",
+    title: "Understanding HTTP 404 errors",
+    pageSummary: { ...contentSummary, headings: ["What does HTTP 404 mean?"] },
+  });
+  assert.equal(isNotFoundObservation(event), false);
+  assert.equal(reconfigureJustified(event), false);
+});
+
+test("rich HTTP reference content titled or headed 404 Not Found is not a not-found landing", () => {
+  for (const event of [
+    observation({
+      url: "https://docs.example.com/http/status/404",
+      title: "404 Not Found - HTTP | Reference",
+      pageSummary: { ...contentSummary, headings: ["HTTP response status codes"] },
+    }),
+    observation({
+      url: "https://docs.example.com/http/status/404",
+      title: "HTTP status reference",
+      pageSummary: { ...contentSummary, headings: ["404 Not Found"] },
+    }),
+  ]) {
+    assert.equal(isNotFoundObservation(event), false);
+    assert.equal(reconfigureJustified(event), false);
+  }
 });
 
 test("a genuine challenge page (title block signal) is justified even with content", () => {
@@ -74,6 +179,16 @@ test("a challenge signalled in a heading is justified", () => {
     })),
     true,
   );
+});
+
+test("an explicit anti-bot signal takes precedence over a not-found title", () => {
+  const event = observation({
+    url: "https://shop.example/missing",
+    title: "404 Not Found",
+    pageSummary: { ...emptySummary, headings: ["Verify you are human"] },
+  });
+  assert.equal(isNotFoundObservation(event), true);
+  assert.equal(reconfigureJustified(event), true);
 });
 
 test("a plain http (non-https) navigated blank page is still navigated", () => {

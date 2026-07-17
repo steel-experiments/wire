@@ -11,7 +11,7 @@ import type {
 import type { JsonObject } from "../shared/types.js";
 import type { BrowserObserveInput, BrowserProvider } from "./bridge.js";
 import { execCode, isLikelyNavigationCode } from "./exec.js";
-import { observeBrowser } from "./observe.js";
+import { observeBrowser, toObservationPayload } from "./observe.js";
 import { clickAt, dispatchMouseEvent, execRaw } from "./raw.js";
 import { describeTarget, resolveTarget } from "./targets.js";
 
@@ -175,6 +175,9 @@ test("observeBrowser returns observation with artifacts", async () => {
           headings: ["Hello"],
           forms: 1,
           buttons: 3,
+          linkSamples: [
+            { label: "Details", href: "https://example.com/details" },
+          ],
         },
       };
     },
@@ -187,6 +190,55 @@ test("observeBrowser returns observation with artifacts", async () => {
   assert.equal(result.pageSummary.forms, 1);
   assert.equal(result.pageSummary.buttons, 3);
   assert.deepEqual(result.pageSummary.headings, ["Hello"]);
+  assert.deepEqual(result.pageSummary.linkSamples, [
+    { label: "Details", href: "https://example.com/details" },
+  ]);
+});
+
+test("observeBrowser bounds and sanitizes custom-provider link samples", async () => {
+  const sessionId = createId("session");
+  const rawSamples = [
+    { label: "Docs", href: "https://example.com/docs" },
+    { label: "Script", href: "javascript:alert(1)" },
+    ...Array.from({ length: 298 }, () => ({ label: "Invalid", href: "ftp://example.com/file" })),
+    { label: "Beyond candidate budget", href: "https://example.com/too-late" },
+  ];
+  const provider = createMockProvider({
+    async observe(input: BrowserObserveInput): Promise<BrowserObservation> {
+      return {
+        sessionId: input.sessionId,
+        url: "https://example.com",
+        title: "Example",
+        tabs: [],
+        pageSummary: { linkSamples: rawSamples },
+      };
+    },
+  });
+
+  const result = await observeBrowser({ provider, sessionId });
+
+  assert.deepEqual(result.pageSummary?.linkSamples, [
+    { label: "Docs", href: "https://example.com/docs" },
+  ]);
+});
+
+test("toObservationPayload also normalizes link samples at the trace boundary", () => {
+  const payload = toObservationPayload({
+    sessionId: createId("session"),
+    url: "https://example.com",
+    title: "Example",
+    tabs: [],
+    pageSummary: {
+      linkSamples: [
+        { label: "Docs", href: "https://example.com/docs" },
+        { label: "Mail", href: "mailto:hello@example.com" },
+      ],
+    },
+  });
+
+  assert.deepEqual((payload.pageSummary as JsonObject).linkSamples, [
+    { label: "Docs", href: "https://example.com/docs" },
+  ]);
 });
 
 test("observeBrowser propagates provider errors", async () => {
@@ -338,8 +390,11 @@ test("isLikelyNavigationCode detects navigation writes but not reads", () => {
   assert.equal(isLikelyNavigationCode("location.assign('/next')"), true);
   assert.equal(isLikelyNavigationCode("location.reload()"), true);
   assert.equal(isLikelyNavigationCode("document.location = '/next'"), true);
+  assert.equal(isLikelyNavigationCode("history.back()"), true);
+  assert.equal(isLikelyNavigationCode("window.history.go(-1)"), true);
   assert.equal(isLikelyNavigationCode("return location.href"), false);
   assert.equal(isLikelyNavigationCode("return document.location.href"), false);
+  assert.equal(isLikelyNavigationCode("return history.length"), false);
 });
 
 // ---------------------------------------------------------------------------

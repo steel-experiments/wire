@@ -17,7 +17,7 @@ export const STATE_UNCHANGED_WARNING =
   "WARNING: Your last 2+ actions had no effect. Try a different approach: raw CDP input (Input.dispatchKeyEvent for trusted keypresses), click a specific element, or inspect the DOM more carefully.";
 
 export function stalledPrompt(noProgress: number): string {
-  return `STALLED: Your last ${noProgress} successful execs returned no usable data (empty payloads, navigation-only, or error-shaped). Stop probing the same way — extract real content (innerText, attributes, structured DOM) or pivot to a different page.`;
+  return `STALLED: Your last ${noProgress} successful execs returned no usable data (empty payloads, navigation-only, or error-shaped). Stop probing the same way — extract real content (innerText, attributes, structured DOM), or return to the last working page and pivot via an observed on-page link, a loaded skill, or site search. Do not invent another URL.`;
 }
 
 export function stuckPrompt(sameSig: number, sameResult: number): string {

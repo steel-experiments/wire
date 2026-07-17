@@ -258,6 +258,11 @@ export interface BrowserFocusContext {
   selectorHint?: string;
 }
 
+export interface BrowserLinkSample {
+  label: string;
+  href: string;
+}
+
 export interface BrowserPageSummary {
   headings?: string[];
   forms?: number;
@@ -266,6 +271,7 @@ export interface BrowserPageSummary {
   tables?: number;
   links?: number;
   inputs?: number;
+  linkSamples?: BrowserLinkSample[];
 }
 
 export type PageSketchSectionKind =

@@ -225,7 +225,12 @@ export function countConsecutiveUnchanged(events: TraceEvent[]): number {
 /** Text markers of a real anti-bot / block / challenge page, matched against
  *  the page title and headings. */
 const RECONFIGURE_BLOCK_SIGNAL =
-  /captcha|are you (?:a )?human|verif(?:y|ying) you|access denied|forbidden|rate.?limit|request rate|unusual traffic|bot detection|cloudflare|just a moment|attention required|checking your browser/iu;
+  /captcha|are you (?:a )?human|verif(?:y|ying) you|access denied|forbidden|rate.?limit|request rate|unusual traffic|bot detection|just a moment|attention required|checking your browser/iu;
+const RECONFIGURE_BLOCK_BRAND_SIGNAL = /cloudflare/iu;
+
+const PAGE_NOT_FOUND_LABEL = /^(?:(?:oops|error)[!,: -]*)?page\s+not found$/iu;
+const HTTP_404_LABEL = /^(?:error\s+404|404(?:\s*(?:[-:]\s*)?(?:page\s+)?not found|\s+error))$/iu;
+const BARE_404_LABEL = /^404$/u;
 
 function reconfigureSummary(payload: JsonObject): { headings: string[]; hasContent: boolean } {
   const summary = payload.pageSummary;
@@ -246,6 +251,83 @@ function reconfigureSummary(payload: JsonObject): { headings: string[]; hasConte
     }
   }
   return { headings, hasContent };
+}
+
+function isSparseSummary(payload: JsonObject, headings: string[]): boolean {
+  const summary = payload.pageSummary;
+  if (!summary || typeof summary !== "object" || Array.isArray(summary) || headings.length > 1) {
+    return false;
+  }
+  const record = summary as Record<string, unknown>;
+  return ["forms", "buttons", "dialogs", "tables", "links", "inputs"]
+    .every((key) => typeof record[key] !== "number" || (record[key] as number) === 0);
+}
+
+function notFoundLabels(observation: TraceEvent): {
+  headings: string[];
+  hasPageNotFoundTitle: boolean;
+  hasAny: boolean;
+} {
+  const { headings } = reconfigureSummary(observation.payload);
+  const title = typeof observation.payload.title === "string" ? observation.payload.title.trim() : "";
+  const titleParts = title.split(/\s*\|\s*|\s+[\-–—]\s+/u);
+  const matchesAny = (value: string): boolean =>
+    PAGE_NOT_FOUND_LABEL.test(value) || HTTP_404_LABEL.test(value) || BARE_404_LABEL.test(value);
+  return {
+    headings,
+    hasPageNotFoundTitle: titleParts.some((part) => PAGE_NOT_FOUND_LABEL.test(part)),
+    hasAny: titleParts.some(matchesAny) || headings.some((heading) => matchesAny(heading.trim())),
+  };
+}
+
+function hasNotFoundLabel(observation: TraceEvent): boolean {
+  return notFoundLabels(observation).hasAny;
+}
+
+/** Detect a high-confidence not-found landing without treating pages that only
+ *  discuss HTTP 404s as missing pages. An exact "Page Not Found" title is
+ *  authoritative even when the site's navigation remains; ambiguous 404
+ *  labels and headings still require an otherwise sparse page shape. */
+export function isNotFoundObservation(observation: TraceEvent | undefined): boolean {
+  if (!observation || observation.kind !== "observation") return false;
+  const url = typeof observation.payload.url === "string" ? observation.payload.url : "";
+  if (!/^https?:\/\//iu.test(url)) return false;
+
+  const labels = notFoundLabels(observation);
+  return labels.hasPageNotFoundTitle ||
+    (labels.hasAny && isSparseSummary(observation.payload, labels.headings));
+}
+
+/** Latest observation that moved from a detected not-found landing to a page
+ *  that is not detected as not-found. This transition is meaningful recovery
+ *  even when the preceding exec returned only `{navigated:true}`. */
+export function latestNotFoundRecoveryObservation(events: TraceEvent[]): TraceEvent | undefined {
+  let previousObservation: TraceEvent | undefined;
+  let latestRecovery: TraceEvent | undefined;
+  for (const event of events) {
+    if (event.kind !== "observation") continue;
+    if (
+      previousObservation &&
+      isNotFoundObservation(previousObservation) &&
+      !isNotFoundObservation(event)
+    ) {
+      latestRecovery = event;
+    }
+    previousObservation = event;
+  }
+  return latestRecovery;
+}
+
+/** Apply not-found recovery credit to one result. The navigation result that
+ *  immediately precedes a recovery observation resets, rather than extends,
+ *  the runtime's hard no-progress streak. */
+export function isNoProgressResultWithRecovery(event: TraceEvent, events: TraceEvent[]): boolean {
+  if (!isNoProgressResult(event)) return false;
+  const eventIndex = events.lastIndexOf(event);
+  const recovery = latestNotFoundRecoveryObservation(events);
+  if (eventIndex < 0 || !recovery) return true;
+  const recoveryIndex = events.lastIndexOf(recovery);
+  return recoveryIndex < eventIndex || events.slice(eventIndex + 1, recoveryIndex).some((item) => item.kind === "code-result");
 }
 
 /**
@@ -269,7 +351,13 @@ export function reconfigureJustified(observation: TraceEvent | undefined): boole
 
   const { headings, hasContent } = reconfigureSummary(observation.payload);
   const title = typeof observation.payload.title === "string" ? observation.payload.title : "";
-  if (RECONFIGURE_BLOCK_SIGNAL.test([title, ...headings].join(" "))) return true;
+  const blockText = [title, ...headings].join(" ");
+  if (hasNotFoundLabel(observation)) {
+    // A CDN brand alone does not turn its ordinary 404 into a challenge. Keep
+    // strong captcha/access-denied evidence authoritative when both appear.
+    return RECONFIGURE_BLOCK_SIGNAL.test(blockText);
+  }
+  if (RECONFIGURE_BLOCK_SIGNAL.test(blockText) || RECONFIGURE_BLOCK_BRAND_SIGNAL.test(blockText)) return true;
 
   return !hasContent;
 }
@@ -519,8 +607,10 @@ export function execActionSignature(action: ProposedAction): string | undefined 
 
 /** Trailing streak of consecutive successful no-progress code-results (empty/nav-only/error-shaped). Pairs with computeRepeatStreak to feed all stuck-loop signals back to the LLM. */
 export function computeNoProgressStreak(events: TraceEvent[]): number {
+  const latestRecovery = latestNotFoundRecoveryObservation(events);
+  const recoveryIndex = latestRecovery ? events.lastIndexOf(latestRecovery) : -1;
   let streak = 0;
-  for (let i = events.length - 1; i >= 0; i--) {
+  for (let i = events.length - 1; i > recoveryIndex; i--) {
     const e = events[i]!;
     if (e.kind !== "code-result") continue;
     if (e.payload.ok !== true) break;
