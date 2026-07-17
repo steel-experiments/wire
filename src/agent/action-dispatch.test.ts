@@ -542,8 +542,8 @@ test("executeStep falls back to sequential execRaw when rawBatch unavailable", a
 });
 
 // ---------------------------------------------------------------------------
-// redaction — code-result payloads on the wireActions and raw dispatch paths
-// must not leak page-derived secrets (see plans/005)
+// redaction — code-result payloads carry whatever the page code returned, so
+// they must pass through secret redaction before being stored or streamed.
 // ---------------------------------------------------------------------------
 
 const FAKE_SECRET = "sk-1234567890abcdef1234567890";
