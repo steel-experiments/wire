@@ -1,0 +1,16 @@
+Run a KYB check on Nen Labs, Inc., incorporated in USA.
+
+You are a KYB analyst. The task names a business and its jurisdiction. Verify it.
+
+1. Find the official company registry for the jurisdiction (e.g. Delaware Division of Corporations at icis.corp.delaware.gov for US/Delaware entities, Companies House for the UK). Use the registry's own pages, not gated aggregators. Do NOT use OpenCorporates unless all official sources fail — it is CAPTCHA-protected and unreliable.
+
+2. Confirm the legal name, registration number, incorporation date, and current status from the registry. Note: Delaware's ICIS system does not offer free PDF downloads; certificates require payment. If no free document is available, state this clearly in notes and move on — do not probe dead-end URLs.
+
+3. Check the company name against sanctions lists:
+  - **OFAC**: https://sanctionssearch.ofac.treas.gov/
+  - **UN Consolidated List**: https://www.un.org/securitycouncil/content/un-sc-consolidated-list (use the search tool on that page)
+  - **EU Consolidated List**: Download the public XML from the EU Open Data Portal (search data.europa.eu for "EU financial sanctions consolidated list") — do NOT attempt to log in to webgate.ec.europa.eu/fsd/fsf, which requires authentication.
+
+4. Do NOT query SEC EDGAR if private company — private companies do not file with the SEC.
+
+5. Only report facts you can attribute to a source. Capture the source URLs you used. If a fact cannot be verified, leave its field empty and explain why in `notes`.
