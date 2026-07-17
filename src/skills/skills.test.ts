@@ -1661,11 +1661,13 @@ test("updateSkillStatsFromRun retires generated skills after a recent fault stre
   ].join("\n"), "utf-8");
 
   // 4 prior loads. This recorded run makes it 5 loads, meeting the floor.
+  // successCount kept high enough that the lifetime-rate path stays clear of
+  // its own threshold, so this test isolates the streak logic.
   await writeSkillStats(dir, skillId, {
     ...DEFAULT_STATS,
     loadedCount: 4,
-    successCount: 0,
-    outcomeCounts: { "agent-error": 4 },
+    successCount: 2,
+    outcomeCounts: { "task-complete": 2, "agent-error": 2 },
     totalSteps: 20,
     totalTokens: 2000,
     lastLoadedAt: "2026-06-09T00:00:00.000Z",
