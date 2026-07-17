@@ -1637,7 +1637,7 @@ test("updateSkillStatsFromRun retires a generated skill after repeated failures"
   assert.match(raw, /^status: rejected$/mu, "an ineffective generated skill is retired");
 });
 
-test("updateSkillStatsFromRun retires generated skills after a recent failure streak", async () => {
+test("updateSkillStatsFromRun retires generated skills after a recent fault streak", async () => {
   testRoot = makeRoot();
   const dir = join(testRoot, "skills");
   await mkdir(dir, { recursive: true });
@@ -1660,11 +1660,14 @@ test("updateSkillStatsFromRun retires generated skills after a recent failure st
     "- Prior guidance that keeps failing.",
   ].join("\n"), "utf-8");
 
+  // 4 prior loads. This recorded run makes it 5 loads, meeting the floor.
+  // successCount kept high enough that the lifetime-rate path stays clear of
+  // its own threshold, so this test isolates the streak logic.
   await writeSkillStats(dir, skillId, {
     ...DEFAULT_STATS,
-    loadedCount: 2,
-    successCount: 0,
-    outcomeCounts: { "partial-success": 2 },
+    loadedCount: 4,
+    successCount: 2,
+    outcomeCounts: { "task-complete": 2, "agent-error": 2 },
     totalSteps: 20,
     totalTokens: 2000,
     lastLoadedAt: "2026-06-09T00:00:00.000Z",
@@ -1672,7 +1675,7 @@ test("updateSkillStatsFromRun retires generated skills after a recent failure st
       {
         runId: createId("run"),
         loadedAt: "2026-06-08T00:00:00.000Z",
-        outcome: "partial-success",
+        outcome: "agent-error",
         stepCount: 10,
         totalTokens: 1000,
         loadedWithSkillIds: [],
@@ -1694,13 +1697,216 @@ test("updateSkillStatsFromRun retires generated skills after a recent failure st
     events: [
       { id: createId("event"), runId, ts: "2026-06-10T00:00:00.000Z", kind: "skill-load", payload: { skills: [skillId] } },
     ],
-    classification: { kind: "partial-success", confidence: 0.55 },
+    classification: { kind: "agent-error", confidence: 0.7 },
     stepCount: 12,
     startedAt: "2026-06-10T00:00:00.000Z",
   } as any);
 
   const raw = await readFile(join(dir, "streaky_example_com-skill.md"), "utf-8");
-  assert.match(raw, /^status: rejected$/mu, "three recent non-complete runs retire generated guidance");
+  assert.match(raw, /^status: rejected$/mu, "three recent skill-fault runs at the min-loads floor retire generated guidance");
+});
+
+test("updateSkillStatsFromRun does not retire on an environmental streak", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  await mkdir(dir, { recursive: true });
+  const skillId = createId("skill");
+  await writeFile(join(dir, "blocked_example_com-skill.md"), [
+    "---",
+    `id: ${skillId}`,
+    "scope: domain",
+    "status: active",
+    "source: generated",
+    "confidence: 0.9",
+    "tags:",
+    "  - blocked.example.com",
+    "updatedAt: 2026-06-01",
+    "hostnamePatterns:",
+    '  - "blocked.example.com"',
+    "---",
+    "# Skill",
+    "## Facts",
+    "- Guidance that keeps hitting environmental blocks.",
+  ].join("\n"), "utf-8");
+
+  // successCount kept high enough that the lifetime-rate path stays clear of
+  // its own threshold, so this test isolates the streak logic.
+  await writeSkillStats(dir, skillId, {
+    ...DEFAULT_STATS,
+    loadedCount: 5,
+    successCount: 3,
+    outcomeCounts: { "task-complete": 3, "blocked-auth": 1, "site-error": 1 },
+    totalSteps: 20,
+    totalTokens: 2000,
+    lastLoadedAt: "2026-06-09T00:00:00.000Z",
+    recentRuns: [
+      {
+        runId: createId("run"),
+        loadedAt: "2026-06-08T00:00:00.000Z",
+        outcome: "blocked-auth",
+        stepCount: 10,
+        totalTokens: 1000,
+        loadedWithSkillIds: [],
+      },
+      {
+        runId: createId("run"),
+        loadedAt: "2026-06-09T00:00:00.000Z",
+        outcome: "site-error",
+        stepCount: 10,
+        totalTokens: 1000,
+        loadedWithSkillIds: [],
+      },
+    ],
+  });
+
+  const runId = createId("run");
+  await updateSkillStatsFromRun(dir, {
+    run: { id: runId } as any,
+    events: [
+      { id: createId("event"), runId, ts: "2026-06-10T00:00:00.000Z", kind: "skill-load", payload: { skills: [skillId] } },
+    ],
+    classification: { kind: "infra-error", confidence: 0.7 },
+    stepCount: 12,
+    startedAt: "2026-06-10T00:00:00.000Z",
+  } as any);
+
+  const raw = await readFile(join(dir, "blocked_example_com-skill.md"), "utf-8");
+  assert.match(raw, /^status: active$/mu, "environmental blocks never count toward the fault streak");
+});
+
+test("updateSkillStatsFromRun does not retire a fault streak below the min-loads floor", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  await mkdir(dir, { recursive: true });
+  const skillId = createId("skill");
+  await writeFile(join(dir, "young_example_com-skill.md"), [
+    "---",
+    `id: ${skillId}`,
+    "scope: domain",
+    "status: active",
+    "source: generated",
+    "confidence: 0.9",
+    "tags:",
+    "  - young.example.com",
+    "updatedAt: 2026-06-01",
+    "hostnamePatterns:",
+    '  - "young.example.com"',
+    "---",
+    "# Skill",
+    "## Facts",
+    "- Guidance still within its fair-chance window.",
+  ].join("\n"), "utf-8");
+
+  // Only 2 prior loads; this recorded run makes it 3 loads, below RETIRE_MIN_LOADS.
+  await writeSkillStats(dir, skillId, {
+    ...DEFAULT_STATS,
+    loadedCount: 2,
+    successCount: 0,
+    outcomeCounts: { "agent-error": 2 },
+    totalSteps: 20,
+    totalTokens: 2000,
+    lastLoadedAt: "2026-06-09T00:00:00.000Z",
+    recentRuns: [
+      {
+        runId: createId("run"),
+        loadedAt: "2026-06-08T00:00:00.000Z",
+        outcome: "agent-error",
+        stepCount: 10,
+        totalTokens: 1000,
+        loadedWithSkillIds: [],
+      },
+      {
+        runId: createId("run"),
+        loadedAt: "2026-06-09T00:00:00.000Z",
+        outcome: "agent-error",
+        stepCount: 10,
+        totalTokens: 1000,
+        loadedWithSkillIds: [],
+      },
+    ],
+  });
+
+  const runId = createId("run");
+  await updateSkillStatsFromRun(dir, {
+    run: { id: runId } as any,
+    events: [
+      { id: createId("event"), runId, ts: "2026-06-10T00:00:00.000Z", kind: "skill-load", payload: { skills: [skillId] } },
+    ],
+    classification: { kind: "agent-error", confidence: 0.7 },
+    stepCount: 12,
+    startedAt: "2026-06-10T00:00:00.000Z",
+  } as any);
+
+  const raw = await readFile(join(dir, "young_example_com-skill.md"), "utf-8");
+  assert.match(raw, /^status: active$/mu, "a fault streak below the min-loads floor does not retire");
+});
+
+test("updateSkillStatsFromRun does not retire on a counterexample streak", async () => {
+  testRoot = makeRoot();
+  const dir = join(testRoot, "skills");
+  await mkdir(dir, { recursive: true });
+  const skillId = createId("skill");
+  await writeFile(join(dir, "falsify_example_com-skill.md"), [
+    "---",
+    `id: ${skillId}`,
+    "scope: domain",
+    "status: active",
+    "source: generated",
+    "confidence: 0.9",
+    "tags:",
+    "  - falsify.example.com",
+    "updatedAt: 2026-06-01",
+    "hostnamePatterns:",
+    '  - "falsify.example.com"',
+    "---",
+    "# Skill",
+    "## Facts",
+    "- Guidance repeatedly used to disprove a hypothesis, as intended.",
+  ].join("\n"), "utf-8");
+
+  // successCount kept high enough that the lifetime-rate path stays clear of
+  // its own threshold, so this test isolates the streak logic.
+  await writeSkillStats(dir, skillId, {
+    ...DEFAULT_STATS,
+    loadedCount: 5,
+    successCount: 3,
+    outcomeCounts: { "task-complete": 3, "counterexample": 2 },
+    totalSteps: 20,
+    totalTokens: 2000,
+    lastLoadedAt: "2026-06-09T00:00:00.000Z",
+    recentRuns: [
+      {
+        runId: createId("run"),
+        loadedAt: "2026-06-08T00:00:00.000Z",
+        outcome: "counterexample",
+        stepCount: 10,
+        totalTokens: 1000,
+        loadedWithSkillIds: [],
+      },
+      {
+        runId: createId("run"),
+        loadedAt: "2026-06-09T00:00:00.000Z",
+        outcome: "counterexample",
+        stepCount: 10,
+        totalTokens: 1000,
+        loadedWithSkillIds: [],
+      },
+    ],
+  });
+
+  const runId = createId("run");
+  await updateSkillStatsFromRun(dir, {
+    run: { id: runId } as any,
+    events: [
+      { id: createId("event"), runId, ts: "2026-06-10T00:00:00.000Z", kind: "skill-load", payload: { skills: [skillId] } },
+    ],
+    classification: { kind: "counterexample", confidence: 0.75 },
+    stepCount: 12,
+    startedAt: "2026-06-10T00:00:00.000Z",
+  } as any);
+
+  const raw = await readFile(join(dir, "falsify_example_com-skill.md"), "utf-8");
+  assert.match(raw, /^status: active$/mu, "counterexample runs are a desired outcome and never count toward the fault streak");
 });
 
 test("updateSkillStatsFromRun never retires authored skills", async () => {

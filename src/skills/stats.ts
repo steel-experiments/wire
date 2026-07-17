@@ -150,22 +150,32 @@ export async function updateSkillStatsFromRun(skillDir: string, result: SkillRun
 // Retirement floor: once a skill has had a fair number of chances and runs
 // that load it almost never complete, marking it rejected takes it out of
 // matching entirely (the loader filters rejected skills) instead of letting
-// it ride along forever at a score penalty.
+// it ride along forever at a score penalty. The recent-failure streak is
+// gated behind the same floor and only counts outcomes the skill can
+// plausibly be blamed for.
 const RETIRE_MIN_LOADS = 5;
 const RETIRE_MAX_SUCCESS_RATE = 0.25;
 const RETIRE_RECENT_FAILURE_STREAK = 3;
+
+// Only outcomes the skill can plausibly be blamed for count toward the
+// streak: environmental blocks (auth walls, policy denials, site/infra
+// errors), counterexamples (a desired outcome), and partial success (the
+// expected end state for watch-loop tasks) say nothing about skill quality.
+const STREAK_FAULT_OUTCOMES: ReadonlySet<RunClassificationKind> =
+  new Set(["agent-error", "ambiguous"]);
 
 function hasRecentFailureStreak(stats: SkillStats): boolean {
   if (stats.recentRuns.length < RETIRE_RECENT_FAILURE_STREAK) return false;
   return stats.recentRuns
     .slice(-RETIRE_RECENT_FAILURE_STREAK)
-    .every((sample) => sample.outcome !== "task-complete");
+    .every((sample) => STREAK_FAULT_OUTCOMES.has(sample.outcome));
 }
 
 function shouldRetireIneffectiveSkill(stats: SkillStats): boolean {
   const poorLifetimeRate = stats.loadedCount >= RETIRE_MIN_LOADS &&
     skillSuccessRate(stats) <= RETIRE_MAX_SUCCESS_RATE;
-  return poorLifetimeRate || hasRecentFailureStreak(stats);
+  return poorLifetimeRate ||
+    (stats.loadedCount >= RETIRE_MIN_LOADS && hasRecentFailureStreak(stats));
 }
 
 async function retireIfIneffective(skillDir: string, skillId: SkillId, stats: SkillStats): Promise<void> {
