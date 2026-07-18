@@ -432,6 +432,7 @@ describe("paired comparison scheduling", () => {
       "--reps", "1",
       "--stamp", "slot-safe-base",
       "--skip-build",
+      "--judge-provider", "claude",
       "--judge-model", "judge-model",
       "--judge-threshold", "0.7",
       "--wire-provider", "anthropic",
@@ -568,6 +569,7 @@ describe("paired harness execution", () => {
       assert.equal(flag(call.args, "--arms"), "wire");
       assert.equal(flag(call.args, "--suite"), f.spec.suite.path);
       assert.equal(flag(call.args, "--reps"), "1");
+      assert.equal(flag(call.args, "--judge-provider"), f.spec.judge.provider ?? "claude");
       assert.equal(flag(call.args, "--judge-model"), f.spec.judge.model);
       assert.equal(flag(call.args, "--judge-threshold"), String(f.spec.judge.threshold));
       assert.equal(flag(call.args, "--wire-provider"), f.spec.wire.provider);
@@ -1179,22 +1181,32 @@ describe("paired harness execution", () => {
     assert.equal(persisted.inFlight, undefined);
   });
 
-  it("supports ZAI, rejects ignored .env inputs, and excludes candidate PATH shadows", async () => {
+  it("supports ZAI with a Gemini judge, rejects ignored .env inputs, and excludes candidate PATH shadows", async () => {
     const zai = await fixture();
     const zaiSpec = campaignSpecSchema.parse({
       ...zai.spec,
+      judge: { provider: "gemini", model: "gemini-3.1-pro-preview", threshold: 0.7 },
       wire: { ...zai.spec.wire, provider: "zai" },
     });
     const zaiFake = fakeRunner(zai);
     const zaiResult = await evaluatePaired({
       ...evaluationOptions(zai, zai.state, zaiFake.runner),
       spec: zaiSpec,
-      env: { ...zai.env, ZAI_API_KEY: "fixture-zai-key" },
+      env: {
+        ...zai.env,
+        ANTHROPIC_API_KEY: undefined,
+        GEMINI_API_KEY: "fixture-gemini-key",
+        ZAI_API_KEY: "fixture-zai-key",
+      },
     });
     assert.equal(zaiResult.stopped, false);
     assert.equal(zaiFake.calls.filter((call) => call.kind === "compare").length, 4);
     assert.ok(zaiFake.calls.filter((call) => call.kind === "compare").every((call) => (
-      call.env.ZAI_API_KEY === "fixture-zai-key" && call.env.WIRE_PROVIDER === "zai"
+      call.env.ZAI_API_KEY === "fixture-zai-key"
+      && call.env.GEMINI_API_KEY === "fixture-gemini-key"
+      && call.env.ANTHROPIC_API_KEY === undefined
+      && flag(call.args, "--judge-provider") === "gemini"
+      && call.env.WIRE_PROVIDER === "zai"
     )));
 
     const exampleEnv = await fixture();

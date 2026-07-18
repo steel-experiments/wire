@@ -25,8 +25,10 @@ Recipes are strict versioned file contracts. Version 1 accepts these fields:
 - `suite.path` names the frozen public suite and `suite.sha256` pins it. Every
   smoke, targeted, and broad task ID must exist in that suite; duplicates are
   rejected.
-- `judge` declares the existing blind-judge model and a threshold from `0` to
-  `1`. It does not install a second evaluator.
+- `judge` declares the blind-judge provider (`claude` or `gemini`), model, and
+  a threshold from `0` to `1`. Recipes that predate the provider field retain
+  the `claude` default; new recipes should state it explicitly. This selects
+  one shared evaluator rather than installing a second judge.
 - `wire` declares `openai`, `anthropic`, or `zai`, the exact model, and a
   positive per-run timeout in milliseconds.
 - `cohorts.smoke`, `cohorts.targeted`, and `cohorts.broad` each contain at
@@ -109,7 +111,8 @@ budget. Before `baseline`, `evaluate`, or `holdout`, the live preflight requires
 credentials by presence only:
 
 - `STEEL_API_KEY` for the browser;
-- `ANTHROPIC_API_KEY` for the existing blind judge; and
+- `ANTHROPIC_API_KEY` for a `claude` blind judge, or `GEMINI_API_KEY` for a
+  `gemini` blind judge; and
 - the selected Wire provider key: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or
   `ZAI_API_KEY`.
 
@@ -117,7 +120,8 @@ Never put keys in a recipe, response, fixture, packet, or candidate worktree.
 Offline install/build/check subprocesses receive a scrubbed environment and
 run only inside the required Linux systemd sandbox. Live Wire services receive
 only the Steel and selected-provider values required for that declared run;
-the controller-side judge receives only its own Anthropic credential through a
-scrubbed launcher. Secret values are never placed in transient-unit argv.
+the controller-side judge receives only its declared credential. Claude runs
+through a scrubbed launcher; Gemini uses the stateless Interactions REST API
+with a header-only key. Secret values are never placed in transient-unit argv.
 Candidate execution fails closed when the host cannot behaviorally enforce the
 declared filesystem, user-manager-socket, and control-group boundaries.

@@ -619,12 +619,15 @@ function providerEnvironmentKeys(provider: CampaignSpec["wire"]["provider"]): st
   return ["ZAI_API_KEY", "ZAI_REASONING_EFFORT"];
 }
 
+function judgeProvider(spec: CampaignSpec): "claude" | "gemini" {
+  return spec.judge.provider ?? "claude";
+}
+
 function harnessEnvironmentKeys(spec: CampaignSpec): string[] {
   return [
     "STEEL_API_KEY",
     "STEEL_BASE_URL",
-    // The immutable comparison harness uses Claude Code for its blind judge.
-    "ANTHROPIC_API_KEY",
+    ...(judgeProvider(spec) === "gemini" ? ["GEMINI_API_KEY"] : ["ANTHROPIC_API_KEY"]),
     ...providerEnvironmentKeys(spec.wire.provider),
   ];
 }
@@ -925,6 +928,7 @@ export function harnessArguments(input: {
     "--reps", "1",
     "--stamp", input.stamp,
     "--skip-build",
+    "--judge-provider", judgeProvider(input.spec),
     "--judge-model", input.spec.judge.model,
     "--judge-threshold", String(input.spec.judge.threshold),
     "--wire-provider", input.spec.wire.provider,
@@ -1005,7 +1009,8 @@ async function validateHarnessRecord(
   }
 
   if (record.judgeScore === null) {
-    throw new HarnessContractError("Judge output is unscorable", record);
+    const detail = record.note === undefined ? "" : `: ${sanitizeDiagnostic(record.note)}`;
+    throw new HarnessContractError(`Judge output is unscorable${detail}`, record);
   }
   const computedSuccess = record.ok && record.judgeScore >= expected.threshold;
   if (record.success !== computedSuccess) {
@@ -1418,7 +1423,7 @@ async function preparePhysicalPaths(input: {
       timeoutMs: input.spec.wire.timeoutMs,
     },
   );
-  if (input.claudeExecutable !== undefined) {
+  if (judgeProvider(input.spec) === "claude" && input.claudeExecutable !== undefined) {
     await createClaudeJudgeShim({
       launcherDirectory,
       claudeExecutable: input.claudeExecutable,
@@ -1795,11 +1800,13 @@ export async function evaluatePaired(options: EvaluatePairedOptions): Promise<Ev
   if (productionExecution) {
     const support = await probeSystemdUserSandbox();
     if (!support.supported) throw new SystemdSandboxUnsupportedError(support.reason);
-    claudeExecutable = await resolveControllerExecutable("claude", env, [
-      resolve(options.paths.root),
-      resolve(options.base.worktreePath),
-      resolve(options.candidate.worktreePath),
-    ]);
+    if (judgeProvider(options.spec) === "claude") {
+      claudeExecutable = await resolveControllerExecutable("claude", env, [
+        resolve(options.paths.root),
+        resolve(options.base.worktreePath),
+        resolve(options.candidate.worktreePath),
+      ]);
+    }
   }
   if (options.candidateSkillSnapshot !== undefined) {
     const snapshot = options.candidateSkillSnapshot;

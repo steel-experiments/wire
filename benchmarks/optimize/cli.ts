@@ -1021,11 +1021,13 @@ function assertStageOrder(record: CandidateRecord, cohort: CohortName): void {
 
 function assertLiveCredentials(
   provider: "openai" | "anthropic" | "zai",
+  judgeProvider: "claude" | "gemini",
   env: NodeJS.ProcessEnv,
 ): void {
   const missing = [
     ...(env.STEEL_API_KEY ? [] : ["STEEL_API_KEY"]),
-    ...(!env.ANTHROPIC_API_KEY ? ["ANTHROPIC_API_KEY (blind judge)"] : []),
+    ...(judgeProvider === "claude" && !env.ANTHROPIC_API_KEY ? ["ANTHROPIC_API_KEY (blind judge)"] : []),
+    ...(judgeProvider === "gemini" && !env.GEMINI_API_KEY ? ["GEMINI_API_KEY (blind judge)"] : []),
     ...(provider === "openai" && !env.OPENAI_API_KEY ? ["OPENAI_API_KEY"] : []),
     ...(provider === "zai" && !env.ZAI_API_KEY ? ["ZAI_API_KEY"] : []),
   ];
@@ -1121,7 +1123,9 @@ async function evaluateCandidate(input: {
     await saveCampaignState(campaign.paths, state);
     throw new Error(`Candidate provenance changed before evaluation: ${rejected.rejectionReasons[0]}`);
   }
-  if (input.compareRunner === undefined) assertLiveCredentials(campaign.spec.wire.provider, input.env);
+  if (input.compareRunner === undefined) {
+    assertLiveCredentials(campaign.spec.wire.provider, campaign.spec.judge.provider ?? "claude", input.env);
+  }
   // For holdout this is intentionally after stage-order and commit
   // revalidation: no sealed input is opened before the candidate is frozen.
   const baseUnderTest = baseRevision(campaign.paths, campaign.spec.baseCommit);
@@ -1398,7 +1402,9 @@ async function runCliUnlocked(
       throw new Error("Baseline calibration requires a fresh initialized campaign with no pending or in-flight work");
     }
     await verifyFrozenInputs(campaign.spec);
-    if (context.compareRunner === undefined) assertLiveCredentials(campaign.spec.wire.provider, env);
+    if (context.compareRunner === undefined) {
+      assertLiveCredentials(campaign.spec.wire.provider, campaign.spec.judge.provider ?? "claude", env);
+    }
     await createDetachedBaseWorktree({
       repositoryRoot,
       paths: campaign.paths,
@@ -1470,7 +1476,9 @@ async function runCliUnlocked(
       "run-holdout",
       candidateId,
     );
-    if (context.compareRunner === undefined) assertLiveCredentials(before.spec.wire.provider, env);
+    if (context.compareRunner === undefined) {
+      assertLiveCredentials(before.spec.wire.provider, before.spec.judge.provider ?? "claude", env);
+    }
 
     let result: Awaited<ReturnType<typeof evaluateCandidate>>;
     try {

@@ -31,7 +31,7 @@ deletes knowledge on environmental failures (plan 006).
 | 006  | Skill-retirement streaks count only skill-fault outcomes, honor the floor | P1 | S | — | DONE (2026-07-17, branch `advisor/006-skill-retirement-fault-streak`, 1 revision round to isolate the positive streak test; reviewed & criteria re-verified; merged to main 2026-07-17) |
 | 007  | Bind the console server to loopback, reject cross-origin state changes | P1 | M | — | DONE (2026-07-17, branch `advisor/007-console-server-local-auth`, reviewed incl. live bind/CSRF probe; merged to main 2026-07-17) |
 | 008  | Gate the console app in CI (typecheck, tests, build) | P1 | S | 004 | DONE (2026-07-17, branch `advisor/008-console-ci-gate` — includes 004's commits via merge; reviewed & parity re-verified; merged to main 2026-07-17) |
-| 009  | Build bounded, evidence-backed optimization campaigns | P1 | L | — | BLOCKED (fresh ZAI smoke stopped at 1/10: the ZAI/GLM Wire arm completed, but the separate blind Claude judge was unscorable; standalone task excluded) |
+| 009  | Build bounded, evidence-backed optimization campaigns | P1 | L | — | BLOCKED (fresh ZAI/GLM + Gemini 3.1 Pro smoke authorization pending after replacing the unscorable Claude judge path; standalone task excluded) |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (one-line reason) | REJECTED (one-line rationale)
 

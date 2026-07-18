@@ -49,7 +49,11 @@ const campaignShape = {
   id: safeId,
   baseCommit: commit,
   suite: z.strictObject({ path: nonEmpty.max(4_096), sha256 }),
-  judge: z.strictObject({ model: nonEmpty.max(200), threshold: z.number().min(0).max(1) }),
+  judge: z.strictObject({
+    provider: z.enum(["claude", "gemini"]).optional(),
+    model: nonEmpty.max(200),
+    threshold: z.number().min(0).max(1),
+  }),
   wire: z.strictObject({
     provider: z.enum(["openai", "anthropic", "zai"]),
     model: nonEmpty.max(200),

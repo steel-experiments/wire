@@ -120,9 +120,10 @@ Offline checks and builds can write only their exact worktree and isolated
 offline home. A live Wire service sees its exact worktree read-only and can
 write only its fresh `WIRE_ROOT` and `WIRE_SKILLS`; it receives the Steel key
 and selected Wire-provider environment, not the judge's unrelated provider
-credentials. The comparison harness and blind judge stay controller-side.
-Their executables are resolved canonically, the judge runs through a scrubbed
-controller-owned launcher, and a systemd control-group owns every Wire
+credentials. The comparison harness and blind judge stay controller-side. A
+Claude judge runs through a canonically resolved, scrubbed controller-owned
+launcher; a Gemini judge uses the stateless Interactions REST endpoint with its
+key only in the request header. A systemd control-group owns every Wire
 descendant, including detached children. This is a strong same-account
 accident and tampering boundary, but genuinely hostile candidates or sealed
 holdouts still belong in a separate account or service.

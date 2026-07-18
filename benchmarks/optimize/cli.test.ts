@@ -176,7 +176,10 @@ function tickingClock(): () => Date {
   return () => new Date(Date.UTC(2026, 6, 17, 12, 0, tick++));
 }
 
-async function fixture(options: { mutateRecipeDuringInit?: boolean } = {}): Promise<Fixture> {
+async function fixture(options: {
+  mutateRecipeDuringInit?: boolean;
+  judgeProvider?: "claude" | "gemini";
+} = {}): Promise<Fixture> {
   const parent = await mkdtemp(join(tmpdir(), "wire-opt-cli-"));
   roots.push(parent);
   const repositoryRoot = join(parent, "repository");
@@ -217,7 +220,11 @@ async function fixture(options: { mutateRecipeDuringInit?: boolean } = {}): Prom
     id: "cli-campaign",
     baseCommit,
     suite: { path: suitePath, sha256: await sha256Path(suitePath) },
-    judge: { model: "judge-model", threshold: 0.7 },
+    judge: {
+      ...(options.judgeProvider === undefined ? {} : { provider: options.judgeProvider }),
+      model: options.judgeProvider === "gemini" ? "gemini-3.1-pro-preview" : "judge-model",
+      threshold: 0.7,
+    },
     wire: { provider: "anthropic", model: "wire-model", timeoutMs: 10_000 },
     cohorts: {
       smoke: { taskIds: ["task-a"], pairedSlots: 1 },
@@ -1226,6 +1233,25 @@ describe("offline campaign lifecycle", () => {
     assert.equal(campaign.state.phase, "stopped");
     assert.equal(campaign.state.stopReason, "required live credentials are missing");
     assert.equal(missing.compareCalls.length, 0);
+
+    const missingGemini = await fixture({ judgeProvider: "gemini" });
+    const { compareRunner: _geminiRunner, ...withoutGeminiRunner } = missingGemini.context;
+    await assert.rejects(
+      runCli(
+        ["baseline", "--campaign", "cli-campaign"],
+        {
+          ...withoutGeminiRunner,
+          env: {
+            ...withoutGeminiRunner.env,
+            GEMINI_API_KEY: undefined,
+          },
+        },
+      ),
+      /GEMINI_API_KEY \(blind judge\)/u,
+    );
+    campaign = await loadCampaign(missingGemini.optimizerRoot, "cli-campaign");
+    assert.equal(campaign.state.phase, "stopped");
+    assert.equal(missingGemini.compareCalls.length, 0);
 
     const drifted = await fixture();
     await write(

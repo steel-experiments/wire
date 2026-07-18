@@ -57,6 +57,17 @@ describe("campaign contracts", () => {
     });
   });
 
+  it("accepts an explicit Gemini judge and preserves legacy Claude recipes", () => {
+    const gemini = validRecipe();
+    gemini.judge = { provider: "gemini", model: "gemini-3.1-pro-preview", threshold: 0.7 };
+    assert.equal(campaignRecipeSchema.parse(gemini).judge.provider, "gemini");
+    assert.equal(campaignRecipeSchema.parse(validRecipe()).judge.provider, undefined);
+    assert.throws(() => campaignRecipeSchema.parse({
+      ...validRecipe(),
+      judge: { provider: "unknown", model: "judge", threshold: 0.7 },
+    }));
+  });
+
   it("rejects a manifest that leaves promotion gates implicit", () => {
     const input = validRecipe();
     delete input.gates;
