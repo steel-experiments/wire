@@ -270,7 +270,11 @@ export function buildSystemdSandboxInvocation(
     "--property=ProtectProc=ptraceable",
     "--property=ProcSubset=pid",
     "--property=TimeoutStopSec=2s",
-    `--property=InaccessiblePaths=${runtimeDirectory}`,
+    // InaccessiblePaths cannot hide the whole runtime directory because
+    // systemd keeps its own inaccessible bind sources below that directory.
+    // An empty read-only tmpfs hides every current and future manager/service
+    // socket without that circular mount dependency.
+    `--property=TemporaryFileSystem=${runtimeDirectory}:ro`,
     ...(readWritePaths.length === 0
       ? []
       : [`--property=BindPaths=${readWritePaths.join(" ")}`]),
@@ -448,9 +452,10 @@ function probeRequest(root: string, runtimeDirectory: string): SystemdSandboxReq
     "  catch { return false; }",
     "}",
     "const [readOnly, readWrite, undeclared, runtimeDirectory] = process.argv.slice(1);",
-    "let runtimeHidden = false;",
-    "try { fs.accessSync(runtimeDirectory); } catch { runtimeHidden = true; }",
-    "process.exit(!writes(readOnly) && writes(readWrite) && !writes(undeclared) && runtimeHidden ? 0 : 78);",
+    "let runtimeIsolated = false;",
+    "try { runtimeIsolated = fs.readdirSync(runtimeDirectory).length === 0; }",
+    "catch { runtimeIsolated = true; }",
+    "process.exit(!writes(readOnly) && writes(readWrite) && !writes(undeclared) && runtimeIsolated ? 0 : 78);",
   ].join("\n");
   return {
     command: process.execPath,

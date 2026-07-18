@@ -28,7 +28,8 @@ Command: `find src -type f \( -name '*.ts' -o -name '*.tsx' \) [! -name '*.test.
 
 Plan 009's campaign controller is developer tooling under
 `benchmarks/optimize/`; it is intentionally excluded from these `src/` LOC
-totals. The production and test counts remain unchanged at 20089 and 22631.
+totals. The 2026-07-18 sandbox compatibility correction also remains outside
+`src/`; the production and test counts remain unchanged at 20089 and 22631.
 
 ## Judge agreement
 

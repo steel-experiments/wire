@@ -103,7 +103,7 @@ describe("systemd sandbox invocation boundary", () => {
       "--property=NoNewPrivileges=yes",
       "--property=ProtectProc=ptraceable",
       "--property=ProcSubset=pid",
-      `--property=InaccessiblePaths=${defaultSystemdSandboxTools.runtimeDirectory}`,
+      `--property=TemporaryFileSystem=${defaultSystemdSandboxTools.runtimeDirectory}:ro`,
       "--property=BindPaths=/tmp/wire-sandbox-writable",
       "--setenv=PATH",
       "--setenv=WIRE_SANDBOX_SECRET",
@@ -114,6 +114,7 @@ describe("systemd sandbox invocation boundary", () => {
       argument.startsWith("--property=BindReadOnlyPaths=")
       && argument.split(" ").includes("/tmp/wire-sandbox-readable")
     )));
+    assert.ok(!launch.args.some((argument) => argument.startsWith("--property=InaccessiblePaths=")));
     const serializedArgv = JSON.stringify([launch.command, ...launch.args]);
     assert.doesNotMatch(serializedArgv, new RegExp(secret, "u"));
     assert.doesNotMatch(serializedArgv, new RegExp(unlisted, "u"));
