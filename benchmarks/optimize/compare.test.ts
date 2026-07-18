@@ -168,6 +168,11 @@ function harnessRecord(input: {
   runId: string | null;
   judgeScore?: number | null;
   success?: boolean;
+  ok?: boolean;
+  answer?: string;
+  nativeStatus?: "succeeded" | "failed";
+  nativeClassification?: "task-complete" | "agent-error" | "infra-error";
+  nativeConfidence?: number;
 }): Record<string, unknown> {
   const judgeScore = input.judgeScore === undefined ? 0.9 : input.judgeScore;
   return {
@@ -175,16 +180,16 @@ function harnessRecord(input: {
     objective: input.objective,
     arm: "wire",
     rep: 1,
-    ok: true,
+    ok: input.ok ?? true,
     wallMs: 80,
     judgeScore,
     success: input.success ?? (judgeScore !== null && judgeScore >= 0.7),
-    answer: "answer containing sk-abcdefghijklmnopqrstuvwxyz",
+    answer: input.answer ?? "answer containing sk-abcdefghijklmnopqrstuvwxyz",
     native: {
       runId: input.runId,
-      status: "succeeded",
-      classification: "task-complete",
-      confidence: 0.9,
+      status: input.nativeStatus ?? "succeeded",
+      classification: input.nativeClassification ?? "task-complete",
+      confidence: input.nativeConfidence ?? 0.9,
       summary: "done",
       provider: "anthropic",
       model: "wire-model",
@@ -219,6 +224,8 @@ type CompareMode =
   | "traversal-run-id"
   | "missing-run-file"
   | "null-judge"
+  | "native-infra"
+  | "failed-agent"
   | "wrong-task"
   | "nonzero"
   | "timeout";
@@ -252,8 +259,20 @@ function fakeRunner(f: Fixture, mode: CompareMode = "success"): {
       const runId = `run_fixture-${runSequence}`;
       await mkdir(dirname(output), { recursive: true });
       await mkdir(join(wireRoot, "runs"), { recursive: true });
+      const nativeFailure = mode === "native-infra" || mode === "failed-agent";
       if (mode !== "missing-run-file") {
-        await writeFile(join(wireRoot, "runs", `${runId}.json`), JSON.stringify(persistedRun(runId)));
+        await writeFile(
+          join(wireRoot, "runs", `${runId}.json`),
+          JSON.stringify(nativeFailure ? {
+            id: runId,
+            taskId: "task_fixture",
+            status: "failed",
+            classification: {
+              kind: mode === "native-infra" ? "infra-error" : "agent-error",
+              confidence: 0.8,
+            },
+          } : persistedRun(runId)),
+        );
       }
 
       const record = harnessRecord({
@@ -263,6 +282,15 @@ function fakeRunner(f: Fixture, mode: CompareMode = "success"): {
           ? null
           : mode === "traversal-run-id" ? "run_../../campaign-state" : runId,
         ...(mode === "null-judge" ? { judgeScore: null } : {}),
+        ...(nativeFailure ? {
+          ok: false,
+          answer: "",
+          judgeScore: 0,
+          success: false,
+          nativeStatus: "failed",
+          nativeClassification: mode === "native-infra" ? "infra-error" as const : "agent-error" as const,
+          nativeConfidence: 0.8,
+        } : {}),
       });
       if (mode === "empty") await writeFile(output, "");
       else if (mode === "malformed") await writeFile(output, "not-json\n");
@@ -660,6 +688,7 @@ describe("paired harness execution", () => {
       "traversal-run-id",
       "missing-run-file",
       "null-judge",
+      "native-infra",
       "wrong-task",
       "nonzero",
       "timeout",
@@ -678,6 +707,23 @@ describe("paired harness execution", () => {
       assert.ok(attempt.results[0]!.failureReason, mode);
       assert.equal(attempt.results[0]!.success, null, mode);
     }
+  });
+
+  it("accepts an empty persisted agent failure as scorable product evidence", async () => {
+    const f = await fixture({ pairedSlots: 1 });
+    const fake = fakeRunner(f, "failed-agent");
+    const result = await evaluatePaired(evaluationOptions(f, f.state, fake.runner));
+    assert.equal(result.stopped, false);
+    assert.equal(result.state.physicalRunsUsed, 2);
+    const attempt = result.attempts.find((entry) => entry.candidateId === "candidate-1")!;
+    assert.equal(attempt.complete, true);
+    assert.equal(attempt.results.length, 2);
+    assert.ok(attempt.results.every((entry) => (
+      entry.status === "completed"
+      && entry.success === false
+      && entry.judgeScore === 0
+      && entry.nativeClassification === "agent-error"
+    )));
   });
 
   it("debits each launched arm exactly once and preserves a budget-limited partial pair", async () => {

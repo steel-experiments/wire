@@ -991,13 +991,17 @@ async function validateHarnessRecord(
   } catch {
     throw new HarnessContractError("native.runId is not a valid persisted run in the isolated WIRE_ROOT", record);
   }
+  const persistedAnswer = persistedRun.result ?? "";
   if (
-    persistedRun.result?.slice(0, 2_000) !== record.answer
+    persistedAnswer.slice(0, 2_000) !== record.answer
     || persistedRun.status !== record.native.status
     || (persistedRun.classification?.kind ?? "unknown") !== record.native.classification
     || (persistedRun.classification?.confidence ?? 0) !== record.native.confidence
   ) {
     throw new HarnessContractError("Harness native envelope does not match the persisted run", record);
+  }
+  if (record.native.classification === "infra-error") {
+    throw new HarnessContractError("Wire persisted an infrastructure-classified run", record);
   }
 
   if (record.judgeScore === null) {
