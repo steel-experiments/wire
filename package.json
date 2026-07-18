@@ -38,7 +38,9 @@
     "metrics": "node scripts/metrics.mjs",
     "judge:score": "node scripts/judge-score.mjs",
     "emit-schema": "tsx benchmarks/emit-schema.ts",
-    "compare": "tsx benchmarks/compare/run-compare.ts"
+    "compare": "tsx benchmarks/compare/run-compare.ts",
+    "optimize": "tsx benchmarks/optimize/cli.ts",
+    "optimize:test": "tsc -p benchmarks/optimize/tsconfig.json && node --import tsx --test 'benchmarks/optimize/**/*.test.ts'"
   },
   "dependencies": {
     "zod": "^4.1.12"
