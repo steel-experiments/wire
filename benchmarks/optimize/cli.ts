@@ -195,9 +195,6 @@ const OFFLINE_VERIFICATION_ENVIRONMENT_NAMES = [
   "LC_ALL",
   "NO_COLOR",
   "TZ",
-  "WIRE_HOME",
-  "WIRE_ROOT",
-  "WIRE_SKILLS",
 ] as const;
 
 export function createSystemdCommandRunner(
@@ -258,9 +255,6 @@ function offlineVerificationEnvironment(source: NodeJS.ProcessEnv, home: string)
     HOME: home,
     CI: "1",
     NO_COLOR: "1",
-    WIRE_HOME: join(home, "wire"),
-    WIRE_ROOT: join(home, "wire", "state"),
-    WIRE_SKILLS: join(home, "wire", "skills"),
   };
   for (const key of ["LANG", "LC_ALL", "TZ"]) {
     const found = source[key];
@@ -919,7 +913,7 @@ async function ingestCandidate(input: {
         };
       }
       await saveCampaignState(campaign.paths, state);
-      if (script === "install" && failure !== undefined) break;
+      if (failure !== undefined) break;
       if (state.phase === "stopped") break;
     }
   } finally {

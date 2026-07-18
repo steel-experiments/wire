@@ -450,6 +450,9 @@ describe("offline campaign lifecycle", () => {
     assert.ok(sandboxCalls.every((call) => (
       call.environment.HOME === verificationHome
       && call.environment.PATH === undefined
+      && call.environment.WIRE_HOME === undefined
+      && call.environment.WIRE_ROOT === undefined
+      && call.environment.WIRE_SKILLS === undefined
       && call.environment.STEEL_API_KEY === undefined
       && call.environment.ANTHROPIC_API_KEY === undefined
       && call.readWritePaths[0] === candidateRoot
@@ -457,7 +460,7 @@ describe("offline campaign lifecycle", () => {
     )));
     assert.ok(sandboxCalls.every((call) => (
       JSON.stringify(call.environmentNames)
-      === JSON.stringify(["CI", "HOME", "NO_COLOR", "WIRE_HOME", "WIRE_ROOT", "WIRE_SKILLS"])
+      === JSON.stringify(["CI", "HOME", "NO_COLOR"])
     )));
     await assert.rejects(realpath(verificationHome), { code: "ENOENT" });
   });
@@ -473,6 +476,49 @@ describe("offline campaign lifecycle", () => {
     assert.equal(campaign.state.candidates["candidate-1"]?.status, "ingested");
     assert.equal(sandboxCalls, 0);
     assert.deepEqual(f.commandCalls.map((call) => call.command), ["pnpm", "pnpm", "pnpm"]);
+  });
+
+  it("stops after the first failed required candidate check", async () => {
+    const f = await fixture();
+    const calls: string[] = [];
+    f.context.commandRunner = async (invocation) => {
+      const script = invocation.args[0]!;
+      calls.push(script);
+      return {
+        code: script === "check" ? 1 : 0,
+        signal: null,
+        stdout: "fixture output",
+        stderr: "",
+        timedOut: false,
+        wallMs: 3,
+      };
+    };
+    assert.equal(await runCli(["next", "--campaign", "cli-campaign"], f.context), 0);
+    let campaign = await loadCampaign(f.optimizerRoot, "cli-campaign");
+    const responsePath = join(campaign.paths.packets, "0001-response.json");
+    await write(responsePath, JSON.stringify({
+      version: 1,
+      campaignId: "cli-campaign",
+      requestId: campaign.state.pendingPacket!.requestId,
+      candidateId: "candidate-1",
+      baseCommit: f.baseCommit,
+      worktreePath: f.candidatePath,
+      candidateCommit: f.candidateCommit,
+      hypothesis: "Reject a candidate whose required check fails.",
+      recommendedHome: "core",
+      changedFiles: f.changedFiles,
+      testsRun: [],
+    }));
+    assert.equal(await runCli([
+      "ingest", "--campaign", "cli-campaign", "--response", responsePath,
+    ], f.context), 1);
+
+    campaign = await loadCampaign(f.optimizerRoot, "cli-campaign");
+    const record = campaign.state.candidates["candidate-1"]!;
+    assert.deepEqual(calls, ["install", "check"]);
+    assert.deepEqual(record.verifiedTests, []);
+    assert.match(record.rejectionReasons.join("\n"), /pnpm check failed/u);
+    assert.equal(campaign.state.inFlight, undefined);
   });
 
   it("fails closed and cleans the offline home when the systemd sandbox is unsupported", async () => {
