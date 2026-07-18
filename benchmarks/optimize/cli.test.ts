@@ -367,6 +367,7 @@ async function evaluateFixtureCandidateTargeted(
 describe("optimizer CLI argument boundary", () => {
   it("rejects unknown, duplicate, positional, and invalid cohort arguments", async () => {
     await assert.rejects(runCli([]), /Missing command/u);
+    await assert.rejects(runCli(["--", "status"]), /Missing required option for status/u);
     await assert.rejects(runCli(["status", "--campaign", "a", "--campaign", "b"]), /Duplicate option/u);
     await assert.rejects(runCli(["next", "campaign"]), /Unexpected argument/u);
     await assert.rejects(

@@ -1149,6 +1149,13 @@ describe("paired harness execution", () => {
       call.env.ZAI_API_KEY === "fixture-zai-key" && call.env.WIRE_PROVIDER === "zai"
     )));
 
+    const exampleEnv = await fixture();
+    await writeFile(join(exampleEnv.candidateWorktree, ".env.example"), "PLACEHOLDER=not-a-credential\n");
+    const exampleFake = fakeRunner(exampleEnv);
+    const exampleResult = await evaluatePaired(evaluationOptions(exampleEnv, exampleEnv.state, exampleFake.runner));
+    assert.equal(exampleResult.stopped, false);
+    assert.equal(exampleFake.calls.filter((call) => call.kind === "compare").length, 4);
+
     const localEnv = await fixture();
     await writeFile(join(localEnv.candidateWorktree, ".env.local"), "WIRE_ROOT=/tmp/not-isolated\n");
     const envFake = fakeRunner(localEnv);

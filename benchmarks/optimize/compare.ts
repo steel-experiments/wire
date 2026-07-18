@@ -384,7 +384,10 @@ async function pathExists(path: string): Promise<boolean> {
 async function assertNoLocalEnv(worktreePath: string): Promise<void> {
   const name = (await readdir(worktreePath))
     .sort()
-    .find((entry) => entry === ".env" || entry.startsWith(".env."));
+    .find((entry) => (
+      entry === ".env"
+      || (entry.startsWith(".env.") && entry !== ".env.example")
+    ));
   if (name !== undefined) {
     throw new Error(`Refusing revision-local .env file: ${join(worktreePath, name)}`);
   }

@@ -146,15 +146,16 @@ function usage(): string {
 }
 
 function parseArguments(args: readonly string[]): ParsedCommand {
-  const command = args[0];
+  const normalizedArgs = args[0] === "--" ? args.slice(1) : args;
+  const command = normalizedArgs[0];
   if (command === undefined || !Object.hasOwn(commandFlags, command)) {
     throw new Error(`${command === undefined ? "Missing" : `Unknown`} command.\n${usage()}`);
   }
   const name = command as CommandName;
   const allowed = commandFlags[name];
   const values: Record<string, string | boolean> = {};
-  for (let index = 1; index < args.length; index += 1) {
-    const token = args[index]!;
+  for (let index = 1; index < normalizedArgs.length; index += 1) {
+    const token = normalizedArgs[index]!;
     if (!token.startsWith("--") || token === "--" || token.includes("=")) {
       throw new Error(`Unexpected argument for ${name}: ${token}`);
     }
@@ -166,7 +167,7 @@ function parseArguments(args: readonly string[]): ParsedCommand {
       values[flag] = true;
       continue;
     }
-    const value = args[index + 1];
+    const value = normalizedArgs[index + 1];
     if (value === undefined || value.startsWith("--")) {
       throw new Error(`Option ${token} requires a value`);
     }
