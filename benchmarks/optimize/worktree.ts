@@ -984,7 +984,8 @@ export async function createWireShim(
   const shimPath = join(launcherDirectory, "wire");
   const source = [
     `#!${process.execPath}`,
-    "const { spawnSync } = require('node:child_process');",
+    "(async () => {",
+    "const { spawnSync } = await import('node:child_process');",
     `const command = ${JSON.stringify(launch.command)};`,
     `const baseArgs = ${JSON.stringify(launch.args)};`,
     `const forwarded = ${JSON.stringify([...forwarded].sort((left, right) => left.localeCompare(right)))};`,
@@ -1007,6 +1008,10 @@ export async function createWireShim(
     "if (result.error) throw result.error;",
     "if (result.signal) process.kill(process.pid, result.signal);",
     "process.exitCode = result.status ?? 1;",
+    "})().catch((error) => {",
+    "  console.error(error);",
+    "  process.exitCode = 1;",
+    "});",
     "",
   ].join("\n");
   await writeFile(shimPath, source, { encoding: "utf8", flag: "wx", mode: 0o755 });
@@ -1036,7 +1041,8 @@ export async function createClaudeJudgeShim(
   const shimPath = join(launcherDirectory, "claude");
   const source = [
     `#!${process.execPath}`,
-    "const { spawnSync } = require('node:child_process');",
+    "(async () => {",
+    "const { spawnSync } = await import('node:child_process');",
     `const target = ${JSON.stringify(claudeExecutable)};`,
     `const home = ${JSON.stringify(harnessHome)};`,
     `const allowed = ${JSON.stringify([
@@ -1064,6 +1070,10 @@ export async function createClaudeJudgeShim(
     "if (result.error) throw result.error;",
     "if (result.signal) process.kill(process.pid, result.signal);",
     "process.exitCode = result.status ?? 1;",
+    "})().catch((error) => {",
+    "  console.error(error);",
+    "  process.exitCode = 1;",
+    "});",
     "",
   ].join("\n");
   await writeFile(shimPath, source, { encoding: "utf8", flag: "wx", mode: 0o755 });

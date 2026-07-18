@@ -566,6 +566,8 @@ describe("paired harness execution", () => {
       assert.match(launcher, /systemd-run/u);
       assert.match(launcher, /KillMode=control-group/u);
       assert.match(launcher, /ProtectSystem=strict/u);
+      assert.match(launcher, /await import\('node:child_process'\)/u);
+      assert.doesNotMatch(launcher, /\brequire\s*\(/u);
       assert.doesNotMatch(launcher, /fixture-anthropic-key|fixture-steel-key/u);
     }
     assert.equal(rootsSeen.size, 4);

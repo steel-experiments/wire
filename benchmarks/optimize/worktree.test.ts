@@ -660,6 +660,8 @@ test("allocates isolated attempt roots from the same snapshot and pins wire to t
     assert.match(launcher, /KillMode=control-group/u);
     assert.match(launcher, /ProtectHome=tmpfs/u);
     assert.match(launcher, /--setenv=SELECTED_KEY/u);
+    assert.match(launcher, /await import\('node:child_process'\)/u);
+    assert.doesNotMatch(launcher, /\brequire\s*\(/u);
     assert.doesNotMatch(launcher, /selected-secret-do-not-copy|SECRET_DO_NOT_PERSIST|blocked/u);
 
     const harnessHome = join(launcherDirectory, "home");
@@ -677,6 +679,8 @@ test("allocates isolated attempt roots from the same snapshot and pins wire to t
     assert.match(judgeLauncher, /ANTHROPIC_API_KEY/u);
     assert.match(judgeLauncher, /spawnSync\(target, process\.argv\.slice\(2\)/u);
     assert.match(judgeLauncher, /stdio: 'inherit'/u);
+    assert.match(judgeLauncher, /await import\('node:child_process'\)/u);
+    assert.doesNotMatch(judgeLauncher, /\brequire\s*\(/u);
     assert.doesNotMatch(
       judgeLauncher,
       /STEEL_API_KEY|STEEL_BASE_URL|WIRE_ROOT|WIRE_SKILLS|WIRE_PROVIDER|OPENAI_API_KEY|ZAI_API_KEY|SELECTED_KEY|selected-secret-do-not-copy|blocked/u,
