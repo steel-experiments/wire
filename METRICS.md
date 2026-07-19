@@ -33,6 +33,8 @@ failed-run evidence, and Gemini blind-judge corrections also remain outside
 `src/`; the production and test counts remain unchanged at 20089 and 22631.
 The 2026-07-19 strict rubric and high-resolution comparison suite likewise add
 only evaluator files under `benchmarks/`; `src/` counts remain unchanged.
+The HN skill candidate changes only durable skill knowledge; `src/` counts
+remain 20089 production and 22631 test LOC.
 
 ## Judge agreement
 
