@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { judgeWithGemini, type GeminiJudgeResult } from "./gemini-judge.ts";
+import { buildJudgePrompt } from "./judge-rubric.ts";
 
 // ---- Types -----------------------------------------------------------------
 
@@ -223,23 +224,6 @@ const ARMS: Record<string, (t: SuiteTask, c: ArmConfig) => Promise<ArmOutcome>> 
 const JUDGE_THRESHOLD_DEFAULT = 0.7;
 type JudgeProvider = "claude" | "gemini";
 
-function judgePrompt(objective: string, answer: string): string {
-  // Same rubric as wire's bench judge. The judge sees only objective + answer —
-  // it is blind to which arm produced the answer.
-  return [
-    "You are a judge evaluating whether a web agent's output fulfills an objective.",
-    "Score the output from 0.0 to 1.0 based on:",
-    "1. Does the output correctly address the objective? (0.6 weight)",
-    "2. Is the output structured, complete, and free of placeholders? (0.4 weight)",
-    "Respond with ONLY a number between 0.0 and 1.0. No other text.",
-    "",
-    `Objective: ${objective}`,
-    "",
-    "Agent output:",
-    answer.slice(0, 4000),
-  ].join("\n");
-}
-
 async function judge(
   objective: string,
   answer: string,
@@ -248,7 +232,7 @@ async function judge(
   timeoutMs: number,
 ): Promise<GeminiJudgeResult> {
   if (!answer.trim()) return { score: 0 };
-  const prompt = judgePrompt(objective, answer);
+  const prompt = buildJudgePrompt(objective, answer);
   if (judgeProvider === "gemini") {
     return judgeWithGemini({
       apiKey: process.env.GEMINI_API_KEY ?? "",

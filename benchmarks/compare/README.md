@@ -18,8 +18,10 @@ does the same and injects a system-prompt hint describing the `wire` CLI.
 
 ## What is measured (and why it's fair)
 
-- **judge** — one `claude -p` judge, same rubric for every arm, blind to which
-  arm produced the answer (sees only objective + final answer). Score 0..1;
+- **judge** — one shared judge, same strict multi-dimensional rubric for every
+  arm, blind to which arm produced the answer (sees only objective + final
+  answer). Explicit missing-content and format caps prevent partial answers
+  from saturating at 1.0. Score 0..1;
   `success` = score ≥ threshold and the arm actually returned an answer.
 - **wall** — wall-clock measured by the harness around each subprocess. This is
   the one latency number that is directly comparable across arms.
@@ -47,6 +49,12 @@ npx tsx benchmarks/compare/run-compare.ts \
   --wire-provider openai --wire-model gpt-5.4-mini \
   --judge-model claude-haiku-4-5-20251001 \
   --judge-threshold 0.7
+
+# high-resolution suite with exact counts, fields, URLs, and partial-credit room
+npx tsx benchmarks/compare/run-compare.ts \
+  --suite benchmarks/compare/suite-quality-v1.json \
+  --arms wire --wire-provider zai --wire-model glm-4.7 \
+  --judge-provider gemini --judge-model gemini-3.1-pro-preview
 ```
 
 ### Flags
@@ -60,6 +68,7 @@ npx tsx benchmarks/compare/run-compare.ts \
 | `--cc-model` | `claude-sonnet-4-6` | model for the Claude Code arms |
 | `--wire-provider` / `--wire-model` | `anthropic` / `claude-sonnet-4-6` | Wire's LLM (defaults match the CC arms for a fair, model-controlled comparison) |
 | `--skill` | `steel-browser` | browser skill name used by `cc-skill` |
+| `--judge-provider` | `claude` | shared blind judge provider: `claude` or `gemini` |
 | `--judge-model` | `claude-haiku-4-5-20251001` | the shared judge |
 | `--judge-threshold` | `0.7` | judge score that counts as success |
 | `--timeout` | `360000` | per-arm wall-clock timeout (ms) |

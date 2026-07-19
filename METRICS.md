@@ -31,6 +31,8 @@ Plan 009's campaign controller is developer tooling under
 totals. The 2026-07-18 sandbox, preflight, launcher, isolated-verification,
 failed-run evidence, and Gemini blind-judge corrections also remain outside
 `src/`; the production and test counts remain unchanged at 20089 and 22631.
+The 2026-07-19 strict rubric and high-resolution comparison suite likewise add
+only evaluator files under `benchmarks/`; `src/` counts remain unchanged.
 
 ## Judge agreement
 

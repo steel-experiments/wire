@@ -1,0 +1,37 @@
+[
+  {
+    "id": "example-title",
+    "objective": "Go to https://example.com and return the heading text as JSON with exactly one field named heading.",
+    "maxSteps": 8
+  },
+  {
+    "id": "hn-top5-detailed",
+    "objective": "Go to https://news.ycombinator.com/ and return the current top 5 stories in order as a JSON array. Each of exactly 5 objects must contain rank, title, points, commentCount, and the observed story URL.",
+    "maxSteps": 12
+  },
+  {
+    "id": "hn-first-comment-detailed",
+    "objective": "Go to https://news.ycombinator.com/, open the comments page for the current rank-1 story using an observed link, and return JSON with storyTitle, commentUsername, commentFirstSentence, and the observed comment permalink for the first visible top-level comment.",
+    "maxSteps": 14
+  },
+  {
+    "id": "github-stars-releases",
+    "objective": "Compare https://github.com/facebook/react and https://github.com/vuejs/core. Return a JSON array with exactly 2 objects in that order, each containing repository, observedUrl, starCount, description, and latestReleaseTag, followed by a winner field naming the repository with more stars.",
+    "maxSteps": 14
+  },
+  {
+    "id": "sec-apple-three-filings",
+    "objective": "Use the SEC company filings page for Apple and return the 3 most recent 10-K filings as a JSON array in newest-first order. Each object must contain form, filingDate, accessionNumber, and the observed filing document URL.",
+    "maxSteps": 14
+  },
+  {
+    "id": "lesswrong-five-posts",
+    "objective": "Go to https://www.lesswrong.com/, wait for the front page posts to render, and return exactly 5 current posts as a JSON array in page order. Each object must contain title, author, displayedDate, and the observed post URL.",
+    "maxSteps": 14
+  },
+  {
+    "id": "saas-pricing-three-way",
+    "objective": "Compare the current public pricing pages for Vercel, Netlify, and Railway. Return a Markdown table with exactly 3 provider rows and columns provider, observedPricingUrl, freeTierLimit, lowestPaidPlanName, and lowestPaidMonthlyPrice. State unavailable values explicitly; do not guess.",
+    "maxSteps": 18
+  }
+]
