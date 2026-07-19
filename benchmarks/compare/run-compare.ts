@@ -6,6 +6,7 @@ import { mkdir, mkdtemp, rm, writeFile, appendFile, readFile } from "node:fs/pro
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { judgeWithGemini, type GeminiJudgeResult } from "./gemini-judge.ts";
 
 // ---- Types -----------------------------------------------------------------
 
@@ -220,12 +221,12 @@ const ARMS: Record<string, (t: SuiteTask, c: ArmConfig) => Promise<ArmOutcome>> 
 // ---- Shared blind judge ----------------------------------------------------
 
 const JUDGE_THRESHOLD_DEFAULT = 0.7;
+type JudgeProvider = "claude" | "gemini";
 
-async function judge(objective: string, answer: string, judgeModel: string, timeoutMs: number): Promise<number | null> {
-  if (!answer.trim()) return 0;
+function judgePrompt(objective: string, answer: string): string {
   // Same rubric as wire's bench judge. The judge sees only objective + answer —
   // it is blind to which arm produced the answer.
-  const prompt = [
+  return [
     "You are a judge evaluating whether a web agent's output fulfills an objective.",
     "Score the output from 0.0 to 1.0 based on:",
     "1. Does the output correctly address the objective? (0.6 weight)",
@@ -237,6 +238,25 @@ async function judge(objective: string, answer: string, judgeModel: string, time
     "Agent output:",
     answer.slice(0, 4000),
   ].join("\n");
+}
+
+async function judge(
+  objective: string,
+  answer: string,
+  judgeProvider: JudgeProvider,
+  judgeModel: string,
+  timeoutMs: number,
+): Promise<GeminiJudgeResult> {
+  if (!answer.trim()) return { score: 0 };
+  const prompt = judgePrompt(objective, answer);
+  if (judgeProvider === "gemini") {
+    return judgeWithGemini({
+      apiKey: process.env.GEMINI_API_KEY ?? "",
+      model: judgeModel,
+      prompt,
+      timeoutMs,
+    });
+  }
   // Judge in a throwaway dir with skills off, so it scores purely from the
   // objective + answer and never picks up the repo's AGENTS.md or a skill.
   const workdir = await mkdtemp(join(tmpdir(), "wire-judge-"));
@@ -246,11 +266,13 @@ async function judge(objective: string, answer: string, judgeModel: string, time
       ["-p", prompt, "--output-format", "json", "--model", judgeModel, "--disable-slash-commands"],
       { timeoutMs, cwd: workdir },
     );
+    if (r.timedOut) return { score: null, note: "Claude judge timed out" };
+    if (r.code !== 0) return { score: null, note: `Claude judge exited ${r.code ?? "without status"}` };
     const env = lastJsonObject(r.stdout);
     const raw = typeof env?.result === "string" ? env.result : "";
     const score = parseFloat(raw.trim());
-    if (Number.isNaN(score)) return null;
-    return Math.min(1, Math.max(0, score));
+    if (Number.isNaN(score)) return { score: null, note: "Claude judge returned an invalid score" };
+    return { score: Math.min(1, Math.max(0, score)) };
   } finally {
     await rm(workdir, { recursive: true, force: true });
   }
@@ -262,11 +284,18 @@ function mean(xs: number[]): number { return xs.length ? xs.reduce((a, b) => a +
 
 function fmtMs(ms: number): string { return `${(ms / 1000).toFixed(1)}s`; }
 
-function buildReport(records: ResultRecord[], armOrder: string[], cfg: ArmConfig, judgeModel: string, threshold: number): string {
+function buildReport(
+  records: ResultRecord[],
+  armOrder: string[],
+  cfg: ArmConfig,
+  judgeProvider: JudgeProvider,
+  judgeModel: string,
+  threshold: number,
+): string {
   const lines: string[] = [];
   lines.push("# Cross-agent comparison report");
   lines.push("");
-  lines.push(`- Judge: \`${judgeModel}\` (blind, single shared rubric), success threshold \`${threshold}\``);
+  lines.push(`- Judge: \`${judgeProvider}/${judgeModel}\` (blind, single shared rubric), success threshold \`${threshold}\``);
   lines.push(`- Claude Code arms model: \`${cfg.ccModel}\`; Wire: \`${cfg.wireProvider ?? "default"}/${cfg.wireModel ?? "default"}\``);
   lines.push(`- Latency is wall-clock measured by the harness around each subprocess (fair across all arms).`);
   lines.push("");
@@ -338,6 +367,8 @@ function assertWireEnv(provider: string | undefined): void {
     if (!process.env.ANTHROPIC_API_KEY) missing.push("ANTHROPIC_API_KEY (wire --provider anthropic)");
   } else if (provider === "openai") {
     if (!process.env.OPENAI_API_KEY) missing.push("OPENAI_API_KEY (wire --provider openai)");
+  } else if (provider === "zai") {
+    if (!process.env.ZAI_API_KEY) missing.push("ZAI_API_KEY (wire --provider zai)");
   } else if (!process.env.OPENAI_API_KEY && !process.env.ANTHROPIC_API_KEY) {
     missing.push("OPENAI_API_KEY or ANTHROPIC_API_KEY");
   }
@@ -382,6 +413,10 @@ async function main() {
   const reps = parseInt(flags.reps ?? "1", 10);
   const onlyTasks = flags.tasks ? new Set(flags.tasks.split(",").map((s) => s.trim())) : null;
   const tasks = onlyTasks ? suite.filter((t) => onlyTasks.has(t.id)) : suite;
+  const judgeProvider = flags["judge-provider"] ?? "claude";
+  if (judgeProvider !== "claude" && judgeProvider !== "gemini") {
+    throw new Error(`Unsupported judge provider: ${judgeProvider}`);
+  }
   const judgeModel = flags["judge-model"] ?? "claude-haiku-4-5-20251001";
   const threshold = parseFloat(flags["judge-threshold"] ?? String(JUDGE_THRESHOLD_DEFAULT));
 
@@ -406,6 +441,12 @@ async function main() {
     assertWireEnv(cfg.wireProvider);
     if (!flags["skip-build"]) await buildWire();
   }
+  if (judgeProvider === "claude" && !process.env.ANTHROPIC_API_KEY) {
+    throw new Error("The Claude blind judge requires ANTHROPIC_API_KEY");
+  }
+  if (judgeProvider === "gemini" && !process.env.GEMINI_API_KEY) {
+    throw new Error("The Gemini blind judge requires GEMINI_API_KEY");
+  }
 
   const stamp = (flags.stamp ?? new Date().toISOString()).replace(/[:.]/g, "-");
   const outDir = join(dirname(fileURLToPath(import.meta.url)), "results", stamp);
@@ -414,7 +455,7 @@ async function main() {
 
   console.log(`Suite: ${tasks.length} task(s) × ${armOrder.length} arm(s) × ${reps} rep(s) = ${tasks.length * armOrder.length * reps} runs`);
   console.log(`Arms: ${armOrder.join(", ")}`);
-  console.log(`Judge: ${judgeModel} (threshold ${threshold})`);
+  console.log(`Judge: ${judgeProvider}/${judgeModel} (threshold ${threshold})`);
   console.log(`Output: ${outDir}`);
   console.log("");
 
@@ -426,21 +467,23 @@ async function main() {
         if (!fn) { console.log(`  skip unknown arm: ${arm}`); continue; }
         process.stdout.write(`[${task.id} #${rep}] ${arm.padEnd(12)} … `);
         const outcome = await fn(task, cfg);
-        const judgeScore = await judge(task.objective, outcome.answer, judgeModel, cfg.timeoutMs);
+        const judged = await judge(task.objective, outcome.answer, judgeProvider, judgeModel, cfg.timeoutMs);
+        const judgeScore = judged.score;
         const success = judgeScore !== null && judgeScore >= threshold && outcome.ok;
+        const note = [outcome.note, judged.note].filter((value): value is string => value !== undefined).join("; ") || undefined;
         const rec: ResultRecord = {
           task: task.id, objective: task.objective, arm, rep,
           ok: outcome.ok, wallMs: outcome.wallMs, judgeScore, success,
-          answer: outcome.answer.slice(0, 2000), native: outcome.native, note: outcome.note,
+          answer: outcome.answer.slice(0, 2000), native: outcome.native, ...(note === undefined ? {} : { note }),
         };
         records.push(rec);
         await appendFile(jsonlPath, JSON.stringify(rec) + "\n");
-        console.log(`judge ${judgeScore?.toFixed(2) ?? "n/a"}  ${fmtMs(outcome.wallMs)}  ${outcome.ok ? "ok" : "FAIL"}${outcome.note ? ` (${outcome.note.slice(0, 40)})` : ""}`);
+        console.log(`judge ${judgeScore?.toFixed(2) ?? "n/a"}  ${fmtMs(outcome.wallMs)}  ${outcome.ok ? "ok" : "FAIL"}${note ? ` (${note.slice(0, 80)})` : ""}`);
       }
     }
   }
 
-  const report = buildReport(records, armOrder, cfg, judgeModel, threshold);
+  const report = buildReport(records, armOrder, cfg, judgeProvider, judgeModel, threshold);
   const reportPath = join(outDir, "report.md");
   await writeFile(reportPath, report);
   console.log("");

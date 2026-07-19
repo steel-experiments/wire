@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "id": "replace-with-campaign-id",
+  "baseCommit": "0000000000000000000000000000000000000000",
+  "suite": {
+    "path": "./frozen-suite.json",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "judge": {
+    "provider": "claude",
+    "model": "replace-with-judge-model",
+    "threshold": 0.7
+  },
+  "wire": {
+    "provider": "anthropic",
+    "model": "replace-with-wire-model",
+    "timeoutMs": 360000
+  },
+  "cohorts": {
+    "smoke": {
+      "taskIds": ["replace-with-task-id"],
+      "pairedSlots": 4
+    },
+    "targeted": {
+      "taskIds": ["replace-with-task-id"],
+      "pairedSlots": 4
+    },
+    "broad": {
+      "taskIds": ["replace-with-task-id"],
+      "pairedSlots": 4
+    },
+    "holdout": {
+      "externalSuitePath": "./sealed-holdout.json",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "slots": 18
+    }
+  },
+  "budget": {
+    "maxPhysicalRuns": 100,
+    "maxCandidates": 3,
+    "maxWallClockMs": 28800000,
+    "maxConcurrency": 1
+  },
+  "skillSnapshot": {
+    "path": "./skills-snapshot",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "seed": "replace-with-recorded-seed",
+  "gates": {
+    "minimumTargetedSuccessDelta": 2,
+    "minimumMeanJudgeDelta": 0.05,
+    "maxSimplificationJudgeRegression": 0.02,
+    "maxSmokeSuccessRegression": 0,
+    "maxBroadSuccessRegression": 0
+  }
+}

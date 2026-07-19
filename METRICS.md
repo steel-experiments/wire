@@ -26,6 +26,12 @@ Command: `find src -type f \( -name '*.ts' -o -name '*.tsx' \) [! -name '*.test.
 | 2026-07-01 | 19741 | 21540 |
 | 2026-07-17 | 20089 | 22631 |
 
+Plan 009's campaign controller is developer tooling under
+`benchmarks/optimize/`; it is intentionally excluded from these `src/` LOC
+totals. The 2026-07-18 sandbox, preflight, launcher, isolated-verification,
+failed-run evidence, and Gemini blind-judge corrections also remain outside
+`src/`; the production and test counts remain unchanged at 20089 and 22631.
+
 ## Judge agreement
 
 How often the run classifier's stored verdict matches hand-labeled ground
