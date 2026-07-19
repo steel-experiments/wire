@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="360" viewBox="0 0 1040 360" role="img" aria-labelledby="title desc">
+  <title id="title">Wire bounded optimization loop</title>
+  <desc id="desc">A candidate generated from evidence is compared with a fixed base on paired browser runs, judged blindly, checked by hard gates, and either promoted after human review or rejected.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10Z" fill="#667085"/>
+    </marker>
+    <style>
+      .box{fill:#f8fafc;stroke:#344054;stroke-width:2;rx:12}
+      .fixed{fill:#eef4ff;stroke:#3538cd}
+      .pass{fill:#ecfdf3;stroke:#027a48}
+      .stop{fill:#fff1f3;stroke:#c01048}
+      .label{font:600 16px system-ui,sans-serif;fill:#101828;text-anchor:middle}
+      .small{font:13px system-ui,sans-serif;fill:#475467;text-anchor:middle}
+      .line{fill:none;stroke:#667085;stroke-width:2;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1040" height="360" fill="white"/>
+  <rect class="box" x="30" y="45" width="170" height="82"/>
+  <text class="label" x="115" y="78">Trace evidence</text>
+  <text class="small" x="115" y="102">failure clusters</text>
+  <path class="line" d="M200 86H245"/>
+  <rect class="box" x="245" y="45" width="170" height="82"/>
+  <text class="label" x="330" y="78">Small candidate</text>
+  <text class="small" x="330" y="102">skill · helper · core</text>
+  <path class="line" d="M415 86H460"/>
+  <rect class="box fixed" x="460" y="25" width="190" height="122"/>
+  <text class="label" x="555" y="59">Paired browser runs</text>
+  <text class="small" x="555" y="85">fixed base vs candidate</text>
+  <text class="small" x="555" y="107">same evaluator + budgets</text>
+  <text class="small" x="555" y="129">real browser evidence</text>
+  <path class="line" d="M650 86H695"/>
+  <rect class="box fixed" x="695" y="45" width="145" height="82"/>
+  <text class="label" x="767.5" y="78">Blind judge</text>
+  <text class="small" x="767.5" y="102">answer quality</text>
+  <path class="line" d="M840 86H885"/>
+  <rect class="box" x="885" y="35" width="130" height="102"/>
+  <text class="label" x="950" y="70">Hard gates</text>
+  <text class="small" x="950" y="94">policy · validity</text>
+  <text class="small" x="950" y="116">reliability · holdout</text>
+  <path class="line" d="M950 137V204H763"/>
+  <rect class="box pass" x="640" y="204" width="245" height="82"/>
+  <text class="label" x="762.5" y="237">Human review → promote</text>
+  <text class="small" x="762.5" y="261">only evidence-backed changes</text>
+  <path class="line" d="M950 137V326H763V286"/>
+  <rect class="box stop" x="885" y="204" width="130" height="82"/>
+  <text class="label" x="950" y="237">Reject</text>
+  <text class="small" x="950" y="261">any hard failure</text>
+  <path class="line" d="M640 245H610C565 245 565 326 520 326H115C70 326 70 127 115 127"/>
+  <text class="small" x="345" y="346">next hypothesis, with durable evidence</text>
+</svg>
